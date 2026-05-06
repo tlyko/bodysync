@@ -4,7 +4,7 @@
 Any task involving AWS infrastructure, modules, variables, or deployment.
 
 ## Module structure
-Each AWS service gets its own module under `terraform/modules/`:
+Each AWS service gets its own module under `infrastructure/terraform/modules/`:
 - `api-gateway/` — HTTP API, routes, custom domain, stage
 - `lambda/` — Functions, layers, IAM roles, CloudWatch log groups
 - `dynamodb/` — Table, GSI, on-demand billing

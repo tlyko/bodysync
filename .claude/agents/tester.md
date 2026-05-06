@@ -117,7 +117,7 @@ def test_user_cannot_read_other_user_data(dynamodb_table, ssm_params):
 ## Running tests
 ```bash
 # All Lambda tests
-cd terraform/lambda-src && pytest -v
+cd apps/api && pytest -v
 
 # Specific test
 pytest tests/lambda/test_health_webhook.py -v

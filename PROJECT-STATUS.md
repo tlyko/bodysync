@@ -28,8 +28,8 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Milestone | Status |
 |---|---|
 | Bootstrap Terraform state backend + GHA OIDC | ✅ shipped |
-| `.claude/` setup (agents + commands + skills) | 🟡 in progress (port style sprawdzamszlak) |
-| ADR-001 stack baseline | ❌ to write |
+| `.claude/` setup (agents + commands + skills) | ✅ shipped (port ze sprawdzamszlak, frontmatter, ADR-001) |
+| ADR-001 stack baseline | ✅ shipped (`docs/adr/ADR-001-stack-baseline.md`) |
 | `apps/api/` Lambda scaffold (Python, Pydantic schemas, JWT) | ❌ |
 | `apps/web/` React+Vite scaffold | ❌ |
 | DDB single-table + IAM | ❌ |
@@ -47,10 +47,9 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 
 ## Active backlog
 
-- **`.claude/` setup port** — w trakcie (commands done, auditor + integrator agents done; pending: frontmatter na istniejących agentach, CLAUDE.md reconciliation, ADR-001)
-- **Provider binaries w `infrastructure/terraform/hashicorp/`** (~2.7MB) — sprawdzić czy w `.gitignore` (powinny być w `.terraform/`, nie commit-owalne)
-- **Naming drift** — `bodysync` jako jedyna nazwa wszędzie (CLAUDE.md / PROJECT_PLAN / agents) — owner zdecydował 2026-05-06
-- **`WORKFLOWS.md` vs `.claude/commands/`** — duplikuje treść; po zsync-u commands `.md` można WORKFLOWS.md skasować
+- **ADR-002 lambda packaging** — gdzie żyje kod Lambdy: `apps/api/` (CLAUDE.md) vs `infrastructure/terraform/lambda-src/` (PROJECT_PLAN sec.7 + TODO Step 5). Konflikt zaflagowany w obu plikach, blokuje Step 5. Architect rozstrzyga.
+- **Provider binaries w `infrastructure/terraform/hashicorp/`** — pusty katalog, nic w git ✓ (alarm fałszywy, do usunięcia z backlogu po weryfikacji `du -sh`)
+- **Open follow-upy z audytu 2026-05-06** — HAE auth scheme, OIDC tightening (rola IAM ma `*` z ABAC tagiem — do zacieśnienia), naming policy ADR (jeśli potrzebne)
 
 ## Architectural commitments (do zapisania w ADRs)
 
