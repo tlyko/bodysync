@@ -18,7 +18,7 @@ Each AWS service gets its own module under `terraform/modules/`:
 - Use `terraform-aws-modules` where it saves boilerplate (but not for simple resources)
 - Lambda source in `lambda-src/{function_name}/handler.py`
 - Lambda packaging: zip per function, exclude tests
-- Tags on everything: `Project = "syncbody"`, `Environment = var.environment`
+- Tags on everything: `Project = "bodysync"`, `Environment = var.environment`
 - State backend: S3 + DynamoDB lock table
 
 ## Lambda functions
@@ -37,7 +37,7 @@ Each AWS service gets its own module under `terraform/modules/`:
 
 ## DynamoDB schema
 ```
-Table: syncbody
+Table: bodysync
 PK (String): USER#alice
 SK (String): PROFILE | HEALTH#2026-05-06 | NUTRITION#2026-05-06 | WEIGHT#2026-05-06 | WORKOUT#2026-05-06#id | TRAINING#2026-05-06 | ADVICE#2026-05-06 | REPORT#2026-W19 | STRAVA_TOKEN
 GSI-1: SK (PK) + PK (SK) — inverted index

@@ -7,7 +7,7 @@ Working on the AI advisor Lambda (daily, weekly, chat), system prompts, or LLM i
 ```python
 import anthropic
 
-client = anthropic.Anthropic(api_key=get_param("/syncbody/anthropic-api-key"))
+client = anthropic.Anthropic(api_key=get_param("/bodysync/anthropic-api-key"))
 
 response = client.messages.create(
     model="claude-haiku-4-5-20251001",
