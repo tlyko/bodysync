@@ -20,17 +20,17 @@ npm run typecheck   # tsc --noEmit
 
 ## Cloudflare (Workers + Static Assets)
 
-Cloudflare promował "Pages" project do "Workers + Static Assets" — deploy odbywa się przez `npx wrangler deploy`, więc potrzebujemy `wrangler.jsonc` (jest obok).
+Cloudflare promował "Pages" project do "Workers + Static Assets" — deploy odbywa się przez `npx wrangler deploy` / `npx wrangler versions upload`, więc potrzebujemy `wrangler.jsonc`. Plik leży w **root repo** (`/wrangler.jsonc`) — wrangler odpalany w cwd = root, ścieżka assets jest pełna (`./apps/web/dist`).
 
-UI Cloudflare → Settings → Build:
+UI Cloudflare → Settings → Build (defaults wystarczą):
 
 | Setting | Wartość |
 |---|---|
-| Root directory | `apps/web` |
-| Build command | `npm ci && npm run build` |
-| Deploy command | `npx wrangler deploy` *(default — można zostawić puste)* |
+| Root directory | `/` *(repo root)* |
+| Build command | `cd apps/web && npm ci && npm run build` |
+| Deploy command | *(default `npx wrangler deploy`)* |
 | `NODE_VERSION` | `20` |
 
-`wrangler.jsonc` mówi wranglerowi gdzie są assety (`./dist`) i włącza SPA fallback (każde 404 → `index.html`). Jeśli nazwa projektu w CF jest inna niż `bodysync-web`, popraw `"name"` w `wrangler.jsonc` na exact match — inaczej wrangler stworzy duplikat.
+`wrangler.jsonc` w root mówi wranglerowi gdzie są assety i włącza SPA fallback (każde 404 → `index.html`). Jeśli nazwa projektu w CF jest inna niż `bodysync-web`, popraw `"name"` w `/wrangler.jsonc` na exact match — inaczej wrangler stworzy duplikat workera.
 
-Branche: `main` → production (`bodysync.pl`), pozostałe → preview deployments (Workers preview URL).
+Branche: `main` → production (`bodysync.pl`), pozostałe → preview deployments (`npx wrangler versions upload`, Workers preview URL).
