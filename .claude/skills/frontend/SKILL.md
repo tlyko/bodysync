@@ -47,7 +47,7 @@ Build these reusable components:
 - `AiAdvisorCard` — daily recommendation, meal plan, chat input
 
 ## Layout
-- Sidebar: 240px, fixed, dark surface, logo "SyncBody" + nav icons
+- Sidebar: 240px, fixed, dark surface, logo "bodysync" + nav icons
 - Main: flex 1, padding 32px, max-width 1200px
 - Grid: `grid-template-columns: repeat(auto-fit, minmax(220px, 1fr))`
 - Mobile: sidebar collapses to bottom nav, single column grid

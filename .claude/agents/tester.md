@@ -1,3 +1,9 @@
+---
+name: tester
+description: Pisze i uruchamia testy dla Lambda handlerów (pytest + moto), komponentów frontu (vitest), i flow integracyjnych. Test-first dla nowego kodu, regression-first dla bug fixów. Używaj po implementer step lub gdy regresion repro potrzebne.
+tools: Read, Grep, Glob, Write, Edit, Bash
+---
+
 # Agent: Tester
 
 ## Role
@@ -41,7 +47,7 @@ def dynamodb_table():
     with mock_dynamodb():
         client = boto3.client("dynamodb", region_name="eu-west-1")
         client.create_table(
-            TableName="syncbody",
+            TableName="bodysync",
             KeySchema=[
                 {"AttributeName": "PK", "KeyType": "HASH"},
                 {"AttributeName": "SK", "KeyType": "RANGE"},
@@ -59,11 +65,11 @@ def ssm_params():
     with mock_ssm():
         client = boto3.client("ssm", region_name="eu-west-1")
         params = {
-            "/syncbody/anthropic-api-key": "test-key",
-            "/syncbody/google-client-id": "test-client-id",
-            "/syncbody/allowed-emails": "user1@gmail.com,user2@gmail.com",
-            "/syncbody/webhook-token-user1": "token-abc",
-            "/syncbody/webhook-token-user2": "token-xyz",
+            "/bodysync/anthropic-api-key": "test-key",
+            "/bodysync/google-client-id": "test-client-id",
+            "/bodysync/allowed-emails": "user1@gmail.com,user2@gmail.com",
+            "/bodysync/webhook-token-user1": "token-abc",
+            "/bodysync/webhook-token-user2": "token-xyz",
         }
         for name, value in params.items():
             client.put_parameter(Name=name, Value=value, Type="String")
@@ -90,7 +96,7 @@ def test_health_webhook_stores_data(dynamodb_table, ssm_params):
     assert response["statusCode"] == 200
 
     # Verify data stored in DynamoDB
-    table = boto3.resource("dynamodb").Table("syncbody")
+    table = boto3.resource("dynamodb").Table("bodysync")
     item = table.get_item(Key={"PK": "USER#user1", "SK": f"HEALTH#{date.today()}"})
     assert item["Item"]["steps"] == 8742
 ```

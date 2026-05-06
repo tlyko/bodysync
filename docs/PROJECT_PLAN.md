@@ -271,7 +271,7 @@ User pisze w dashboardzie: "Zamień obiad na wegetariański" albo "Ile mogę zje
 - React + Vite
 - Własny design system (dark theme, patrz 5.4)
 - Deploy: `git push` → Cloudflare Pages auto-build
-- Env var: `API_URL` → API Gateway custom domain (api.syncbody.pl)
+- Env var: `API_URL` → API Gateway custom domain (api.bodysync.pl)
 
 ### 5.2 Widoki
 
@@ -444,7 +444,7 @@ terraform/
 Brak — wszystkie decyzje podjęte. Gotowe do kodowania.
 
 ### Rozwiązane decyzje
-- ✅ **Domena** → syncbody.pl (kupiona)
+- ✅ **Domena** → bodysync.pl (kupiona)
 - ✅ **Przepisy** → PDFy od dietetyków (~1000 przepisów), pipeline: PDF → LLM parse → DynamoDB + embeddingi
 - ✅ **Auth** → Google OAuth2 bezpośrednio, allowlist 2 emaili, JWT session 30 dni, zero Cognito
 - ✅ **LLM** → Anthropic API bezpośrednio (nie Bedrock). Te same ceny ($1/$5 per MTok), prostsze (1 API key vs IAM + Bedrock config), prompt caching działa

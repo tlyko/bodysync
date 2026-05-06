@@ -38,6 +38,10 @@ Jeśli `terraform.tfstate` jest lokalny → migracja na S3 + DynamoDB lock:
 ```hcl
 terraform {
   backend "s3" {
+    # Bootstrap-tier resource names: legacy `syncbody-*` from initial scaffolding
+    # (var.project default w infrastructure/terraform/variables.tf). Live AWS already
+    # provisioned z tymi nazwami — nie zmieniaj bez migration ADR + state mv.
+    # App-tier zasoby (DDB, S3 dla Lambda, SSM paths) używają prefix `bodysync-*`.
     bucket         = "syncbody-tfstate"
     key            = "main/terraform.tfstate"
     region         = "eu-west-1"

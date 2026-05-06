@@ -38,8 +38,8 @@ Build FAISS index → upload to S3
 ```
 
 ## FAISS in Lambda
-- Index file stored in S3: `s3://syncbody-data/faiss/recipes.index`
-- Metadata JSON: `s3://syncbody-data/faiss/recipes_meta.json`
+- Index file stored in S3: `s3://bodysync-data/faiss/recipes.index`
+- Metadata JSON: `s3://bodysync-data/faiss/recipes_meta.json`
 - Lambda loads both on cold start (3-5s for ~1000 recipes, ~6MB index)
 - Search: embed query → FAISS nearest neighbors → return top N recipes
 

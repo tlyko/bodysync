@@ -59,7 +59,7 @@ HAE_METRIC_MAP = {
 
 ## Google Sheets integration
 - Use `google-auth` + `gspread` libraries
-- Service account key stored in SSM at `/syncbody/google-sa-key`
+- Service account key stored in SSM at `/bodysync/google-sa-key`
 - Read spreadsheet by ID, parse raw text per week, save AS-IS to DynamoDB TRAINING# record
 - Cron every 6 hours — don't over-parse, let AI advisor handle interpretation
 
