@@ -369,8 +369,10 @@ Plik referencyjny: `/mnt/user-data/outputs/health-dashboard.jsx` — pełny prot
 
 ## 7. Terraform — struktura modułów
 
+> ⚠️ **Stale section** — ten layout (Lambda kod w `terraform/lambda-src/`) konfliktuje z CLAUDE.md (`infrastructure/terraform/` = TYLKO IaC, kod Lambdy w `apps/api/`). Do rozstrzygnięcia w ADR-002 (lambda packaging). Do tego czasu CLAUDE.md jest authoritative.
+
 ```
-terraform/
+infrastructure/terraform/
 ├── main.tf
 ├── variables.tf
 ├── outputs.tf
