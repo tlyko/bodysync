@@ -31,6 +31,10 @@ env/
 package/
 *.zip
 
+# Derived operational outputs — regenerate locally with
+# `cd terraform/bootstrap && terraform output -json > ../../docs/infra-outputs.json`
+docs/infra-outputs.json
+
 # Node / Frontend
 node_modules/
 dist/

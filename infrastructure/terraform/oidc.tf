@@ -1,11 +1,10 @@
-data "tls_certificate" "github_actions" {
+# OIDC provider for token.actions.githubusercontent.com is shared across
+# all GitHub Actions in this AWS account and is owned by another project
+# (tlyko/sprawdzamszlak — see its terraform/cicd.tf). We reference it via
+# a data source — never manage it from here. Touching it would cause drift
+# pingpong with the other project's terraform state.
+data "aws_iam_openid_connect_provider" "github_actions" {
   url = "https://token.actions.githubusercontent.com"
-}
-
-resource "aws_iam_openid_connect_provider" "github_actions" {
-  url             = "https://token.actions.githubusercontent.com"
-  client_id_list  = ["sts.amazonaws.com"]
-  thumbprint_list = [data.tls_certificate.github_actions.certificates[0].sha1_fingerprint]
 }
 
 resource "aws_iam_role" "github_actions" {
@@ -17,7 +16,7 @@ resource "aws_iam_role" "github_actions" {
     Statement = [{
       Effect = "Allow"
       Principal = {
-        Federated = aws_iam_openid_connect_provider.github_actions.arn
+        Federated = data.aws_iam_openid_connect_provider.github_actions.arn
       }
       Action = "sts:AssumeRoleWithWebIdentity"
       Condition = {

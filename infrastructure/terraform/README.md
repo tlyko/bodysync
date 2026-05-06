@@ -4,7 +4,7 @@ Provisions the prerequisites that the rest of the infra depends on:
 
 - **S3 bucket** `syncbody-tfstate-<account_id>` — remote state for the root config (versioned, encrypted, public access blocked, noncurrent versions expire after 90d).
 - **DynamoDB table** `syncbody-tflock` — state locking.
-- **OIDC provider + IAM role** `syncbody-github-actions` — assumed by GitHub Actions running in `tlyko/bodysync` via OIDC, no static keys.
+- **IAM role** `syncbody-github-actions` — assumed by GitHub Actions running in `tlyko/bodysync` via OIDC, no static keys. The OIDC provider itself (`token.actions.githubusercontent.com`) is account-wide and owned by another project (`tlyko/sprawdzamszlak`); we reference it via a data source.
 
 ## State
 
