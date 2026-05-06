@@ -1,0 +1,31 @@
+{
+  "permissions": {
+    "allow": [
+      "bash(terraform:*)",
+      "bash(pytest:*)",
+      "bash(npm:*)",
+      "bash(ruff:*)",
+      "bash(curl:*)",
+      "bash(git:*)",
+      "bash(pip:*)",
+      "bash(cd:*)",
+      "bash(cat:*)",
+      "bash(ls:*)",
+      "bash(mkdir:*)",
+      "bash(cp:*)",
+      "bash(zip:*)",
+      "read(**)",
+      "write(terraform/**)",
+      "write(frontend/**)",
+      "write(scripts/**)",
+      "write(tests/**)",
+      "write(docs/**)"
+    ],
+    "deny": [
+      "bash(terraform destroy:*)",
+      "bash(rm -rf:*)",
+      "write(.env*)",
+      "write(**/secrets*)"
+    ]
+  }
+}
