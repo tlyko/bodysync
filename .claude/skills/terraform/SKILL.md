@@ -16,8 +16,9 @@ Each AWS service gets its own module under `infrastructure/terraform/modules/`:
 - Provider versions pinned in `versions.tf`
 - Variables have descriptions and type constraints
 - Use `terraform-aws-modules` where it saves boilerplate (but not for simple resources)
-- Lambda source in `lambda-src/{function_name}/handler.py`
-- Lambda packaging: zip per function, exclude tests
+- **Lambda source lives in `apps/api/handlers/{function_name}/` — NOT in `infrastructure/terraform/`** (see ADR-002)
+- **Lambda packaging:** build script `apps/api/scripts/build.py` produces `apps/api/dist/{function_name}.zip` per Lambda. Terraform consumes via `aws_lambda_function.filename = var.source_zip` + `source_code_hash = filebase64sha256(var.source_zip)`. Path passed through root variable `lambda_artifacts_path = "${path.module}/../../apps/api/dist"`.
+- **CI must run build before plan/apply:** GHA workflow does `setup-python` → `cd apps/api && python scripts/build.py` BEFORE `terraform plan/apply`.
 - Tags on everything: `Project = "bodysync"`, `Environment = var.environment`
 - State backend: S3 + DynamoDB lock table
 

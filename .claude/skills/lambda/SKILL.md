@@ -3,9 +3,18 @@
 ## When to use
 Writing or modifying Lambda handler code, shared utilities, DynamoDB operations, or webhook parsing.
 
+## Layout (ADR-002)
+- All Lambda code lives under `apps/api/`. **Never** put Python in `infrastructure/terraform/`.
+- Per-handler folder: `apps/api/handlers/{function_name}/{handler.py, schemas.py, service.py, requirements.txt}`
+- Shared modules: `apps/api/shared/{ssm,dynamo,auth,anthropic_client,logging}.py` — copied into each zip at build time, imported as `from shared.X import Y`
+- Tests: `apps/api/tests/handlers/{function_name}/test_handler.py` and `apps/api/tests/shared/test_*.py`. Global fixtures in `apps/api/tests/conftest.py`.
+- Dev tooling: `apps/api/pyproject.toml` (pytest, moto, responses, ruff, mypy, pydantic). Single venv at `apps/api/.venv`. Production deps in per-handler `requirements.txt` (cold start tax = bundle size).
+- Build: `apps/api/scripts/build.py` produces `apps/api/dist/{function_name}.zip` (deterministic — sorted files, fixed mtime). `dist/` is gitignored, generated in CI before `terraform plan/apply`.
+
 ## Handler pattern
 Every Lambda follows this structure:
 ```python
+# apps/api/handlers/{fn}/handler.py
 import json
 import logging
 from shared.dynamo import get_item, put_item
@@ -33,11 +42,12 @@ def handler(event, context):
         return {"statusCode": 500, "body": json.dumps({"error": str(e)})}
 ```
 
-## Shared modules (`lambda-src/shared/`)
+## Shared modules (`apps/api/shared/`)
 - `dynamo.py` — DynamoDB helpers: `get_item(pk, sk)`, `put_item(pk, sk, data)`, `query_by_date_range(pk, sk_prefix, start, end)`
 - `auth.py` — `verify_jwt(token)` → returns user_id or raises 401. `verify_webhook_token(token)` for HAE.
-- `ssm.py` — `get_param(name)` with caching (avoid repeated SSM calls in warm Lambda)
+- `ssm.py` — `get_param(name)` with module-level dict caching (avoid repeated SSM calls in warm Lambda)
 - `anthropic_client.py` — Anthropic API wrapper with prompt caching setup
+- `logging.py` — structured logger (request_id, user_id) — never log raw payloads
 
 ## Health Auto Export webhook payload
 The webhook receives POST with JSON array of metrics. Key mapping:
@@ -64,7 +74,10 @@ HAE_METRIC_MAP = {
 - Cron every 6 hours — don't over-parse, let AI advisor handle interpretation
 
 ## Testing
-- Use `moto` to mock DynamoDB
-- Use `responses` library to mock HTTP calls (Anthropic API, Google Sheets, Strava)
-- Every handler test covers: happy path, missing auth, invalid payload, DynamoDB error
-- Test file naming: `test_{function_name}.py` next to `handler.py`
+- Run tests: `cd apps/api && pytest -v`
+- Use `moto` to mock DynamoDB and SSM (`@mock_aws` or `@mock_dynamodb` + `@mock_ssm`)
+- Use `responses` library to mock HTTP calls (Anthropic API, Google Sheets, Strava, Google OAuth)
+- Every handler test covers: happy path, missing auth, invalid payload, DynamoDB error, **PK isolation (user_a cannot read user_b records)**
+- Test file location: `apps/api/tests/handlers/{function_name}/test_handler.py` (mirrors handlers tree)
+- Global fixtures (`dynamodb_table`, `ssm_params`) live in `apps/api/tests/conftest.py`
+- Lint/format: `ruff check .` + `ruff format --check .` from `apps/api/`. Type check: `mypy shared/ handlers/`.
