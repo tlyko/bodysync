@@ -3,6 +3,13 @@
 ## When to use
 Any task involving AWS infrastructure, modules, variables, or deployment.
 
+## Root layout (per ADR-003)
+- `infrastructure/terraform/config.tf` — `terraform {}` (required_version + required_providers + backend "s3") plus `provider "aws"` z default_tags. Wszystko co konfiguruje runtime Terraforma.
+- `infrastructure/terraform/locals.tf` — wszystkie stałe konfiguracyjne (project, region, table configs, ssm paths, lambda_artifacts_path, common tags). Zero `variable {}` w root.
+- `infrastructure/terraform/main.tf` (+ tematyczne `lambda.tf`, `oidc.tf`, ...) — `data` + `resource` + `module` blocks.
+- **Brak `variables.tf` / `outputs.tf` w root** dopóki nie ma drugiego env'a / cross-stack consumer'a outputu. Outputy z istniejących resources → `terraform state show` lub `aws iam get-role --query 'Role.Arn'`.
+- Bootstrap (S3 state bucket + DDB lock + OIDC role) żyje osobno w `infrastructure/terraform/bootstrap/` z lokalnym state.
+
 ## Module structure
 Each AWS service gets its own module under `infrastructure/terraform/modules/`:
 - `api-gateway/` — HTTP API, routes, custom domain, stage
@@ -13,8 +20,8 @@ Each AWS service gets its own module under `infrastructure/terraform/modules/`:
 - `ssm/` — Parameter Store entries (API keys, allowed emails, Google SA key)
 
 ## Conventions
-- Provider versions pinned in `versions.tf`
-- Variables have descriptions and type constraints
+- Provider versions pinned in `config.tf` `required_providers` block
+- Module variables have descriptions and type constraints (root workspace doesn't use `variables.tf` per ADR-003 — module contracts still do)
 - Use `terraform-aws-modules` where it saves boilerplate (but not for simple resources)
 - **Lambda source lives in `apps/api/handlers/{function_name}/` — NOT in `infrastructure/terraform/`** (see ADR-002)
 - **Lambda packaging:** build script `apps/api/scripts/build.py` produces `apps/api/dist/{function_name}.zip` per Lambda. Terraform consumes via `aws_lambda_function.filename = var.source_zip` + `source_code_hash = filebase64sha256(var.source_zip)`. Path passed through root variable `lambda_artifacts_path = "${path.module}/../../apps/api/dist"`.
