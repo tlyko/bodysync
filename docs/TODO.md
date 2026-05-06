@@ -32,18 +32,19 @@ Estimated effort: 8–10h (jeden weekend)
 
 ---
 
-### Step 2: Terraform root + remote state + providery + tagging → `infrastructure/terraform/`
-- **Tworzy:**
-  - `infrastructure/terraform/versions.tf` — terraform `~> 1.9`, AWS `~> 5.x`, Cloudflare `~> 4.x` (placeholder — provider zadeklarowany ale jeszcze nieużywany)
-  - `infrastructure/terraform/backend.tf` — `backend "s3"` z bucket/table z kroku 1
-  - `infrastructure/terraform/main.tf` — providery (AWS w eu-west-1, Cloudflare z tokenem z env), `default_tags { Project = "bodysync", Environment = var.environment, ManagedBy = "terraform" }`
-  - `infrastructure/terraform/variables.tf` — `environment` (default `prod`), `aws_region`, `domain_name` (default `bodysync.pl`)
-  - `infrastructure/terraform/locals.tf` — `name_prefix = "bodysync"`, common tags
-  - `infrastructure/terraform/outputs.tf` — pusty na razie
-  - `.gitignore` na poziomie repo (`.terraform/`, `*.tfstate*`, `.terraform.lock.hcl` zostawiamy w repo)
-- **Depends on:** Step 1 (bucket + lock table muszą istnieć)
-- **Test:** `cd infrastructure/terraform && terraform init` (powinien się połączyć z S3 backendem), `terraform validate`, `terraform plan` → "No changes"
-- **Acceptance:** `terraform plan` w czystym repo zwraca zero zmian, lock działa (drugi `plan` w drugim terminalu czeka), default tagi widoczne w `plan` jako "would be applied to all resources"
+### Step 2: Terraform główny workspace (S3 backend, providery, tagging)
+
+**Layout zgodnie z [ADR-003 terraform conventions](adr/ADR-003-terraform-conventions.md):** `config.tf` + `locals.tf` + `main.tf`. Bez `versions.tf`, `variables.tf`, `outputs.tf`.
+
+> ⚠️ **Pre-req: layout decision** — bootstrap obecnie zajmuje `infrastructure/terraform/`. Główny workspace nie może siedzieć w tym samym katalogu (różne backendy: bootstrap = local state, główny = S3). Decyzja przed startem: przenieść bootstrap do `infrastructure/terraform/bootstrap/` + główny żyje w `infrastructure/terraform/`, ALBO zostawić bootstrap i stworzyć główny w `infrastructure/terraform-app/`. Ta sama decyzja dotyczy migracji state pliku bootstrap (kopiowanie + `terraform init -migrate-state` przy zmianie ścieżki).
+
+- **Tworzy** (zakładając przeniesienie bootstrap → `infrastructure/terraform/bootstrap/`):
+  - `infrastructure/terraform/config.tf` — `terraform { required_version, required_providers (aws ~> 6.43, archive), backend "s3" { bucket="syncbody-tfstate-{account_id}", key="bodysync/terraform.tfstate", region="eu-west-1", encrypt=true, use_lockfile=true (TF 1.10+ S3 .tflock zamiast DDB) } }` + `provider "aws" { region = local.aws_region, default_tags { tags = local.tags } }`
+  - `infrastructure/terraform/locals.tf` — `project = "bodysync"`, `aws_region = "eu-west-1"`, `tags = { Project = local.project, ManagedBy = "terraform" }`. Per-table configs (DDB main + Strava events) i SSM param paths dochodzą w Step 4.
+  - `infrastructure/terraform/main.tf` — pusty (resources dochodzą od Step 4)
+- **Depends on:** Step 1 (bucket + lock table muszą istnieć), layout decision z pre-req
+- **Test:** `cd infrastructure/terraform && terraform init` (S3 backend), `terraform validate`, `terraform plan` → "No changes"
+- **Acceptance:** `terraform plan` zwraca zero zmian, S3 .tflock działa (drugi `plan` w drugim terminalu czeka), default tagi widoczne w `plan`
 
 ---
 

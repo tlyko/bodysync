@@ -8,8 +8,8 @@ data "aws_iam_openid_connect_provider" "github_actions" {
 }
 
 resource "aws_iam_role" "github_actions" {
-  name        = "${var.project}-github-actions"
-  description = "Role assumed by GitHub Actions in ${var.github_owner}/${var.github_repo} via OIDC."
+  name        = "${local.project}-github-actions"
+  description = "Role assumed by GitHub Actions in ${local.github_owner}/${local.github_repo} via OIDC."
 
   assume_role_policy = jsonencode({
     Version = "2012-10-17"
@@ -24,7 +24,7 @@ resource "aws_iam_role" "github_actions" {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
         }
         StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${var.github_owner}/${var.github_repo}:*"
+          "token.actions.githubusercontent.com:sub" = "repo:${local.github_owner}/${local.github_repo}:*"
         }
       }
     }]
@@ -79,8 +79,8 @@ resource "aws_iam_role_policy" "github_actions_iam" {
           "iam:PassRole",
         ]
         Resource = [
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${var.project}-*",
-          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${var.project}-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.project}-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.project}-*",
         ]
       },
       {

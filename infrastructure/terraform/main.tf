@@ -1,24 +1,4 @@
-provider "aws" {
-  region = var.aws_region
-
-  default_tags {
-    tags = local.tags
-  }
-}
-
 data "aws_caller_identity" "current" {}
-
-locals {
-  tags = {
-    Project     = var.project
-    Environment = "shared"
-    ManagedBy   = "terraform"
-    Component   = "bootstrap"
-  }
-
-  state_bucket_name = "${var.project}-tfstate-${data.aws_caller_identity.current.account_id}"
-  lock_table_name   = "${var.project}-tflock"
-}
 
 resource "aws_s3_bucket" "tf_state" {
   bucket = local.state_bucket_name
