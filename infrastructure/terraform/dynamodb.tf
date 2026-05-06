@@ -5,11 +5,12 @@ resource "aws_dynamodb_table" "data" {
   name         = local.ddb_table_name
   billing_mode = "PAY_PER_REQUEST"
 
-  # NOTE: `range_key` deprecated w AWS provider 6.x na rzecz `key_schema`,
-  # ale `key_schema` jeszcze nie jest stabilne (różne syntaxes per minor
-  # version, provider 6.43 nie akceptuje block ani list-of-object). Wracamy
-  # do legacy hash_key/range_key — warning ignorowany. Migracja w osobnym
-  # PR przy bumpie provider'a.
+  # NOTE: AWS provider 6.43-6.44 emituje deprecation warning na hash_key/
+  # range_key z sugestią `key_schema`, ale alternatywa NIE jest jeszcze
+  # zaimplementowana w provider'ze (block ani argument odrzucone). To
+  # pre-emptive deprecation — provider zapowiada przyszłą zmianę. Zostajemy
+  # przy legacy syntax, warning ignorowany. Migracja gdy `key_schema`
+  # pojawi się w provider'ze (śledź release notes).
   hash_key  = "PK"
   range_key = "SK"
 
