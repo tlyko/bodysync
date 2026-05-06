@@ -2,6 +2,8 @@
 
 Living document — overwritten when significant state changes. Read this first after `/clear`.
 
+**Sprint roadmap:** [docs/SPRINTS.md](docs/SPRINTS.md). Sprint 0 zamykany (PR #7), Sprint 1 startuje po merge.
+
 ## Co to jest
 
 Personal health + fitness dashboard dla pary (single-tenant initial; projektowane z możliwością otwarcia, ale **bez** przedwczesnej generalizacji). Agreguje:
