@@ -31,10 +31,10 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | `.claude/` setup (agents + commands + skills) | ✅ shipped (port ze sprawdzamszlak, frontmatter, ADR-001) |
 | ADR-001 stack baseline | ✅ shipped (`docs/adr/ADR-001-stack-baseline.md`) |
 | `apps/api/` Lambda scaffold (Python, Pydantic schemas, JWT) | ❌ |
-| `apps/web/` React+Vite scaffold | ❌ |
+| `apps/web/` React+Vite scaffold | ✅ shipped (placeholder z dark theme) |
 | DDB single-table + IAM | ❌ |
 | API Gateway HTTP + custom domain | ❌ |
-| Cloudflare Pages binding | ❌ |
+| Cloudflare Workers binding + `bodysync.pl` custom domain | ✅ shipped |
 | Apple Health webhook (signature verify + idempotency) | ❌ |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
