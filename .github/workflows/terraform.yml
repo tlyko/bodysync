@@ -1,0 +1,109 @@
+name: Terraform
+
+on:
+  pull_request:
+    paths:
+      - 'infrastructure/terraform/**'
+      - '.github/workflows/terraform.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'infrastructure/terraform/**'
+      - '.github/workflows/terraform.yml'
+  workflow_dispatch:
+    # Manual trigger (gh workflow run terraform.yml --ref main).
+    # Useful as a no-op smoke test, or when the paths filter would
+    # otherwise skip a run we want to force.
+
+# Concurrency: one run at a time per branch. Cancel queued runs on the same
+# PR but not on main (apply must finish).
+concurrency:
+  group: terraform-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  id-token: write       # for AWS OIDC role assumption
+  contents: read
+  pull-requests: write  # to post the plan as a PR comment
+
+env:
+  AWS_REGION: eu-west-1
+  TF_INPUT: '0'         # never prompt
+  TF_IN_AUTOMATION: '1' # cleaner CLI output
+
+jobs:
+  terraform:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: infrastructure/terraform
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: arn:aws:iam::214598715232:role/syncbody-github-actions
+          aws-region: ${{ env.AWS_REGION }}
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.13.5
+          terraform_wrapper: false
+
+      - name: Terraform fmt check
+        run: terraform fmt -check -recursive
+
+      - name: Terraform init
+        run: terraform init -no-color
+
+      - name: Terraform validate
+        run: terraform validate -no-color
+
+      - name: Terraform plan
+        id: plan
+        run: |
+          set -o pipefail
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+
+      - name: Post plan as PR comment
+        if: github.event_name == 'pull_request'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const path = 'infrastructure/terraform/plan.txt';
+            let plan = fs.readFileSync(path, 'utf8');
+            // Truncate huge plans so we don't hit GH 65k char comment limit.
+            const MAX = 60000;
+            if (plan.length > MAX) {
+              plan = plan.slice(-MAX);
+              plan = '… (plan truncated to last ' + MAX + ' chars) …\n' + plan;
+            }
+            const body = [
+              '## `terraform plan`',
+              '',
+              'Captured by GitHub Actions for commit `' + context.sha.slice(0, 7) + '`.',
+              '',
+              '<details><summary>Full plan output</summary>',
+              '',
+              '```hcl',
+              plan,
+              '```',
+              '',
+              '</details>',
+            ].join('\n');
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body,
+            });
+
+      - name: Terraform apply
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: terraform apply -no-color -auto-approve tfplan
