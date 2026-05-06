@@ -70,10 +70,12 @@ bodysync/
 - **TypeScript/React:**
   - Strict mode, brak `any` bez komentarza dlaczego
   - `prettier`, ESM imports, named exports only
-- **Terraform:**
-  - Jeden moduł per service (api-gateway, lambda, dynamodb, s3, eventbridge, ssm)
-  - `variables.tf` + `outputs.tf` per moduł
-  - **Walidacja env zawsze przez Pydantic / Zod** — fail fast przy cold starcie
+- **Terraform** (per ADR-003):
+  - **Root workspace** używa trzech plików konfiguracyjnych: `config.tf` (`terraform {}` + backend + `provider`), `locals.tf` (wszystkie stałe — project name, region, table configs, common tags), `main.tf` + tematyczne (`oidc.tf`, `lambda.tf`, ...) z `data`/`resource` blokami.
+  - **Brak `variables.tf` w root** dopóki nie pojawi się drugi environment. Defaulty hardkodowane w `locals.tf`.
+  - **Brak `outputs.tf`** chyba że output jest faktycznie konsumowany (cross-module, GHA workflow). ARN role'a → `terraform state show` lub `aws iam get-role`.
+  - Moduły (`infrastructure/terraform/modules/X/`) mogą mieć `variables.tf` + `outputs.tf` — to ich kontrakt, nie sprzeczne z ADR-003.
+  - Jeden moduł per service (api-gateway, lambda, dynamodb, s3, eventbridge, ssm).
 - **Endpoint contract:** walidacja inputu (Pydantic), error handling, structured log z `request_id` + `user_id`, bez payloadu w logach
 - **Commits:** konwencjonalne (`feat/fix/chore/infra/refactor/docs`), po polsku albo angielsku — byle konsekwentnie
 - **Branche:** `feat/*`, `fix/*`, `chore/*`. **Brak commitów bezpośrednio do `main`** — tylko PR.

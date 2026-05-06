@@ -400,10 +400,15 @@ apps/api/                              # Python 3.12 backend (cały kod Lambd)
 │   └── create_user.py                 # CLI do tworzenia profilu usera
 └── dist/                              # gitignored — build artefakty (Terraform input)
 
-infrastructure/terraform/              # TYLKO IaC, zero kodu Pythona
-├── main.tf                            # wywołania modułów + routing API GW
-├── variables.tf                       # m.in. lambda_artifacts_path = "../../apps/api/dist"
-├── outputs.tf
+infrastructure/terraform/              # TYLKO IaC, zero kodu Pythona (per ADR-003)
+├── config.tf                          # terraform{} (backend + providers) + provider "aws" + default_tags
+├── locals.tf                          # project, aws_region, tags, table configs, ssm paths, lambda_artifacts_path
+├── main.tf                            # data + resource: wywołania modułów + routing API GW
+├── bootstrap/                         # bootstrap workspace (lokalny state, jednorazowy apply)
+│   ├── config.tf
+│   ├── locals.tf
+│   ├── main.tf                        # S3 state bucket + DDB lock table
+│   └── oidc.tf                        # GHA OIDC trust policy + IAM role
 └── modules/
     ├── api-gateway/                   # HTTP API + routes + (later) custom domain
     ├── lambda/                        # generic moduł parametryzowany source_zip
@@ -412,6 +417,8 @@ infrastructure/terraform/              # TYLKO IaC, zero kodu Pythona
     ├── eventbridge/                   # cron rules
     └── ssm/                           # parameter store entries
 ```
+
+**Konwencja plików:** root używa `config.tf` + `locals.tf` + `main.tf` (+ tematyczne) — bez `variables.tf`/`outputs.tf` w root. Moduły mają `variables.tf` + `outputs.tf` jako swój kontrakt (per ADR-003).
 
 **Dependencies:** każdy handler ma własny `requirements.txt` (cold start tax). Shared kopiowany do każdego zip per build (~5KB nadmiaru, pomijalne). Bez Lambda layera (YAGNI dla 7 Lambd dzielących 5KB Pythona).
 
