@@ -18,16 +18,19 @@ npm run preview     # preview produkcyjnego buildu
 npm run typecheck   # tsc --noEmit
 ```
 
-## Cloudflare Pages
+## Cloudflare (Workers + Static Assets)
 
-Build settings (ustawione w UI Cloudflare):
+Cloudflare promował "Pages" project do "Workers + Static Assets" — deploy odbywa się przez `npx wrangler deploy`, więc potrzebujemy `wrangler.jsonc` (jest obok).
+
+UI Cloudflare → Settings → Build:
 
 | Setting | Wartość |
 |---|---|
-| Framework preset | Vite |
-| Build command | `cd apps/web && npm ci && npm run build` |
-| Build output | `apps/web/dist` |
-| Root directory | `/` (repo root) |
+| Root directory | `apps/web` |
+| Build command | `npm ci && npm run build` |
+| Deploy command | `npx wrangler deploy` *(default — można zostawić puste)* |
 | `NODE_VERSION` | `20` |
 
-Branche: `main` → production (`bodysync.pl`), pozostałe → preview deployments.
+`wrangler.jsonc` mówi wranglerowi gdzie są assety (`./dist`) i włącza SPA fallback (każde 404 → `index.html`). Jeśli nazwa projektu w CF jest inna niż `bodysync-web`, popraw `"name"` w `wrangler.jsonc` na exact match — inaczej wrangler stworzy duplikat.
+
+Branche: `main` → production (`bodysync.pl`), pozostałe → preview deployments (Workers preview URL).
