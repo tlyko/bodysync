@@ -1,6 +1,6 @@
 {
   "$schema": "apps/web/node_modules/wrangler/config-schema.json",
-  "name": "bodysync-web",
+  "name": "bodysync",
   "compatibility_date": "2026-05-06",
   "assets": {
     "directory": "./apps/web/dist",
