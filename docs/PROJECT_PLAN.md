@@ -367,35 +367,53 @@ Plik referencyjny: `/mnt/user-data/outputs/health-dashboard.jsx` — pełny prot
 
 ---
 
-## 7. Terraform — struktura modułów
+## 7. Struktura repo — backend + IaC
 
-> ⚠️ **Stale section** — ten layout (Lambda kod w `terraform/lambda-src/`) konfliktuje z CLAUDE.md (`infrastructure/terraform/` = TYLKO IaC, kod Lambdy w `apps/api/`). Do rozstrzygnięcia w ADR-002 (lambda packaging). Do tego czasu CLAUDE.md jest authoritative.
+> Pełna decyzja architektoniczna: [ADR-002 lambda packaging](adr/ADR-002-lambda-packaging.md). Sekcja 7 to skrót.
+
+**Reguła:** `infrastructure/terraform/` = TYLKO IaC. Kod Pythona Lambdy żyje w `apps/api/`. Build script `apps/api/scripts/build.py` produkuje `apps/api/dist/{fn}.zip`, Terraform konsumuje przez `aws_lambda_function.filename`.
 
 ```
-infrastructure/terraform/
-├── main.tf
-├── variables.tf
+apps/api/                              # Python 3.12 backend (cały kod Lambd)
+├── pyproject.toml                     # dev deps (pytest, moto, ruff, mypy, pydantic)
+├── shared/                            # importowane przez wszystkie handlery
+│   ├── ssm.py                         # get_param(name) z module-level cache
+│   ├── dynamo.py                      # get_item / put_item / query_by_pk_sk_prefix
+│   ├── auth.py                        # verify_jwt, verify_webhook_token
+│   ├── anthropic_client.py            # wrapper + prompt caching
+│   └── logging.py                     # structured logger
+├── handlers/
+│   ├── google_auth/{handler,schemas,service}.py + requirements.txt
+│   ├── health_webhook/...
+│   ├── training_plan_sync/...
+│   ├── strava_sync/...
+│   ├── ai_advisor/...                 # daily + weekly + chat
+│   ├── recipe_search/...              # FAISS loader
+│   └── api_read/...                   # GET /api/* dashboard reads
+├── tests/
+│   ├── conftest.py                    # dynamodb_table (moto) + ssm_params fixtures
+│   ├── shared/test_*.py
+│   └── handlers/{fn}/test_handler.py  # happy + auth + invalid + PK isolation
+├── scripts/
+│   ├── build.py                       # produkuje dist/{fn}.zip per handler
+│   ├── seed_recipes.py                # PDF extract → LLM parse → DDB + embeddingi
+│   └── create_user.py                 # CLI do tworzenia profilu usera
+└── dist/                              # gitignored — build artefakty (Terraform input)
+
+infrastructure/terraform/              # TYLKO IaC, zero kodu Pythona
+├── main.tf                            # wywołania modułów + routing API GW
+├── variables.tf                       # m.in. lambda_artifacts_path = "../../apps/api/dist"
 ├── outputs.tf
-├── modules/
-│   ├── api-gateway/         # HTTP API + routes + custom domain
-│   ├── lambda/              # Funkcje + layers + IAM roles
-│   ├── dynamodb/            # Tabela + GSI
-│   ├── s3/                  # Bucket na embeddingi + backup
-│   ├── eventbridge/         # Cron rules (daily + weekly advisor + training sync)
-│   └── ssm/                 # Parameter Store (allowed-emails, Google SA key, Anthropic API key, tokens)
-├── lambda-src/
-│   ├── google_auth/         # handler.py (Google OAuth2 → JWT session)
-│   ├── health_webhook/      # handler.py
-│   ├── training_plan_sync/  # handler.py (Google Sheets API → DynamoDB)
-│   ├── strava_sync/         # handler.py
-│   ├── ai_advisor/          # handler.py (daily + weekly + chat)
-│   ├── recipe_search/       # handler.py + faiss index loader
-│   ├── api_read/            # handler.py (dashboard data reads)
-│   └── shared/              # DynamoDB helpers, auth middleware (JWT verify)
-└── scripts/
-    ├── seed_recipes.py      # PDF extract → LLM parse → DynamoDB + embeddingi
-    └── create_user.py       # CLI do tworzenia profilu usera
+└── modules/
+    ├── api-gateway/                   # HTTP API + routes + (later) custom domain
+    ├── lambda/                        # generic moduł parametryzowany source_zip
+    ├── dynamodb/                      # bodysync table + GSI-1
+    ├── s3/                            # bucket na embeddingi + raw payloads
+    ├── eventbridge/                   # cron rules
+    └── ssm/                           # parameter store entries
 ```
+
+**Dependencies:** każdy handler ma własny `requirements.txt` (cold start tax). Shared kopiowany do każdego zip per build (~5KB nadmiaru, pomijalne). Bez Lambda layera (YAGNI dla 7 Lambd dzielących 5KB Pythona).
 
 ---
 

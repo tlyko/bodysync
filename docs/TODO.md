@@ -78,23 +78,31 @@ Estimated effort: 8–10h (jeden weekend)
 
 ### Step 5: API Gateway + moduł Lambda + funkcja `google-auth` → pierwszy endpoint
 
-> ⚠️ **Blocker przed startem:** lambda packaging ADR. Step zakłada kod Lambdy w `terraform/lambda-src/`, ale CLAUDE.md wskazuje `apps/api/` (`infrastructure/terraform/` = TYLKO IaC). Architect ma rozstrzygnąć (ADR-002 lambda packaging) zanim implementer ruszy.
+**Layout zgodnie z [ADR-002 lambda packaging](adr/ADR-002-lambda-packaging.md):** kod w `apps/api/`, IaC w `infrastructure/terraform/`, build script `apps/api/scripts/build.py` produkuje `apps/api/dist/{fn}.zip` konsumowany przez Terraform.
 
 - **Tworzy:**
+  - `apps/api/pyproject.toml` — PEP 621 metadata, `[project.optional-dependencies] dev = [pytest, moto, responses, ruff, mypy, pydantic]`. Single venv pod `apps/api/.venv`.
+  - `apps/api/shared/` — `__init__.py`, `ssm.py` (cache w module-level dict, `get_param(name)`), `dynamo.py` (`get_item`, `put_item`, `query_by_pk_sk_prefix` używając `boto3.resource('dynamodb')`), `auth.py` (`verify_jwt(token)` → user_id albo raise; używa secret z SSM), `logging.py` (structured logger z `request_id` + `user_id`)
+  - `apps/api/handlers/google_auth/` — `handler.py` (parsuje `id_token` z body via Pydantic, waliduje przez `google.oauth2.id_token.verify_oauth2_token`, sprawdza email na allowliście z SSM, generuje JWT z `PyJWT`, zwraca `{session_token, user_id, name, email}`), `schemas.py` (Pydantic input/output), `service.py` (logika osobno od `handler` dla testowalności), `requirements.txt` (`google-auth==2.35.*`, `pyjwt==2.9.*`, `pydantic==2.x`)
+  - `apps/api/tests/conftest.py` — fixtures `dynamodb_table` (moto) i `ssm_params`
+  - `apps/api/tests/handlers/google_auth/test_handler.py` — pytest+moto+responses: happy path, brak tokenu → 400, email spoza listy → 403, zły token Google → 401, **PK isolation: user_a nie widzi sesji user_b**
+  - `apps/api/scripts/build.py` — buduje `dist/{fn}.zip` per handler: `pip install -r handlers/{fn}/requirements.txt --target dist/_build/{fn}/ --platform manylinux2014_aarch64 --only-binary=:all:`, kopiuje `handlers/{fn}/*.py` + `shared/` do `_build/{fn}/`, zip deterministyczny (sortowane pliki, fixed mtime)
+  - `apps/api/.gitignore` — `.venv/`, `dist/`, `__pycache__/`, `.pytest_cache/`, `.ruff_cache/`, `.mypy_cache/`
   - `infrastructure/terraform/modules/api-gateway/` — `aws_apigatewayv2_api` (HTTP), `cors_configuration` (`allow_origins = ["https://bodysync.pl", "http://localhost:5173"]`, methods, headers), default `$default` stage z auto-deploy. **Bez** custom domain (czeka na Cloudflare)
-  - `infrastructure/terraform/modules/lambda/` — generic moduł parametryzowany: `function_name`, `source_dir`, `handler`, `environment`, `extra_iam_statements`. Buduje zip (`archive_file`), tworzy `aws_lambda_function` (python3.12, arm64, 512MB, 30s timeout), CloudWatch log group z 14d retention, IAM role z basic execution + `extra_iam_statements`
-  - `terraform/lambda-src/shared/` — `__init__.py`, `ssm.py` (cache w module-level dict), `dynamo.py` (helper `get_item`/`put_item` używający `boto3.resource`), `auth.py` (`verify_jwt(token)` → user_id albo raise; używa secret z SSM)
-  - `terraform/lambda-src/google_auth/` — `handler.py` (parsuje `id_token` z body, waliduje przez `google.oauth2.id_token.verify_oauth2_token`, sprawdza email na allowliście z SSM, generuje JWT z `PyJWT`, zwraca `{session_token, user_id, name, email}`), `requirements.txt` (`google-auth`, `pyjwt`), `test_handler.py` (pytest+moto+responses: happy path, brak tokenu → 400, email spoza listy → 403, zły token Google → 401)
-  - `infrastructure/terraform/main.tf` — wpięcie API GW + integracja `aws_apigatewayv2_integration` + route `POST /api/auth/google` → moduł lambda
-  - `tests/conftest.py` — fixtures `dynamodb_table` i `ssm_params` (kopia ze SKILL.md `tester.md`)
+  - `infrastructure/terraform/modules/lambda/` — generic moduł parametryzowany: `function_name`, `source_zip` (path do `apps/api/dist/{fn}.zip`), `handler` (default `handler.handler`), `memory_size` (512), `timeout` (10), `environment` (map), `extra_iam_statements` (list). Tworzy `aws_lambda_function` (python3.12, arm64) z `filename = var.source_zip` + `source_code_hash = filebase64sha256(var.source_zip)`, `aws_cloudwatch_log_group` z 14d retention, `aws_iam_role` z basic execution + `extra_iam_statements`
+  - `infrastructure/terraform/variables.tf` — dodać `lambda_artifacts_path = "${path.module}/../../apps/api/dist"`
+  - `infrastructure/terraform/main.tf` — wpięcie API GW + `aws_apigatewayv2_integration` + route `POST /api/auth/google` → `module "google_auth"` (source `./modules/lambda`, `source_zip = "${var.lambda_artifacts_path}/google_auth.zip"`, `extra_iam_statements` z `dynamodb:GetItem/PutItem` na table_arn + `ssm:GetParameter` na `arn:aws:ssm:*:*:parameter/bodysync/*`)
+  - `.github/workflows/terraform-plan.yml` + `terraform-apply.yml` — dodać step `setup-python@v5` + `cd apps/api && python scripts/build.py` PRZED `terraform plan/apply`
 - **Depends on:** Step 4 (DynamoDB + SSM muszą istnieć)
 - **Test:**
-  - `cd terraform/lambda-src && pytest -v` — wszystkie testy zielone
-  - `ruff check terraform/lambda-src && ruff format --check terraform/lambda-src`
-  - PR → plan → merge → apply
+  - `cd apps/api && python -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"`
+  - `cd apps/api && pytest -v` — wszystkie testy zielone (z testem PK isolation)
+  - `cd apps/api && ruff check . && ruff format --check . && mypy shared/ handlers/`
+  - `cd apps/api && python scripts/build.py` — produkuje `dist/google_auth.zip`, sprawdź `unzip -l dist/google_auth.zip` zawiera `handler.py`, `shared/`, deps Google
+  - PR → GHA build + plan → komentarz na PR → merge → apply
   - `curl -X POST $API_URL/api/auth/google -d '{"id_token":"invalid"}'` → 401
   - (po ręcznym ustawieniu prawdziwych wartości w SSM + Google OAuth client w Cloud Console) flow z prawdziwym tokenem → 200 + JWT
-- **Acceptance:** pytest zielony, `terraform plan` = "No changes" po apply, endpoint odpowiada 401 na zły token bez exception, log group w CloudWatch ma wpisy z `logger.info`, JWT można zdekodować i ma `user_id`+`exp` 30 dni
+- **Acceptance:** pytest zielony (z PK isolation test), build script deterministyczny (drugi `build.py` produkuje identyczny hash), `terraform plan` = "No changes" po apply, endpoint odpowiada 401 na zły token bez exception, log group w CloudWatch ma wpisy z `logger.info`, JWT można zdekodować i ma `user_id`+`exp` 30 dni
 
 ---
 
