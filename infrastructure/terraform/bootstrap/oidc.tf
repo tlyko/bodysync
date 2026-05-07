@@ -83,7 +83,6 @@ resource "aws_iam_role_policy" "github_actions_iam" {
           "iam:UntagRole",
           "iam:TagPolicy",
           "iam:UntagPolicy",
-          "iam:PassRole",
         ]
         # `local.project` to legacy literówka "syncbody" (zob. backlog
         # PROJECT-STATUS — destruktywny rename do bodysync osobno). Główny
@@ -96,6 +95,24 @@ resource "aws_iam_role_policy" "github_actions_iam" {
           "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/bodysync-*",
           "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/bodysync-*",
         ]
+      },
+      {
+        # Sec audit H3 — `iam:PassRole` bez condition jest klasyczną ścieżką
+        # privilege escalation z PowerUserAccess (GHA → EC2 RunInstances z
+        # naszą Lambda exec role jako instance profile → DDB+SSM dump).
+        # Restykcja do lambda.amazonaws.com zamyka ten wektor.
+        Sid    = "PassRoleToLambdaOnly"
+        Effect = "Allow"
+        Action = "iam:PassRole"
+        Resource = [
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.project}-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/bodysync-*",
+        ]
+        Condition = {
+          StringEquals = {
+            "iam:PassedToService" = "lambda.amazonaws.com"
+          }
+        }
       },
       {
         Sid    = "ListIamForPlanning"
