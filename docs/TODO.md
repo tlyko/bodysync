@@ -451,7 +451,7 @@ class DinnerAdvisorResponse(BaseModel):
 
 ---
 
-### Step 1: SSM API key placeholder + IAM fragment → modyfikuje `infrastructure/terraform/main.tf` + `locals.tf`
+### Step 1: SSM API key placeholder + IAM fragment → modyfikuje `infrastructure/terraform/main.tf` + `locals.tf` ✅ shipped (commit b7205e1 — SSM `/bodysync/anthropic/api_key` już istniał w `locals.tf` ssm_securestrings z poprzedniego sprintu, IAM dodane razem ze Step 6)
 - **Tworzy/Modyfikuje:**
   - `infrastructure/terraform/locals.tf` — dodaj do listy `ssm_securestring_params` (jeśli istnieje) klucz `/bodysync/anthropic/api_key`. Jeśli SSM zarządzane jest osobnym blokiem `aws_ssm_parameter.securestring` (`for_each` po lista), dopisz do tej listy.
   - `infrastructure/terraform/main.tf` — `aws_ssm_parameter` z `lifecycle { ignore_changes = [value] }`, type `SecureString`, value `"PLACEHOLDER"`. Owner wpisuje real key post-deploy:
@@ -473,7 +473,7 @@ class DinnerAdvisorResponse(BaseModel):
 
 ---
 
-### Step 2: Schemas + service skeleton + system prompt → tworzy `apps/api/handlers/advisor_dinner/`
+### Step 2: Schemas + service skeleton + system prompt → tworzy `apps/api/handlers/advisor_dinner/` ✅ shipped (commit 4f6e40d — schemas, system_prompt.txt 5257 chars, requirements.txt)
 - **Tworzy:**
   - `apps/api/handlers/advisor_dinner/__init__.py` (empty)
   - `apps/api/handlers/advisor_dinner/schemas.py`:
@@ -514,7 +514,7 @@ class DinnerAdvisorResponse(BaseModel):
 
 ---
 
-### Step 3: Anthropic client + prompt caching + tool_use → tworzy `apps/api/shared/anthropic.py` + impl `service.call_advisor`
+### Step 3: Anthropic client + prompt caching + tool_use → tworzy `apps/api/shared/anthropic.py` + impl `service.call_advisor` ✅ shipped (commit 4f6e40d — `service.get_anthropic_client` lazy singleton, `cache_control: ephemeral` na system prompt, tool_use forced. Decyzja: client logic w `handlers/advisor_dinner/service.py` zamiast `shared/anthropic.py` — jedyny consumer w MVP, KISS)
 - **Tworzy:**
   - `apps/api/shared/anthropic.py`:
     - `_client_singleton: anthropic.Anthropic | None = None` (lazy init module-scope, cold start budget — cache key fetch + SDK init)
@@ -544,7 +544,7 @@ class DinnerAdvisorResponse(BaseModel):
 
 ---
 
-### Step 4: Cache layer — `ADVISOR_CACHE#dinner#{today}` w DDB → impl `service.get_cached_or_call`
+### Step 4: Cache layer — `ADVISOR_CACHE#dinner#{today}` w DDB → impl `service.get_cached_or_call` ✅ shipped (commit 4f6e40d — cache lookup z TTL guard, write z DDB native TTL na `ttl` attribute, force=True bypass)
 - **Modyfikuje** `apps/api/handlers/advisor_dinner/service.py`:
   - `_cache_key(today: date) -> tuple[str, str]` — `(f"USER#{user_id}", f"ADVISOR_CACHE#dinner#{today.isoformat()}")` dla DDB
   - `get_cached_or_call(user_id: str, today: date, *, force: bool, notes: str | None) -> DinnerAdvisorResponse`:
@@ -568,7 +568,7 @@ class DinnerAdvisorResponse(BaseModel):
 
 ---
 
-### Step 5: Tests — happy + cache + force + 503 + retry + PK isolation → tworzy `apps/api/tests/handlers/advisor_dinner/`
+### Step 5: Tests — happy + cache + force + 503 + retry + PK isolation → tworzy `apps/api/tests/handlers/advisor_dinner/` ✅ shipped (commit 8e2dd67 — 23 tests pass, 117 total)
 - **Tworzy:**
   - `apps/api/tests/handlers/advisor_dinner/__init__.py`
   - `apps/api/tests/handlers/advisor_dinner/conftest.py` — fixtures:
@@ -599,7 +599,7 @@ class DinnerAdvisorResponse(BaseModel):
 
 ---
 
-### Step 6: Lambda + API GW route + IAM → modyfikuje `infrastructure/terraform/main.tf` + `apps/api/scripts/build.py`
+### Step 6: Lambda + API GW route + IAM → modyfikuje `infrastructure/terraform/main.tf` + `apps/api/scripts/build.py` ✅ shipped (commit b7205e1 — module advisor_dinner 1024MB/30s, POST /api/advisor/dinner route, IAM DDB+SSM least-privilege. `scripts/build.py` autodiscovery — brak zmiany potrzebna)
 - **Modyfikuje** `apps/api/scripts/build.py`:
   - Add `advisor_dinner` do listy handlers do build (jeśli list-driven). Build produkuje `dist/advisor_dinner.zip` z deps Anthropic SDK (~25MB unzipped — sprawdź pre-merge że pod 50MB Lambda quota).
 - **Modyfikuje** `infrastructure/terraform/main.tf`:
@@ -686,7 +686,7 @@ class DinnerAdvisorResponse(BaseModel):
 
 ---
 
-### Step 7: Cost guard CloudWatch alarm → modyfikuje `infrastructure/terraform/main.tf` (lub nowy `cloudwatch.tf`)
+### Step 7: Cost guard CloudWatch alarm → modyfikuje `infrastructure/terraform/main.tf` (lub nowy `cloudwatch.tf`) ✅ shipped (commit b6718dc — `cloudwatch.tf` z 2 metric filters + alarm 1.5M output tokens/day, MVP bez SNS)
 - **Tworzy/Modyfikuje:**
   - **Strategia logu** — handler emituje structured log po każdym Anthropic call: `logger.info("anthropic_call", extra={"input_tokens": resp.usage.input_tokens, "output_tokens": resp.usage.output_tokens, "cache_read_tokens": resp.usage.cache_read_input_tokens, "model": "claude-haiku-4-5"})`. Anthropic SDK zwraca `usage` w response — używamy.
   - **Step 7.1: Handler instrumentation** — w `handlers/advisor_dinner/handler.py` po `call_advisor`: extract `usage` z response (przez wrapper w `service.call_advisor` zwracający `tuple[response, usage_dict]` lub atrybut na response). Log `input_tokens`, `output_tokens`, `cache_read_input_tokens`, `cache_creation_input_tokens` w structured JSON.
