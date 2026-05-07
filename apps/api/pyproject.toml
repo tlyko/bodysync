@@ -1,0 +1,79 @@
+[project]
+name = "bodysync-api"
+version = "0.0.0"
+description = "bodysync.pl Lambda backend (Python 3.12 ARM64)"
+requires-python = "~=3.12"
+readme = "README.md"
+
+# NOTE: prod deps live in handlers/{fn}/requirements.txt (per ADR-002).
+# This `dependencies` array stays empty — the package itself doesn't ship
+# anything to runtime. Only dev tooling lives in [project.optional-dependencies].
+dependencies = []
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "moto[dynamodb,ssm]>=5.0",
+    "responses>=0.25",
+    "ruff>=0.7",
+    "mypy>=1.13",
+    # `pip` w dev deps, bo `uv venv` nie zainstaluje go domyślnie a
+    # scripts/build.py używa `python -m pip install --target` (działa
+    # tak samo w uv venv lokalnie i w setup-python venv w GHA).
+    "pip>=25.0",
+    # Mirror prod deps so type checking sees them; pinning loose because
+    # they're test-time only.
+    "pydantic>=2.10",
+    "PyJWT>=2.9",
+    "google-auth>=2.35",
+    "boto3>=1.35",
+    "boto3-stubs[dynamodb,ssm]>=1.35",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["shared*", "handlers*"]
+exclude = ["tests*", "scripts*", "dist*"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["dist", ".venv"]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "UP",  # pyupgrade
+    "SIM", # flake8-simplify
+    "N",   # pep8-naming
+]
+ignore = [
+    "E501",  # line length (ruff format handles)
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["N802"]  # test_X funcs
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+exclude = ["dist", ".venv", "tests"]
+
+[[tool.mypy.overrides]]
+module = ["google.*", "moto.*", "responses.*"]
+ignore_missing_imports = true
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+filterwarnings = [
+    "error",
+    "ignore::DeprecationWarning:botocore.*",
+]
