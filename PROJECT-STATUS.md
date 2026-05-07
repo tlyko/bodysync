@@ -48,7 +48,25 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 
 ## Open PRs
 
-`gh pr list` — TBD na razie nic.
+`gh pr list` — żadnych otwartych w danej chwili.
+
+## Aktywny sprint — Sprint 6 (per ADR-007)
+
+Chat assistant + RAG. Refactor `advisor_dinner` → `advisor_chat`, multi-turn z 24h DDB TTL, plain POST + prompt caching, RAG przez FAISS+S3+OpenAI embeddings, persona "asystent dietetyczny z biblioteki Lidla/Biedronki" (~150-200 przepisów z 5 PDFów w `samples/recipes/`).
+
+**Strategia delivery — 2 PRy incremental (owner zaakceptował 2026-05-07):**
+- **PR1 — Sprint 6.1 — Chat refactor (~5h)** — chat działa bez RAG, generic Haiku knowledge
+- **PR2 — Sprint 6.2 — RAG (seed + retrieval, ~9-10h)** — dodaje konkretne przepisy do prompt context
+
+**Pre-req DONE:**
+- ✅ Anthropic key w SSM `/bodysync/anthropic/api_key`
+- ✅ OpenAI key w SSM `/bodysync/openai/api_key`
+- ✅ ADR-006 superseded by ADR-007 (PR #55)
+- ✅ Sprint 8 (recipe pipeline) merged into Sprint 6
+
+**Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2 (planner output in progress).
+
+**5 OPEN questions z ADR-007:** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
 
 ## Active backlog
 
