@@ -275,6 +275,70 @@ def test_workouts_silently_dropped(dynamodb_table: Any) -> None:
 
 
 @pytest.mark.usefixtures("ssm_params")
+def test_s3_archive_on_success(dynamodb_table: Any, s3_bucket: Any) -> None:
+    """Po pomyślnym ingest raw body ląduje w S3 pod expected key prefix."""
+    from handlers.health_webhook import handler as h
+
+    payload = _load_minimal_payload()
+    result = h.handler(_event(payload), _FakeContext())
+    assert result["statusCode"] == 200
+
+    objects = s3_bucket.list_objects_v2(
+        Bucket="bodysync-data-test-bucket",
+        Prefix="raw/health-auto-export/tomek/",
+    )
+    contents = objects.get("Contents", [])
+    assert len(contents) == 1
+    key = contents[0]["Key"]
+    # raw/health-auto-export/tomek/YYYY/MM/DD/{iso}.json
+    assert key.startswith("raw/health-auto-export/tomek/")
+    assert key.endswith(".json")
+
+    # Body == raw JSON request
+    obj = s3_bucket.get_object(Bucket="bodysync-data-test-bucket", Key=key)
+    body = obj["Body"].read().decode("utf-8")
+    assert json.loads(body) == payload
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_s3_archive_failure_does_not_block_ingest(
+    dynamodb_table: Any, s3_bucket: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """S3 outage → handler i tak zwraca 200 i przepuszcza ingest do DDB."""
+    from shared import s3 as _s3
+
+    def _boom(*_args: Any, **_kwargs: Any) -> None:
+        raise RuntimeError("simulated S3 outage")
+
+    monkeypatch.setattr(_s3, "archive_raw_payload", _boom)
+
+    from handlers.health_webhook import handler as h
+
+    payload = _load_minimal_payload()
+    result = h.handler(_event(payload), _FakeContext())
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    # Ingest mimo S3 fail
+    assert body["received"] == 3
+    assert body["stored"] == 3
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_s3_archive_skipped_without_bucket_env(
+    dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Brak `RAW_BUCKET_NAME` → log error, ingest dalej leci, brak crash."""
+    monkeypatch.delenv("RAW_BUCKET_NAME", raising=False)
+
+    from handlers.health_webhook import handler as h
+
+    payload = _load_minimal_payload()
+    result = h.handler(_event(payload), _FakeContext())
+    assert result["statusCode"] == 200
+    assert json.loads(result["body"])["stored"] == 3
+
+
+@pytest.mark.usefixtures("ssm_params")
 def test_warsaw_local_date_grouping(dynamodb_table: Any) -> None:
     """Punkt z 2026-05-06 01:30 +0200 → SK z 2026-05-06 (Warsaw local),
     NIE 2026-05-05 (UTC by sygestionał wczorajszy dzień)."""
