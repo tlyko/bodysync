@@ -42,7 +42,17 @@ def _response(status: int, body: dict[str, Any], cookie: str | None = None) -> d
 
 
 def _build_cookie(token: str) -> str:
-    secure = os.environ.get("ENV", "prod") != "local"
+    """Build Set-Cookie header value.
+
+    W prod cookie ma `Domain=.bodysync.pl` żeby był współdzielony między
+    `bodysync.pl` (frontend) a `api.bodysync.pl` (backend) — JWT session
+    z POST /api/auth/google trafia do same-parent cookie store i jest
+    wysyłany przez fetch z frontu.
+
+    W local (np. wsparcie dla Vite proxy do localhost API) — Domain
+    pominięte (cookie per-host).
+    """
+    is_prod = os.environ.get("ENV", "prod") != "local"
     parts = [
         f"{COOKIE_NAME}={token}",
         "Path=/",
@@ -50,8 +60,9 @@ def _build_cookie(token: str) -> str:
         "HttpOnly",
         "SameSite=Lax",
     ]
-    if secure:
+    if is_prod:
         parts.append("Secure")
+        parts.append("Domain=.bodysync.pl")
     return "; ".join(parts)
 
 
