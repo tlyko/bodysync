@@ -72,3 +72,68 @@ resource "aws_lambda_permission" "google_auth_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# Sprint 3 — Apple Health webhook. POST /api/health/webhook,
+# Bearer auth (per-user secret w SSM, server resolves user_id po hmac match).
+module "health_webhook" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "health-webhook"
+  source_zip    = "${path.module}/../../apps/api/dist/health_webhook.zip"
+  handler       = "handlers.health_webhook.handler.handler"
+  memory_size   = 512
+  timeout       = 10
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Per CLAUDE.md "Reguła PK isolation" + sec audit H5 — IAM jako druga
+      # linia obrony przy PK injection. health_webhook pisze tylko BIOMETRY#*
+      # pod USER#* PK, tak samo jak google_auth.
+      Sid      = "DDBWriteBiometry"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadHaeWebhookSecrets"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/health-auto-export/webhook_secret_tomek",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/health-auto-export/webhook_secret_partner",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "health_webhook" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.health_webhook.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "health_webhook" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/health/webhook"
+  target    = "integrations/${aws_apigatewayv2_integration.health_webhook.id}"
+}
+
+resource "aws_lambda_permission" "health_webhook_apigw" {
+  statement_id  = "AllowAPIGWInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.health_webhook.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
