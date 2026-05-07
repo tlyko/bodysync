@@ -117,6 +117,9 @@ BPM_UNITS: set[str | None] = {"count/min", "bpm", None}
 GRAM_UNITS: set[str | None] = {"g", "gram", "grams", None}
 KG_UNITS: set[str | None] = {"kg", "kilogram", "kilograms", None}
 PCT_UNITS: set[str | None] = {"%", "percent", None}
+# BMI to dimensionless number — Apple Health/HAE wysyła `units: "count"`
+# albo puste/None. Fail-loud na "kg"/"%"/inne (silent corruption guard).
+BMI_UNITS: set[str | None] = {"count", "", None}
 
 
 def _normalize_units(units: str | None) -> str | None:
@@ -407,6 +410,14 @@ METRIC_HANDLERS: dict[str, MetricHandler] = {
     ),
     "body_fat_percentage": _make_scalar_upsert(
         "body_fat", "pct", allowed_units=PCT_UNITS, metric_name="body_fat_percentage"
+    ),
+    # Xiaomi Mi Home → Apple Zdrowie sync — masa beztłuszczowa + BMI.
+    # Snapshot last-writer-wins (1 measurement per pomiar wagą).
+    "lean_body_mass": _make_scalar_upsert(
+        "lean_body_mass", "kg", allowed_units=KG_UNITS, metric_name="lean_body_mass"
+    ),
+    "body_mass_index": _make_scalar_upsert(
+        "bmi", "value", allowed_units=BMI_UNITS, metric_name="body_mass_index"
     ),
 }
 

@@ -698,3 +698,217 @@ def test_heart_rate_replay_idempotent(dynamodb_table: Any, ssm_params: None) -> 
     second = h.handler(_event(payload), _FakeContext())
     # Replay tego samego HR window = NOOP
     assert json.loads(second["body"])["stored"] == 0
+
+
+# ─── lean_body_mass + body_mass_index (Xiaomi Mi Home → Apple Zdrowie) ────
+
+
+def test_lean_body_mass(dynamodb_table: Any, ssm_params: None) -> None:
+    """Snapshot — masa beztłuszczowa w kg, SK bez timestamp."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "lean_body_mass",
+                    "units": "kg",
+                    "data": [
+                        {
+                            "qty": 65.3,
+                            "date": "2026-05-06 07:30:00 +0200",
+                            "source": "Mi Body Composition Scale",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    assert json.loads(result["body"])["stored"] == 1
+
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    item = _by_sk(items, "#lean_body_mass")
+    assert item is not None
+    assert item["SK"] == "BIOMETRY#2026-05-06#lean_body_mass"
+    assert float(item["kg"]) == 65.3
+
+
+def test_lean_body_mass_overwrite(dynamodb_table: Any, ssm_params: None) -> None:
+    """Snapshot last-writer-wins: drugi pomiar (65.5 kg) nadpisuje pierwszy
+    (65.3 kg). Items count = 1 po obu callach."""
+    from handlers.health_webhook import handler as h
+
+    def _payload(qty: float) -> dict[str, Any]:
+        return {
+            "data": {
+                "metrics": [
+                    {
+                        "name": "lean_body_mass",
+                        "units": "kg",
+                        "data": [
+                            {
+                                "qty": qty,
+                                "date": "2026-05-06 07:30:00 +0200",
+                                "source": "Mi Body Composition Scale",
+                            }
+                        ],
+                    }
+                ],
+                "workouts": [],
+            }
+        }
+
+    h.handler(_event(_payload(65.3)), _FakeContext())
+    h.handler(_event(_payload(65.5)), _FakeContext())
+
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues={
+            ":pk": "USER#tomek",
+            ":sk": "BIOMETRY#2026-05-06#lean_body_mass",
+        },
+    )["Items"]
+    assert len(items) == 1
+    assert float(items[0]["kg"]) == 65.5
+
+
+def test_body_mass_index(dynamodb_table: Any, ssm_params: None) -> None:
+    """BMI snapshot — dimensionless `value`, SK bez timestamp.
+    Apple Health wysyła `units: "count"` dla BMI (HKQuantityTypeIdentifierBodyMassIndex)."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "body_mass_index",
+                    "units": "count",
+                    "data": [
+                        {
+                            "qty": 23.4,
+                            "date": "2026-05-06 07:30:00 +0200",
+                            "source": "Mi Body Composition Scale",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    assert json.loads(result["body"])["stored"] == 1
+
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    item = _by_sk(items, "#bmi")
+    assert item is not None
+    assert item["SK"] == "BIOMETRY#2026-05-06#bmi"
+    assert float(item["value"]) == 23.4
+
+
+def test_body_mass_index_no_units(dynamodb_table: Any, ssm_params: None) -> None:
+    """BMI dimensionless — HAE może wysyłać bez `units` (None lub puste)."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "body_mass_index",
+                    "data": [
+                        {
+                            "qty": 23.4,
+                            "date": "2026-05-06 07:30:00 +0200",
+                            "source": "Mi Body Composition Scale",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    assert json.loads(result["body"])["stored"] == 1
+
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    item = _by_sk(items, "#bmi")
+    assert item is not None
+    assert float(item["value"]) == 23.4
+
+
+def test_lean_body_mass_invalid_unit(dynamodb_table: Any, ssm_params: None) -> None:
+    """Fail-loud: `units="lb"` dla lean_body_mass → ValidationError, items=0."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "lean_body_mass",
+                    "units": "lb",
+                    "data": [
+                        {
+                            "qty": 144.0,
+                            "date": "2026-05-06 07:30:00 +0200",
+                            "source": "Mi Body Composition Scale",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    body = json.loads(result["body"])
+    assert result["statusCode"] == 200
+    assert body["received"] == 1
+    assert body["stored"] == 0
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert len(items) == 0
+
+
+def test_body_mass_index_invalid_unit(dynamodb_table: Any, ssm_params: None) -> None:
+    """Fail-loud: `units="kg"` dla BMI (dimensionless) → ValidationError, items=0."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "body_mass_index",
+                    "units": "kg",
+                    "data": [
+                        {
+                            "qty": 23.4,
+                            "date": "2026-05-06 07:30:00 +0200",
+                            "source": "Mi Body Composition Scale",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    body = json.loads(result["body"])
+    assert result["statusCode"] == 200
+    assert body["received"] == 1
+    assert body["stored"] == 0
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert len(items) == 0
