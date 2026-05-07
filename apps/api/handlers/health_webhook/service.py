@@ -29,6 +29,8 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
+from pydantic import ValidationError
+
 from handlers.health_webhook.schemas import (
     HAEHeartRatePoint,
     HAEPayload,
@@ -416,10 +418,12 @@ def ingest(user_id: str, payload: HAEPayload, *, ingested_at: datetime) -> Inges
             result.received += 1
             try:
                 stored = handler(user_id, raw_point, ingested_at, metric.units)
-            except Exception:
-                # Pojedynczy bad point nie wywala batcha — log + continue.
-                # Pełny payload retried przez HAE byłby gorszy (storm
-                # tych samych błędów).
+            except (ValueError, ValidationError):
+                # Bad data per point (zły schemat, nieznane units) — log + continue.
+                # Replay całego payloadu byłby gorszy — storm tych samych błędów.
+                # Transient errors (boto3 ClientError, ProvisionedThroughputExceededException)
+                # NIE są łapane — bubble do handlera → 5xx → HAE retry → idempotent
+                # replay (multi-point timestamp w SK).
                 logger.exception(
                     "hae_point_ingest_failed",
                     extra={"metric_name": metric.name, "user_id": user_id},

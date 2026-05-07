@@ -317,8 +317,13 @@ def test_invalid_units_fail_loud_per_metric(
 
 
 def test_kj_replay_idempotent_after_conversion(dynamodb_table: Any, ssm_params: None) -> None:
-    """Replay payloadu z kJ → drugi call stored=0 (konwersja deterministyczna,
-    SK po timestamp identyczny)."""
+    """Replay payloadu z kJ → drugi call stored=0.
+
+    Idempotency po SK (timestamp w SK identyczny dla obu call'ów). Wartość
+    `kcal` w atrybutach też jest deterministic — `qty / 4.184` na tym samym
+    floacie zwraca ten sam wynik (Python float division reproducible per
+    architecture, dla identycznego wejścia zawsze identyczne wyjście).
+    """
     from handlers.health_webhook import handler as h
 
     payload = {
@@ -341,8 +346,63 @@ def test_kj_replay_idempotent_after_conversion(dynamodb_table: Any, ssm_params: 
     }
     first = h.handler(_event(payload), _FakeContext())
     assert json.loads(first["body"])["stored"] == 1
+
+    items_after_first = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert len(items_after_first) == 1
+    kcal_first = items_after_first[0]["kcal"]
+
     second = h.handler(_event(payload), _FakeContext())
     assert json.loads(second["body"])["stored"] == 0
+
+    items_after_second = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert len(items_after_second) == 1
+    # Storage value identyczny — żadnego drift'u przy replay
+    assert items_after_second[0]["kcal"] == kcal_first
+
+
+@pytest.mark.parametrize(
+    "units_variant",
+    ["kJ", "KJ", "kj", "kJ ", " kJ", "Kilojoule", "kilojoule", "KILOJOULE"],
+)
+def test_units_case_insensitive_kj_conversion(
+    units_variant: str, dynamodb_table: Any, ssm_params: None
+) -> None:
+    """`_normalize_units` (lower + strip) traktuje case/whitespace warianty kJ
+    identycznie. Forward-compat na HAE iOS quirks ("kJ "/" KJ"/etc.).
+    """
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "dietary_energy",
+                    "units": units_variant,
+                    "data": [
+                        {
+                            "qty": 4184.0,  # exactly 1000 kcal
+                            "date": "2026-05-06 14:00:00 +0200",
+                            "source": "Fitatu",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    h.handler(_event(payload), _FakeContext())
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert len(items) == 1
+    assert abs(float(items[0]["kcal"]) - 1000.0) < 0.01
 
 
 def test_steps_multi_point_hourly_buckets(dynamodb_table: Any, ssm_params: None) -> None:
