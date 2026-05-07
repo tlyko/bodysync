@@ -83,7 +83,15 @@ def _copy_sources(handler_dir: Path, target: Path) -> None:
 
     handler_pkg = handlers_pkg / handler_name
     handler_pkg.mkdir(exist_ok=True)
-    for src in handler_dir.glob("*.py"):
+    # Kopiujemy *.py + non-code assets (system_prompt.txt, json fixtures, itp).
+    # Wykluczamy `requirements.txt` (deps install) i `__pycache__` (build cache).
+    for src in handler_dir.iterdir():
+        if not src.is_file():
+            continue
+        if src.name == "requirements.txt":
+            continue
+        if src.suffix == ".pyc":
+            continue
         shutil.copy2(src, handler_pkg / src.name)
     (handler_pkg / "__init__.py").touch()  # idempotent — handler_dir może już mieć
 
