@@ -24,10 +24,20 @@ module "google_auth" {
 
   extra_iam_statements = [
     {
+      # Sec audit H5 — defense in depth dla CLAUDE.md "Reguła PK isolation".
+      # Bez condition Lambda mogłaby pisać/czytać dowolny PK (EVENT#strava
+      # idempotency, RECIPES, profiles innego usera) jeśli przyszły bug
+      # w handlerze pozwoli na PK injection. LeadingKeys=USER#* zamyka to
+      # na poziomie IAM — kod może mieć błąd, IAM odrzuci wywołanie.
       Sid      = "DDBWriteUserProfile"
       Effect   = "Allow"
       Action   = ["dynamodb:GetItem", "dynamodb:PutItem"]
       Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
     },
     {
       Sid    = "ReadAuthSecrets"
