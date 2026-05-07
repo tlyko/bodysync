@@ -34,6 +34,6 @@ def verify_jwt(token: str) -> dict[str, Any]:
     """Decode + verify signature + verify exp. Returns payload, raises AuthError."""
     secret = get_param(JWT_SSM_PARAM)
     try:
-        return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])  # type: ignore[no-any-return]
+        return jwt.decode(token, secret, algorithms=[JWT_ALGORITHM])
     except jwt.InvalidTokenError as e:
         raise AuthError(f"invalid jwt: {e}") from e

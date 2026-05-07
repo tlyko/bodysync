@@ -76,9 +76,7 @@ def _copy_sources(handler_dir: Path, target: Path) -> None:
 
 
 def _walk_files(root: Path) -> list[Path]:
-    files = [
-        p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts
-    ]
+    files = [p for p in root.rglob("*") if p.is_file() and "__pycache__" not in p.parts]
     return sorted(files, key=lambda p: p.relative_to(root).as_posix())
 
 
@@ -123,10 +121,7 @@ def discover_handlers() -> list[str]:
 
 
 def main() -> None:
-    if len(sys.argv) > 1:
-        handlers = sys.argv[1:]
-    else:
-        handlers = discover_handlers()
+    handlers = sys.argv[1:] if len(sys.argv) > 1 else discover_handlers()
     if not handlers:
         print("no handlers to build")
         return

@@ -123,9 +123,7 @@ def test_401_invalid_google_token() -> None:
     from handlers.google_auth import handler as h
 
     with _patch_google(verified_email=None):
-        result = h.handler(
-            _event({"id_token": "garbage.token.here"}), _FakeContext()
-        )
+        result = h.handler(_event({"id_token": "garbage.token.here"}), _FakeContext())
     assert result["statusCode"] == 401
 
 
@@ -145,14 +143,12 @@ def test_pk_isolation_two_users(dynamodb_table: Any) -> None:
     from handlers.google_auth import handler as h
 
     with _patch_google("alice@example.com", name="Alice"):
-        h.handler(_event({"id_token": "alice.token"}), _FakeContext())
+        h.handler(_event({"id_token": "alice.fake.token"}), _FakeContext())
 
     with _patch_google("bob@example.com", name="Bob"):
-        h.handler(_event({"id_token": "bob.token"}), _FakeContext())
+        h.handler(_event({"id_token": "bob.fake.token"}), _FakeContext())
 
-    alice = dynamodb_table.get_item(Key={"PK": "USER#alice", "SK": "PROFILE"}).get(
-        "Item"
-    )
+    alice = dynamodb_table.get_item(Key={"PK": "USER#alice", "SK": "PROFILE"}).get("Item")
     bob = dynamodb_table.get_item(Key={"PK": "USER#bob", "SK": "PROFILE"}).get("Item")
 
     assert alice is not None and bob is not None

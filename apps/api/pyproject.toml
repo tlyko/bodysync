@@ -17,6 +17,10 @@ dev = [
     "responses>=0.25",
     "ruff>=0.7",
     "mypy>=1.13",
+    # `pip` w dev deps, bo `uv venv` nie zainstaluje go domyślnie a
+    # scripts/build.py używa `python -m pip install --target` (działa
+    # tak samo w uv venv lokalnie i w setup-python venv w GHA).
+    "pip>=25.0",
     # Mirror prod deps so type checking sees them; pinning loose because
     # they're test-time only.
     "pydantic>=2.10",
