@@ -38,9 +38,9 @@
       },
       {
         "name": "active_energy",
-        "units": "kcal",
+        "units": "kJ",
         "data": [
-          { "qty": 487.3, "date": "2026-05-06 23:59:59 +0200", "source": "Apple Watch" }
+          { "qty": 2038.864, "date": "2026-05-06 23:59:59 +0200", "source": "Apple Watch" }
         ]
       },
       {

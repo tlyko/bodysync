@@ -107,12 +107,13 @@ def test_steps(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]
 
 
 def test_active_energy(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
-    """active_energy cumulative — SK z timestamp, attrs `kcal`."""
+    """active_energy cumulative — SK z timestamp, fixture w kJ → DDB w kcal."""
     _, items = full_payload_response
     item = _by_sk(items, "#kcal_active#")
     assert item is not None
     assert item["SK"].startswith("BIOMETRY#2026-05-06#kcal_active#")
-    assert float(item["kcal"]) == 487.3
+    # fixture qty=2038.864 kJ → / 4.184 = 487.3 kcal
+    assert abs(float(item["kcal"]) - 487.3) < 0.01
 
 
 def test_basal_energy(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
@@ -210,6 +211,138 @@ def test_sleep_omits_none_fields(dynamodb_table: Any, ssm_params: None) -> None:
     assert "rem" not in sleep
     assert "inBedStart" not in sleep
     assert float(sleep["inBed"]) == 7.5
+
+
+@pytest.mark.parametrize(
+    "metric_name,short_sk,units,raw_qty,expected_kcal",
+    [
+        # kJ → kcal
+        ("active_energy", "#kcal_active#", "kJ", 2038.864, 487.3),
+        ("basal_energy_burned", "#kcal_basal#", "kJ", 7291.8752, 1742.8),
+        ("dietary_energy", "#kcal_in#", "kJ", 9794.744, 2341.0),
+        # kcal passthrough
+        ("active_energy", "#kcal_active#", "kcal", 487.3, 487.3),
+        ("basal_energy_burned", "#kcal_basal#", "kcal", 1742.8, 1742.8),
+        ("dietary_energy", "#kcal_in#", "kcal", 2341.0, 2341.0),
+    ],
+)
+def test_energy_unit_conversion_kj_to_kcal(
+    metric_name: str,
+    short_sk: str,
+    units: str,
+    raw_qty: float,
+    expected_kcal: float,
+    dynamodb_table: Any,
+    ssm_params: None,
+) -> None:
+    """Energy mappery konwertują kJ→kcal (HealthKit SI base unit).
+
+    Driving evidence: live DDB 2026-05-07 kcal_in=3594.89 (raw kJ) / 4.184 =
+    859 kcal = match Apple Health UI.
+    """
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": metric_name,
+                    "units": units,
+                    "data": [
+                        {
+                            "qty": raw_qty,
+                            "date": "2026-05-06 12:00:00 +0200",
+                            "source": "Apple Watch",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    h.handler(_event(payload), _FakeContext())
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    item = _by_sk(items, short_sk)
+    assert item is not None
+    assert abs(float(item["kcal"]) - expected_kcal) < 0.01
+
+
+@pytest.mark.parametrize(
+    "metric_name,bad_units",
+    [
+        ("active_energy", "watts"),
+        ("basal_energy_burned", "joules"),
+        ("dietary_energy", "BTU"),
+        ("protein", "oz"),
+        ("total_fat", "lb"),
+        ("carbohydrates", "ounce"),
+        ("weight_body_mass", "lb"),
+        ("step_count", "miles"),
+    ],
+)
+def test_invalid_units_fail_loud_per_metric(
+    metric_name: str, bad_units: str, dynamodb_table: Any, ssm_params: None
+) -> None:
+    """Forward-compat fail-loud: unknown unit dla danej metryki = ValueError
+    w mapperze, point pominięty (handler dalej zwraca 200, inne metryki leca).
+    """
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": metric_name,
+                    "units": bad_units,
+                    "data": [{"qty": 100, "date": "2026-05-06 12:00:00 +0200", "source": "iPhone"}],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    body = json.loads(result["body"])
+    assert result["statusCode"] == 200
+    # Bad units → mapper rzuca, nie zapisuje
+    assert body["received"] == 1
+    assert body["stored"] == 0
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert len(items) == 0
+
+
+def test_kj_replay_idempotent_after_conversion(dynamodb_table: Any, ssm_params: None) -> None:
+    """Replay payloadu z kJ → drugi call stored=0 (konwersja deterministyczna,
+    SK po timestamp identyczny)."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "dietary_energy",
+                    "units": "kJ",
+                    "data": [
+                        {
+                            "qty": 3594.89,
+                            "date": "2026-05-06 14:00:00 +0200",
+                            "source": "Fitatu",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    first = h.handler(_event(payload), _FakeContext())
+    assert json.loads(first["body"])["stored"] == 1
+    second = h.handler(_event(payload), _FakeContext())
+    assert json.loads(second["body"])["stored"] == 0
 
 
 def test_steps_multi_point_hourly_buckets(dynamodb_table: Any, ssm_params: None) -> None:
