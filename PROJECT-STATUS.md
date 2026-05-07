@@ -58,11 +58,13 @@ Chat assistant + RAG. Refactor `advisor_dinner` → `advisor_chat`, multi-turn z
 - **PR1 — Sprint 6.1 — Chat refactor (~5h)** — chat działa bez RAG, generic Haiku knowledge
 - **PR2 — Sprint 6.2 — RAG (seed + retrieval, ~9-10h)** — dodaje konkretne przepisy do prompt context
 
-**Pre-req DONE:**
-- ✅ Anthropic key w SSM `/bodysync/anthropic/api_key`
-- ✅ OpenAI key w SSM `/bodysync/openai/api_key`
+**Pre-req status:**
+- ⏳ Anthropic key w SSM `/bodysync/anthropic/api_key` — **PLACEHOLDER**, owner musi wpisać real `sk-ant-...` przed smoke test'em (instrukcja: `aws ssm put-parameter --name /bodysync/anthropic/api_key --type SecureString --overwrite --value "sk-ant-..."`)
+- ✅ OpenAI key w SSM `/bodysync/openai/api_key` (do PR2)
 - ✅ ADR-006 superseded by ADR-007 (PR #55)
 - ✅ Sprint 8 (recipe pipeline) merged into Sprint 6
+
+**Bez Anthropic key:** endpoint `/api/advisor/*` zwraca 503 (Sprint 2.5 H2 PLACEHOLDER guard fail-loud) — kod deploy'd OK, smoke test failuje dopóki key nie ustawiony.
 
 **Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2 (planner output in progress).
 
