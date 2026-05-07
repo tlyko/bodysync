@@ -1,4 +1,7 @@
 google-auth==2.35.*
+# google.auth.transport.requests.Request (używane w service.py do verify_oauth2_token)
+# wymaga `requests` jako optional dep — google-auth tego nie pull'uje automatycznie.
+requests==2.32.*
 PyJWT==2.9.*
 pydantic==2.10.*
 boto3==1.35.*
