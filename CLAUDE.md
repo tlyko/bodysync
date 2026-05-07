@@ -76,6 +76,11 @@ bodysync/
   - **Brak `outputs.tf`** chyba że output jest faktycznie konsumowany (cross-module, GHA workflow). ARN role'a → `terraform state show` lub `aws iam get-role`.
   - Moduły (`infrastructure/terraform/modules/X/`) mogą mieć `variables.tf` + `outputs.tf` — to ich kontrakt, nie sprzeczne z ADR-003.
   - Jeden moduł per service (api-gateway, lambda, dynamodb, s3, eventbridge, ssm).
+- **GitHub Actions:**
+  - **Pin każdą action na pełny SHA-1**, NIGDY na tag (`@v4`, `@main`). Tagi są mutable — historia attack'ów supply chain (`tj-actions/changed-files` marzec 2025, `reviewdog` 2025, `eslint-config-prettier` 2024) pokazuje że atakujący przepinają tag pod złośliwy commit. SHA-1 jest immutable.
+  - Format: `uses: owner/action@<40-char-sha> # vX.Y.Z` — komentarz z czytelnym tagiem dla review.
+  - Bump action = jeden commit z nowym SHA. Aktualizacje przez Dependabot (`.github/dependabot.yml`) lub ręcznie: `gh api repos/{owner}/{repo}/commits/{tag} --jq .sha`.
+  - Wyjątek przy `actions/*` (GitHub-owned) — niżej w threat model, ale defaultem pinujemy też.
 - **Endpoint contract:** walidacja inputu (Pydantic), error handling, structured log z `request_id` + `user_id`, bez payloadu w logach
 - **Commits:** konwencjonalne (`feat/fix/chore/infra/refactor/docs`), po polsku albo angielsku — byle konsekwentnie
 - **Branche:** `feat/*`, `fix/*`, `chore/*`. **Brak commitów bezpośrednio do `main`** — tylko PR.
