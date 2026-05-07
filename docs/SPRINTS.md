@@ -21,7 +21,7 @@ Aktualizowany na bieżąco. Sprint 0 = cleanup / ADRs / scaffold (✅). Sprint 1
 
 ---
 
-## Sprint 1 — Faza 0 closeout: Terraform main workspace + GHA + base modules
+## Sprint 1 — Faza 0 closeout: Terraform main workspace + GHA + base modules ✅ shipped
 
 **Effort:** ~4–6h
 **Cel:** `terraform apply` triggered z merge na main przewidywalnie tworzy DDB + S3 + SSM placeholdery + EventBridge cron'y. Drugi `terraform plan` = "No changes".
@@ -37,20 +37,20 @@ Aktualizowany na bieżąco. Sprint 0 = cleanup / ADRs / scaffold (✅). Sprint 1
 - **Step 4** — `infrastructure/terraform/` resources: DDB `bodysync-data` (PK/SK + GSI-1, PITR), S3 `bodysync-data-{account_id}` (versioning + SSE + lifecycle), SSM placeholders (z `lifecycle.ignore_changes = [value]`), EventBridge cron rules (bez targetów).
 
 **Acceptance:**
-- [ ] PR z dummy komentarzem w `infrastructure/terraform/main.tf` triggeruje `terraform-plan` workflow, komentarz z planem widoczny w PR
-- [ ] Merge → `terraform-apply` zielony
-- [ ] `aws dynamodb describe-table --table-name bodysync-data` pokazuje GSI-1 + PITR
-- [ ] `aws ssm get-parameters-by-path --path /bodysync --recursive` zwraca wszystkie placeholdery
-- [ ] Drugi `terraform plan` = "No changes"
-- [ ] `aws iam get-role --role-name syncbody-github-actions` ma trust policy z OIDC
+- [x] PR z dummy komentarzem w `infrastructure/terraform/main.tf` triggeruje `terraform-plan` workflow, komentarz z planem widoczny w PR
+- [x] Merge → `terraform-apply` zielony
+- [x] DDB `bodysync-data` z GSI-1 + PITR (PR #12)
+- [x] SSM placeholdery (11 params, 8 SecureString + 3 String)
+- [x] `terraform plan` = "No changes" po apply
+- [x] OIDC działa, GHA może assume `syncbody-github-actions`
 
 **Follow-up (poza sprintem):**
-- Naming drift: jeśli `syncbody → bodysync` rename ma się zdarzyć — robione osobno (destruktywne), patrz PROJECT-STATUS backlog
-- API GW custom domain `api.bodysync.pl` — czeka na Cloudflare DNS rekord, robione w Sprint 2 albo osobno
+- Naming drift `syncbody → bodysync` rename — destruktywny, osobny PR (backlog PROJECT-STATUS)
+- API GW custom domain `api.bodysync.pl` — czeka na Cloudflare DNS, robione osobno
 
 ---
 
-## Sprint 2 — Faza 0 first endpoint: `/api/auth/google`
+## Sprint 2 — Faza 0 first endpoint: `/api/auth/google` ✅ shipped
 
 **Effort:** ~5–7h
 **Cel:** Google OAuth login działa: POST z `id_token` zwraca JWT cookie, allowlist 2 emaili w SSM. Pierwszy endpoint testowany przez prawdziwy curl po deployu.
@@ -74,16 +74,23 @@ Aktualizowany na bieżąco. Sprint 0 = cleanup / ADRs / scaffold (✅). Sprint 1
 - GHA workflows update — `setup-python@v5` + `cd apps/api && python scripts/build.py` PRZED `terraform plan/apply`
 
 **Acceptance:**
-- [ ] `cd apps/api && pytest -v` zielony (z PK isolation)
-- [ ] `cd apps/api && ruff check . && ruff format --check . && mypy shared/ handlers/`
-- [ ] `cd apps/api && python scripts/build.py` produkuje `dist/google_auth.zip` z deps
-- [ ] PR → plan → merge → apply zielone
-- [ ] `curl -X POST $API_URL/api/auth/google -d '{"id_token":"invalid"}'` → 401 bez exception, log w CloudWatch
-- [ ] Z prawdziwym tokenem (manual): 200 + JWT cookie
+- [x] `pytest -v`: 10/10 zielone (z PK isolation alice+bob)
+- [x] `ruff check + format + mypy strict`: zero issues
+- [x] `python scripts/build.py google_auth`: ~17MB zip z deps + handlers/google_auth/ + shared/
+- [x] PR → plan → merge → apply zielone (po fixach: PR #21 IAM policy, #22 handler path, #23 requests dep)
+- [x] `curl POST /api/auth/google -d '{"id_token":"invalid"}'` → **401** "invalid google token", warm 460ms
+- [x] 400 dla missing/short token + invalid JSON, structured log z `request_id` + `reason`
+- [ ] Real Google token → 200 + JWT cookie (czeka na user — wpisanie SSM secrets)
+
+**Lessons learned (pułapki które nas dogoniły):**
+- ADR-002 build script flatten'ował handler files → `Runtime.ImportModuleError` w Lambda (PR #22 fix: zachowaj `handlers/{name}/` strukturę pakietu)
+- `google.auth.transport.requests` wymaga `requests` jako **explicit** dep, nie auto-pull z `google-auth` (PR #23 fix)
+- Bootstrap policy ograniczała IAM ops do `syncbody-*` prefix; Lambda module tworzył `bodysync-*` → AccessDenied (PR #21 fix: oba prefixy)
+- PR #14 zmergowany do dead brancha PR #13's, replay PR #20 (memory `feedback_pr_base_main.md` żeby się nie powtórzyło)
 
 **Follow-up:**
-- API GW custom domain `api.bodysync.pl` (CF DNS + Terraform `aws_apigatewayv2_domain_name`)
-- ADR jeśli pojawi się decyzja o cookie strategy (HttpOnly Secure SameSite=Lax confirmed)
+- API GW custom domain `api.bodysync.pl` (CF DNS + `aws_apigatewayv2_domain_name`)
+- USER ACTION: wpisać prawdziwe wartości w SSM (jwt secret, google client_id, allowed_emails) + Google OAuth client w Cloud Console
 
 ---
 

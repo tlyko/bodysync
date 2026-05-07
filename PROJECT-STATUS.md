@@ -32,11 +32,12 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Bootstrap Terraform state backend + GHA OIDC | ✅ shipped |
 | `.claude/` setup (agents + commands + skills) | ✅ shipped (port ze sprawdzamszlak, frontmatter, ADR-001) |
 | ADR-001 stack baseline | ✅ shipped (`docs/adr/ADR-001-stack-baseline.md`) |
-| `apps/api/` Lambda scaffold (Python, Pydantic schemas, JWT) | ❌ |
+| `apps/api/` Lambda scaffold (Python, Pydantic schemas, JWT) | ✅ shipped (per ADR-002, pytest 10/10, mypy strict) |
 | `apps/web/` React+Vite scaffold | ✅ shipped (placeholder z dark theme) |
-| DDB single-table + IAM | ❌ |
-| API Gateway HTTP + custom domain | ❌ |
+| DDB single-table + IAM | ✅ shipped (`bodysync-data` PK/SK + GSI-1, PITR, SSE, TTL) |
+| API Gateway HTTP + custom domain | 🟡 endpoint live (`8pyf98ekt2.execute-api.eu-west-1.amazonaws.com`); custom domain `api.bodysync.pl` TODO |
 | Cloudflare Workers binding + `bodysync.pl` custom domain | ✅ shipped |
+| `/api/auth/google` endpoint | ✅ shipped (401 invalid / 400 Pydantic / 500 placeholders w SSM dopóki user nie wpisze) |
 | Apple Health webhook (signature verify + idempotency) | ❌ |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
