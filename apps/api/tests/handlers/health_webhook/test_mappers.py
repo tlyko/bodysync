@@ -98,27 +98,33 @@ def test_resting_heart_rate(
 
 
 def test_steps(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
+    """Steps cumulative — 1 hourly bucket w fixture, SK z timestamp."""
     _, items = full_payload_response
-    item = _by_sk(items, "#steps")
+    item = _by_sk(items, "#steps#")
     assert item is not None
+    assert item["SK"].startswith("BIOMETRY#2026-05-06#steps#")
     assert item["count"] == 8421
 
 
 def test_active_energy(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
+    """active_energy cumulative — SK z timestamp, attrs `kcal`."""
     _, items = full_payload_response
-    item = _by_sk(items, "#kcal_active")
+    item = _by_sk(items, "#kcal_active#")
     assert item is not None
+    assert item["SK"].startswith("BIOMETRY#2026-05-06#kcal_active#")
     assert float(item["kcal"]) == 487.3
 
 
 def test_basal_energy(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
     _, items = full_payload_response
-    item = _by_sk(items, "#kcal_basal")
+    item = _by_sk(items, "#kcal_basal#")
     assert item is not None
+    assert item["SK"].startswith("BIOMETRY#2026-05-06#kcal_basal#")
     assert float(item["kcal"]) == 1742.8
 
 
 def test_weight(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
+    """Snapshot — SK bez timestamp."""
     _, items = full_payload_response
     item = _by_sk(items, "#weight")
     assert item is not None
@@ -130,22 +136,27 @@ def test_body_fat(full_payload_response: tuple[dict[str, Any], list[dict[str, An
     _, items = full_payload_response
     item = _by_sk(items, "#body_fat")
     assert item is not None
+    assert item["SK"] == "BIOMETRY#2026-05-06#body_fat"
     assert float(item["pct"]) == 18.2
 
 
 def test_dietary_energy(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
     _, items = full_payload_response
-    item = _by_sk(items, "#kcal_in")
+    item = _by_sk(items, "#kcal_in#")
     assert item is not None
+    assert item["SK"].startswith("BIOMETRY#2026-05-06#kcal_in#")
     assert int(item["kcal"]) == 2341
 
 
 def test_dietary_macros(full_payload_response: tuple[dict[str, Any], list[dict[str, Any]]]) -> None:
     _, items = full_payload_response
-    protein = _by_sk(items, "#protein")
-    fat = _by_sk(items, "#fat")
-    carbs = _by_sk(items, "#carbs")
+    protein = _by_sk(items, "#protein#")
+    fat = _by_sk(items, "#fat#")
+    carbs = _by_sk(items, "#carbs#")
     assert protein is not None and fat is not None and carbs is not None
+    assert protein["SK"].startswith("BIOMETRY#2026-05-06#protein#")
+    assert fat["SK"].startswith("BIOMETRY#2026-05-06#fat#")
+    assert carbs["SK"].startswith("BIOMETRY#2026-05-06#carbs#")
     assert float(protein["g"]) == 178.5
     assert float(fat["g"]) == 86.4
     assert float(carbs["g"]) == 245.0
@@ -199,6 +210,72 @@ def test_sleep_omits_none_fields(dynamodb_table: Any, ssm_params: None) -> None:
     assert "rem" not in sleep
     assert "inBedStart" not in sleep
     assert float(sleep["inBed"]) == 7.5
+
+
+def test_steps_multi_point_hourly_buckets(dynamodb_table: Any, ssm_params: None) -> None:
+    """Cumulative model: 3 hourly buckets steps → 3 osobne items, każdy z SK timestamp."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "step_count",
+                    "units": "count",
+                    "data": [
+                        {"qty": 300, "date": "2026-05-06 09:00:00 +0200", "source": "iPhone"},
+                        {"qty": 500, "date": "2026-05-06 12:00:00 +0200", "source": "iPhone"},
+                        {"qty": 200, "date": "2026-05-06 18:00:00 +0200", "source": "iPhone"},
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    assert json.loads(result["body"])["stored"] == 3
+
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues={":pk": "USER#tomek", ":sk": "BIOMETRY#2026-05-06#steps#"},
+    )["Items"]
+    assert len(items) == 3
+    counts = sorted(int(i["count"]) for i in items)
+    assert counts == [200, 300, 500]
+
+
+def test_cumulative_replay_idempotent(dynamodb_table: Any, ssm_params: None) -> None:
+    """Każdy z 7 cumulative mapperów: drugi call tego samego payloadu = stored=0."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": metric,
+                    "units": units,
+                    "data": [
+                        {"qty": 100, "date": "2026-05-06 09:00:00 +0200", "source": "Apple Watch"},
+                    ],
+                }
+                for metric, units in [
+                    ("step_count", "count"),
+                    ("active_energy", "kcal"),
+                    ("basal_energy_burned", "kcal"),
+                    ("dietary_energy", "kcal"),
+                    ("protein", "g"),
+                    ("total_fat", "g"),
+                    ("carbohydrates", "g"),
+                ]
+            ],
+            "workouts": [],
+        }
+    }
+    first = h.handler(_event(payload), _FakeContext())
+    assert json.loads(first["body"])["stored"] == 7
+
+    second = h.handler(_event(payload), _FakeContext())
+    assert json.loads(second["body"])["stored"] == 0
 
 
 def test_heart_rate_replay_idempotent(dynamodb_table: Any, ssm_params: None) -> None:

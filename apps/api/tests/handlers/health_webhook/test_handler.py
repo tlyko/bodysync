@@ -68,10 +68,10 @@ def test_happy_path_minimal_payload(dynamodb_table: Any) -> None:
     )["Items"]
     assert len(items) == 3
     sks = sorted(i["SK"] for i in items)
-    # 2 HRV (z timestampem) + 1 steps (bez timestampu)
+    # 2 HRV (z timestampem) + 1 steps (też z timestampem — cumulative model)
     assert sks[0].startswith("BIOMETRY#2026-05-06#hrv#")
     assert sks[1].startswith("BIOMETRY#2026-05-06#hrv#")
-    assert sks[2] == "BIOMETRY#2026-05-06#steps"
+    assert sks[2].startswith("BIOMETRY#2026-05-06#steps#")
 
 
 @pytest.mark.usefixtures("ssm_params")
@@ -200,8 +200,11 @@ def test_400_does_not_leak_user_input() -> None:
 
 @pytest.mark.usefixtures("ssm_params")
 def test_replay_hrv_multipoint_idempotent(dynamodb_table: Any) -> None:
-    """Replay tego samego HRV point = idempotent skip (conditional PutItem
-    na BIOMETRY#date#hrv#timestamp). Steps overwrite (last-writer-wins)."""
+    """Replay całego payloadu = idempotent (Sprint 3.5 cumulative model).
+
+    HRV + steps używają conditional PutItem z timestampem w SK → drugi call
+    zwraca `stored=0` dla wszystkich 3 punktów.
+    """
     from handlers.health_webhook import handler as h
 
     payload = _load_minimal_payload()
@@ -211,10 +214,9 @@ def test_replay_hrv_multipoint_idempotent(dynamodb_table: Any) -> None:
     second = h.handler(_event(payload), _FakeContext())
     body = json.loads(second["body"])
     assert second["statusCode"] == 200
-    # 2 HRV points idempotent → stored=0 (conditional skip)
-    # 1 steps point overwrites → stored=1 (put_item w/o condition zwraca True)
+    # Wszystkie 3 punkty (2 HRV + 1 steps) idempotent po Sprint 3.5
     assert body["received"] == 3
-    assert body["stored"] == 1
+    assert body["stored"] == 0
 
 
 @pytest.mark.usefixtures("ssm_params")
@@ -297,4 +299,4 @@ def test_warsaw_local_date_grouping(dynamodb_table: Any) -> None:
         ExpressionAttributeValues={":pk": "USER#tomek"},
     )["Items"]
     assert len(items) == 1
-    assert items[0]["SK"] == "BIOMETRY#2026-05-06#steps"
+    assert items[0]["SK"].startswith("BIOMETRY#2026-05-06#steps#")
