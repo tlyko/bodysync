@@ -248,6 +248,71 @@ def test_biometry_pk_isolation(dynamodb_table: Any) -> None:
     assert body == {"days": []}
 
 
+@pytest.mark.usefixtures("ssm_params")
+def test_biometry_cumulative_aggregated_to_sum(dynamodb_table: Any) -> None:
+    """Cumulative metrics (steps, kcal_in, etc.) — multi-point hourly buckets
+    z PR #46 sumują się do single dict z `samples` count, nie listy."""
+    from handlers.api_read import handler as h
+
+    today = datetime.now(UTC).date().isoformat()
+    # 3 hourly buckety dla kcal_in
+    for hour, qty in [("09:00", "300.5"), ("13:00", "550.25"), ("19:00", "420.10")]:
+        dynamodb_table.put_item(
+            Item={
+                "PK": "USER#tomek",
+                "SK": f"BIOMETRY#{today}#kcal_in#{today}T{hour}:00+02:00",
+                "kcal": Decimal(qty),
+                "device": "Fitatu",
+                "source": "apple-health",
+            }
+        )
+
+    token = _mint_test_jwt("tomek")
+    result = h.handler(
+        _event_with_cookie("GET /api/biometry", f"bodysync_session={token}"), _FakeContext()
+    )
+    body = json.loads(result["body"])
+    today_metrics = body["days"][0]["metrics"]
+
+    assert "kcal_in" in today_metrics
+    kcal = today_metrics["kcal_in"]
+    assert isinstance(kcal, dict)
+    assert abs(float(kcal["kcal"]) - 1270.85) < 0.01
+    assert kcal["samples"] == 3
+    assert kcal["device"] == "Fitatu"
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_biometry_cumulative_legacy_single_point_still_aggregated(
+    dynamodb_table: Any,
+) -> None:
+    """Defense in depth: legacy single-point cumulative SK (pre-PR-#46) też
+    przechodzi przez aggregation — bez crash, samples=1.
+    """
+    from handlers.api_read import handler as h
+
+    today = datetime.now(UTC).date().isoformat()
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#tomek",
+            "SK": f"BIOMETRY#{today}#steps",  # legacy 3-part SK
+            "count": Decimal("8500"),
+            "device": "iPhone",
+            "source": "apple-health",
+        }
+    )
+
+    token = _mint_test_jwt("tomek")
+    result = h.handler(
+        _event_with_cookie("GET /api/biometry", f"bodysync_session={token}"), _FakeContext()
+    )
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    steps = body["days"][0]["metrics"]["steps"]
+    assert steps["count"] == 8500
+    assert steps["samples"] == 1
+
+
 @pytest.mark.usefixtures("ssm_params", "dynamodb_table")
 def test_unknown_route_404() -> None:
     from handlers.api_read import handler as h
