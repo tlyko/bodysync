@@ -3,11 +3,17 @@
 PK isolation reminder: every read/write MUST scope to `USER#{user_id}` PK
 (or known constant like `RECIPES`, `EVENT#strava`). NEVER pass user-supplied
 PK without validation — see CLAUDE.md "Reguła PK isolation".
+
+Read aggregations (Sprint 3.5):
+- `sum_metric_today` / `sum_metric_in_range` — Query z `begins_with` na
+  `BIOMETRY#{date}#{metric}#`, sum w aplikacji. Brak materialized view
+  (per ADR-006 trade-off — N≤24 items/dzień/metric ≈ 1 RCU per Query).
 """
 
 from __future__ import annotations
 
 import os
+from datetime import date, timedelta
 from decimal import Decimal
 from typing import Any
 
@@ -71,3 +77,57 @@ def query_by_pk(pk: str, sk_prefix: str | None = None) -> list[dict[str, Any]]:
     kwargs["ExpressionAttributeValues"] = expr_values
     resp = _table.query(**kwargs)
     return [dict(item) for item in resp.get("Items", [])]
+
+
+def sum_metric_today(user_id: str, metric_short: str, *, value_attr: str, today: date) -> Decimal:
+    """Suma `value_attr` po wszystkich hourly bucketach dla danego dnia.
+
+    Query: `PK=USER#{user_id} AND begins_with(SK, "BIOMETRY#{today}#{metric_short}#")`.
+    Returns `Decimal(0)` dla pustego setu — caller nie musi sprawdzać `None`.
+
+    Sprint 3.5 design: read-time aggregation, brak materialized view.
+    Dla N≤24 items/dzień/metric (typowy hourly granularity HAE) ≈ 1 RCU
+    per Query. Cache pattern w ADR-006 (advisor on-demand endpoint).
+    """
+    sk_prefix = f"BIOMETRY#{today.isoformat()}#{metric_short}#"
+    resp = _table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :skp)",
+        ExpressionAttributeValues={":pk": f"USER#{user_id}", ":skp": sk_prefix},
+    )
+    total = Decimal("0")
+    for item in resp.get("Items", []):
+        raw = item.get(value_attr)
+        if raw is None:
+            continue
+        # DDB zwraca Decimal; defensywne `Decimal(str(...))` na inne typy.
+        total += raw if isinstance(raw, Decimal) else Decimal(str(raw))
+    return total
+
+
+def sum_metric_in_range(
+    user_id: str,
+    metric_short: str,
+    *,
+    value_attr: str,
+    start: date,
+    end: date,
+) -> dict[str, Decimal]:
+    """Per-day sumy w przedziale `[start..end]` (inclusive).
+
+    Decyzja: prosty per-day loop > single Query z range filter — DDB nie
+    ma `between` na fragment SK, pre-filter w aplikacji jest jaśniejszy.
+    Max 7 dni dla weekly = 7 Query × ~3ms = pomijalne w cold-start budget.
+
+    Returns dict `{date_iso: Decimal}` dla każdego dnia w przedziale
+    (dni bez danych = `Decimal("0")`).
+    """
+    if start > end:
+        raise ValueError(f"start {start} > end {end}")
+    out: dict[str, Decimal] = {}
+    cursor = start
+    while cursor <= end:
+        out[cursor.isoformat()] = sum_metric_today(
+            user_id, metric_short, value_attr=value_attr, today=cursor
+        )
+        cursor += timedelta(days=1)
+    return out
