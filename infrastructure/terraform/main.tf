@@ -146,3 +146,68 @@ resource "aws_lambda_permission" "health_webhook_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# api_read — dispatcher dla GET endpointów frontu (/api/me, /api/biometry).
+# JWT cookie verification (set przez google_auth), DDB query po USER#{id}.
+module "api_read" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "api-read"
+  source_zip    = "${path.module}/../../apps/api/dist/api_read.zip"
+  handler       = "handlers.api_read.handler.handler"
+  memory_size   = 512
+  timeout       = 10
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      Sid      = "DDBReadUserData"
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid      = "ReadJwtSecret"
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret"
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "api_read" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.api_read.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "api_me" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/me"
+  target    = "integrations/${aws_apigatewayv2_integration.api_read.id}"
+}
+
+resource "aws_apigatewayv2_route" "api_biometry" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/biometry"
+  target    = "integrations/${aws_apigatewayv2_integration.api_read.id}"
+}
+
+resource "aws_lambda_permission" "api_read_apigw" {
+  statement_id  = "AllowAPIGWInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.api_read.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
