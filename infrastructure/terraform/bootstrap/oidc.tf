@@ -22,9 +22,16 @@ resource "aws_iam_role" "github_actions" {
       Condition = {
         StringEquals = {
           "token.actions.githubusercontent.com:aud" = "sts.amazonaws.com"
-        }
-        StringLike = {
-          "token.actions.githubusercontent.com:sub" = "repo:${local.github_owner}/${local.github_repo}:*"
+          # Sec audit H4 — `repo:owner/repo:*` było zbyt szerokie, łapało
+          # PR'y z forków, ref'y feature branchy etc. Każdy ref mógł próbować
+          # assume role. Whitelist konkretnych subject patterns:
+          # - main push (terraform-apply)
+          # - pull_request od MAIN repo (nie forków — GHA dla pull_request_target
+          #   z forka dostaje subject `repo:fork-owner/repo:pull_request`)
+          "token.actions.githubusercontent.com:sub" = [
+            "repo:${local.github_owner}/${local.github_repo}:ref:refs/heads/main",
+            "repo:${local.github_owner}/${local.github_repo}:pull_request",
+          ]
         }
       }
     }]
