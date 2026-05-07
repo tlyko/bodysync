@@ -8,6 +8,7 @@ PK without validation — see CLAUDE.md "Reguła PK isolation".
 from __future__ import annotations
 
 import os
+from decimal import Decimal
 from typing import Any
 
 import boto3
@@ -17,6 +18,22 @@ _table_name = os.environ.get("TABLE_NAME", "bodysync-data")
 _table = _resource.Table(_table_name)
 
 
+def _to_dynamodb(value: Any) -> Any:
+    """Konwertuje float → Decimal rekursywnie (DDB nie wspiera float).
+
+    Pydantic models zwracają float dla numeric fields; bez konwersji boto3
+    rzuca `TypeError: Float types are not supported`.
+    """
+    if isinstance(value, float):
+        # str() — Decimal(float) ma rounding issues, str() zachowuje precyzję
+        return Decimal(str(value))
+    if isinstance(value, dict):
+        return {k: _to_dynamodb(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_to_dynamodb(v) for v in value]
+    return value
+
+
 def get_item(pk: str, sk: str) -> dict[str, Any] | None:
     resp = _table.get_item(Key={"PK": pk, "SK": sk}, ConsistentRead=True)
     item = resp.get("Item")
@@ -24,7 +41,7 @@ def get_item(pk: str, sk: str) -> dict[str, Any] | None:
 
 
 def put_item(pk: str, sk: str, attrs: dict[str, Any]) -> None:
-    item = {"PK": pk, "SK": sk, **attrs}
+    item = _to_dynamodb({"PK": pk, "SK": sk, **attrs})
     _table.put_item(Item=item)
 
 
@@ -33,7 +50,7 @@ def put_item_idempotent(pk: str, sk: str, attrs: dict[str, Any]) -> bool:
 
     Used for webhook idempotency tables where a replay must be a no-op.
     """
-    item = {"PK": pk, "SK": sk, **attrs}
+    item = _to_dynamodb({"PK": pk, "SK": sk, **attrs})
     try:
         _table.put_item(
             Item=item,

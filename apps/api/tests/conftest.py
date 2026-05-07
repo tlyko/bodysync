@@ -94,6 +94,18 @@ def ssm_params(dynamodb_table: Any) -> Iterator[None]:
         ),
         Type="String",
     )
+    # HAE webhook secrets per user — handler resolves user_id po
+    # Bearer match. Wartości muszą mieć ≥32 chars (load_secure_secret guard).
+    client.put_parameter(
+        Name="/bodysync/health-auto-export/webhook_secret_tomek",
+        Value="tomek-webhook-secret-aaaaaaaaaaaaaaaa",
+        Type="SecureString",
+    )
+    client.put_parameter(
+        Name="/bodysync/health-auto-export/webhook_secret_partner",
+        Value="partner-webhook-secret-bbbbbbbbbbbbbb",
+        Type="SecureString",
+    )
     # Reset module-level cache so the test's SSM values are read fresh.
     from shared import ssm as _ssm
 
