@@ -78,9 +78,16 @@ resource "aws_iam_role_policy" "github_actions_iam" {
           "iam:UntagPolicy",
           "iam:PassRole",
         ]
+        # `local.project` to legacy literówka "syncbody" (zob. backlog
+        # PROJECT-STATUS — destruktywny rename do bodysync osobno). Główny
+        # workspace IaC tworzy resources z prefixem "bodysync-*" — dopisujemy
+        # oba żeby uniknąć recreate IAM role + reset AWS_ROLE_ARN. Po rename
+        # do bodysync usuwamy "syncbody-*".
         Resource = [
           "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/${local.project}-*",
           "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/${local.project}-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/bodysync-*",
+          "arn:aws:iam::${data.aws_caller_identity.current.account_id}:policy/bodysync-*",
         ]
       },
       {
