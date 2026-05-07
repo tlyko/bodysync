@@ -1,6 +1,8 @@
 # ADR-006 — Advisor: on-demand dinner endpoint vs daily cron
 
-**Status:** Accepted (2026-05-07)
+**Status:** Superseded by [ADR-007](ADR-007-chat-assistant-rag.md) (2026-05-07).
+User feedback (2026-05-07 wieczorem) ujawnił że primary use case to "okno z asystentem dietetycznym z RAG" (multi-turn chat z dostępem do biblioteki przepisów Lidla/Biedronki), nie sztywny single-shot dinner endpoint. Chat + RAG razem, refactor `advisor_dinner` → `advisor_chat`. Endpoint `POST /api/advisor/dinner` znika, zastępuje go `POST /api/advisor/chat`. PR #50 infra (Lambda module, IAM, cost guard) zachowane jako baseline refactoru.
+
 **Owner:** Tomek (`tlyko94@gmail.com`)
 **Supersedes:** Sprint 6 plan w `docs/SPRINTS.md` (`daily cron 21:00 CET → tomorrow_menu`).
 **Blokuje:** Sprint 6 implementację, Sprint 7 frontend (consumer endpointu).
