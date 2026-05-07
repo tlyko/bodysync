@@ -120,7 +120,9 @@ def get_biometry(user_id: str, *, days: int = 7) -> list[BiometryDay]:
             # Bierzemy `device`/`source` z ostatniego point'u (debug info).
             last = buckets[-1] if buckets else {}
             metrics_for_day[metric] = {
-                value_attr: int(total) if total == int(total) else round(total, 4),
+                # Zaokrąglenie do int — dla kcal/g/count ułamki są szumem
+                # (Apple Health UI też pokazuje całkowite).
+                value_attr: round(total),
                 "samples": len(buckets),
                 "device": last.get("device"),
                 "source": last.get("source"),

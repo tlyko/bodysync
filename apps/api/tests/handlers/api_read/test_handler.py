@@ -277,7 +277,8 @@ def test_biometry_cumulative_aggregated_to_sum(dynamodb_table: Any) -> None:
     assert "kcal_in" in today_metrics
     kcal = today_metrics["kcal_in"]
     assert isinstance(kcal, dict)
-    assert abs(float(kcal["kcal"]) - 1270.85) < 0.01
+    # Zaokrąglone do int (300.5 + 550.25 + 420.10 = 1270.85 → 1271)
+    assert kcal["kcal"] == 1271
     assert kcal["samples"] == 3
     assert kcal["device"] == "Fitatu"
 
