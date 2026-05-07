@@ -15,6 +15,7 @@ import json
 from datetime import UTC, datetime
 from typing import Any
 
+from google.auth import exceptions as google_auth_exceptions
 from google.auth.transport import requests as google_requests
 from google.oauth2 import id_token as google_id_token
 
@@ -43,9 +44,11 @@ def _verify_google_token(id_token_str: str) -> dict[str, Any]:
             google_requests.Request(),
             audience=client_id,
         )
-    except (ValueError, Exception) as e:
-        # google-auth raises ValueError for malformed tokens, GoogleAuthError for crypto.
-        # Both → 401.
+    except (ValueError, google_auth_exceptions.GoogleAuthError) as e:
+        # ValueError: malformed token / wrong audience / expired
+        # GoogleAuthError: crypto / network failure during JWKS fetch
+        # Tuple z `Exception` redukowała się do bare Exception i pożerała
+        # SSM/IAM/boto3 błędy, maskując je jako 401 (sec audit C1).
         raise GoogleTokenError(str(e)) from e
 
 

@@ -119,6 +119,27 @@ def test_400_short_token() -> None:
 
 
 @pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_400_validation_does_not_leak_user_input() -> None:
+    """Reflection guard (sec audit C2): error response NIE może zawierać
+    surowego user-supplied value — Pydantic `errors()` zwraca `input`
+    field z payloadem, sanityzujemy do `loc + type` only."""
+    from handlers.google_auth import handler as h
+
+    # Krótki token (Pydantic min_length=10 odrzuci) z markerem łatwym do
+    # wyszukania w response body.
+    secret_marker = "AAAA-LEAK"  # 9 chars — pod min_length=10
+    result = h.handler(_event({"id_token": secret_marker}), _FakeContext())
+
+    assert result["statusCode"] == 400
+    body = json.loads(result["body"])
+    assert secret_marker not in json.dumps(body), "user input wyciekł do response"
+    # Sanity check że details ma sens dla frontu (info o polu, nie value)
+    assert body["details"][0]["loc"] == ["id_token"]
+    assert body["details"][0]["type"] == "string_too_short"
+    assert "input" not in body["details"][0]
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
 def test_401_invalid_google_token() -> None:
     from handlers.google_auth import handler as h
 

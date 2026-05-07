@@ -72,10 +72,15 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     try:
         req = LoginRequest.model_validate(payload)
     except ValidationError as e:
+        # `e.errors()` zawiera `input` field z surowym user-supplied value —
+        # wycieka payload attackera do response (XSS reflection vector dla
+        # frontu który wyświetlałby `details`). Sanityzujemy do `loc + type`
+        # — frontend i tak wie czego brakuje (LoginRequest ma jedno pole).
+        sanitized = [{"loc": err["loc"], "type": err["type"]} for err in e.errors()]
         logger.warning(
             "invalid payload", extra={"request_id": request_id, "handler": "google_auth"}
         )
-        return _response(400, {"error": "invalid payload", "details": e.errors()})
+        return _response(400, {"error": "invalid payload", "details": sanitized})
 
     try:
         body, token = login(req)

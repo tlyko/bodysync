@@ -1,0 +1,22 @@
+# Cloudflare Workers + Static Assets headers (sec audit H6).
+# Format: per-path block. `/*` matches wszystko. `_headers` file kopiowany
+# z `public/` do `dist/` przez Vite, deployed przez wrangler jako asset.
+# https://developers.cloudflare.com/pages/configuration/headers/
+
+/*
+  Content-Security-Policy: default-src 'self'; script-src 'self' https://accounts.google.com/gsi/client; connect-src 'self' https://api.bodysync.pl https://accounts.google.com/gsi/; frame-src https://accounts.google.com/gsi/; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'; upgrade-insecure-requests
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: strict-origin-when-cross-origin
+  Permissions-Policy: camera=(), microphone=(), geolocation=(), payment=(), usb=()
+  Strict-Transport-Security: max-age=31536000; includeSubDomains; preload
+  Cross-Origin-Opener-Policy: same-origin-allow-popups
+  Cross-Origin-Resource-Policy: same-site
+
+# CSP notes:
+#  - script-src `https://accounts.google.com/gsi/client` — Google Identity Services SDK
+#    (Sprint 7 frontend dashboard będzie używał, dziś nieużywane ale headers stałe)
+#  - connect-src `https://accounts.google.com/gsi/` — GIS endpoints dla token verification
+#  - frame-src `https://accounts.google.com/gsi/` — Google Sign-In popup
+#  - style-src 'unsafe-inline' — Vite/React inline style attrs (TODO: nonce-based gdy dashboard scaffold)
+#  - frame-ancestors 'none' — clickjacking protection (zastępuje X-Frame-Options: DENY)
+#  - upgrade-insecure-requests — wymuszenie HTTPS

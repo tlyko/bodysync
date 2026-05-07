@@ -4,7 +4,11 @@ variable "project" {
 
 variable "cors_allow_origins" {
   type    = list(string)
-  default = ["https://bodysync.pl", "http://localhost:5173"]
+  default = ["https://bodysync.pl"]
+  # NIGDY localhost w prod (sec audit H1) — z `allow_credentials=true` to
+  # vector data exfil dla XHR/fetch z dowolnej maszyny w cudzej sieci. Dev
+  # frontend musi używać Vite proxy (`/api → https://api.bodysync.pl`) albo
+  # osobnego staging API GW z osobnym CORS allowlist.
 }
 
 variable "cors_allow_methods" {
