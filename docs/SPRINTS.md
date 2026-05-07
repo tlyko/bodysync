@@ -94,6 +94,33 @@ Aktualizowany na bieżąco. Sprint 0 = cleanup / ADRs / scaffold (✅). Sprint 1
 
 ---
 
+## Sprint 2.5 — Security hardening (✅ shipped)
+
+**Effort:** ~2h
+**Cel:** Zamknąć 2 Critical + 6 High z security audit (2026-05-07) zanim Sprint 3 doda publiczny webhook endpoint = większą attack surface.
+
+**Audit wykonany przez subagent `security`** — pełen sweep `apps/` + `infrastructure/`. Output: 2 Critical + 6 High + 7 Notes.
+
+**Critical (PR #25-26):**
+- **C1** [PR #25] `service.py` exception handling — `except (ValueError, Exception)` redukowało się do bare `Exception`, eat'owało SSM/IAM bugi jako 401. Fix: explicit `(ValueError, GoogleAuthError)`.
+- **C2** [PR #26] `handler.py` ValidationError sanitization — `e.errors()` echo'owało user input do response (XSS reflection vector). Fix: sanityzacja do `loc + type` + regression test.
+
+**High (PR #27-32):**
+- **H1** [PR #28] CORS prod cleanup — `localhost:5173` w `allow_origins` z `allow_credentials=true` to vector data exfil. Fix: domyślny CORS = `["https://bodysync.pl"]` only.
+- **H2** [PR #27] JWT secret guard — `mint_jwt`/`verify_jwt` fail-fast gdy SSM zwraca `"PLACEHOLDER"` lub <32 chars. Bez guard'a każdy mógłby minted JWT podpisać stringiem "PLACEHOLDER" i fałszować user_id.
+- **H3** [PR #29] `iam:PassRole` condition — wydzielony Statement z `iam:PassedToService=lambda.amazonaws.com`. Zamknięty privilege escalation path (GHA → EC2 RunInstances z Lambda role → DDB dump).
+- **H4** [PR #30] OIDC trust subject narrowing — explicit lista `[ref:refs/heads/main, pull_request]` zamiast wildcard `:*`. Nie da się assume z forka ani z arbitrary brancha.
+- **H5** [PR #31] DDB `LeadingKeys = USER#*` — defense in depth dla CLAUDE.md "Reguła PK isolation". IAM odrzuci cross-PK request nawet przy bug'u w handlerze.
+- **H6** [PR #32] Frontend security headers — `apps/web/public/_headers` z CSP (Google Identity ready dla Sprint 7), HSTS, X-Content-Type-Options, Referrer-Policy, frame-ancestors 'none'.
+
+**USER ACTIONS po merge (zrealizowane):**
+- `cd infrastructure/terraform/bootstrap && terraform apply` — 2× (po H3 i po H4) dla in-place IAM policy + trust update na `syncbody-github-actions`.
+- Notatka: `iam:PassedToService` condition zamyka privilege escalation; subject narrowing zamyka cross-branch/cross-fork OIDC abuse.
+
+**Notes (7) jako follow-upy w `PROJECT-STATUS.md` backlog** — non-blocking, do rozliczenia przy otwarciu projektu / compliance trigger / Sprint 7 frontend.
+
+---
+
 ## Sprint 3 — Faza 1A: Apple Health webhook
 
 **Effort:** ~4–5h

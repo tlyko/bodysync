@@ -38,6 +38,7 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | API Gateway HTTP + custom domain | 🟡 endpoint live (`8pyf98ekt2.execute-api.eu-west-1.amazonaws.com`); custom domain `api.bodysync.pl` TODO |
 | Cloudflare Workers binding + `bodysync.pl` custom domain | ✅ shipped |
 | `/api/auth/google` endpoint | ✅ shipped (401 invalid / 400 Pydantic / 500 placeholders w SSM dopóki user nie wpisze) |
+| Security hardening (audit 2026-05-07: 2 Critical + 6 High) | ✅ shipped (PR #25-32) |
 | Apple Health webhook (signature verify + idempotency) | ❌ |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
@@ -54,6 +55,13 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 - **Layout decision dla Step 2** — bootstrap obecnie zajmuje `infrastructure/terraform/`. Główny workspace nie może tam siedzieć (różne backendy). Decyzja: przenieść bootstrap do `infrastructure/terraform/bootstrap/` (preferowane per ADR-003) lub stworzyć główny w `infrastructure/terraform-app/`. Ruszanie state file = manualnie + `terraform init -migrate-state`.
 - **Provider binaries w `infrastructure/terraform/hashicorp/`** — pusty katalog, nic w git ✓ (alarm fałszywy, do usunięcia z backlogu)
 - **Open follow-upy z audytu 2026-05-06** — HAE auth scheme, OIDC tightening (rola IAM ma `*` z ABAC tagiem — do zacieśnienia), naming policy ADR (jeśli potrzebne)
+- **Security audit follow-upy (Notes z 2026-05-07)** — accept lub planuj na otwarcie projektu:
+  - SSM cache bez TTL (rotacja secret = cold restart Lambdy) → ADR jeśli zaczniemy rotować runtime
+  - S3 deny-non-TLS bucket policy (Security Hub flaguje)
+  - DDB CMK zamiast aws-managed key (compliance trigger)
+  - `requirements.txt` bez `--require-hashes` — `pip-compile --generate-hashes` przed Sprint 3 jeśli dochodzi większy stack deps (Anthropic SDK, googleapiclient, faiss)
+  - Logger `reason=str(e)` whitelistuj typy (zamiast surowego google-auth message) jeśli library zacznie loggować raw token
+  - CSP `style-src 'unsafe-inline'` → migracja na nonce-based gdy dashboard scaffold (Sprint 7)
 
 ## Architectural commitments (do zapisania w ADRs)
 
