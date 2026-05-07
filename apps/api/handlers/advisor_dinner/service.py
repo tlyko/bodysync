@@ -149,15 +149,22 @@ def _query_snapshots_in_range(
 
     Snapshot metrics: weight, body_fat, resting_hr, sleep — single item
     per dzień, last-writer-wins (per health_webhook._make_scalar_upsert).
+
+    Single Query z `begins_with(SK, "BIOMETRY#")` + post-filter w Pythonie
+    (cheaper niż N×GetItem dla 7 dni — 1-2 RCU vs 7 round-tripów).
     """
+    rows = query_by_pk(f"USER#{user_id}", sk_prefix="BIOMETRY#")
+    start_iso = start.isoformat()
+    end_iso = end.isoformat()
     items: list[dict[str, Any]] = []
-    cursor = start
-    while cursor <= end:
-        sk = f"BIOMETRY#{cursor.isoformat()}#{metric_short}"
-        item = get_item(f"USER#{user_id}", sk)
-        if item is not None:
-            items.append(item)
-        cursor += timedelta(days=1)
+    for row in rows:
+        sk = row.get("SK", "")
+        # Snapshot SK: "BIOMETRY#YYYY-MM-DD#metric" (dokładnie 3 części).
+        parts = sk.split("#")
+        if len(parts) != 3 or parts[2] != metric_short:
+            continue
+        if start_iso <= parts[1] <= end_iso:
+            items.append(row)
     return items
 
 
@@ -538,13 +545,15 @@ def _write_cache(user_id: str, today: date, response: DinnerAdvisorResponse) -> 
     # nested attrs do DDB (Decimal conversion, list-of-dict). Cache row
     # ma uproszczony shape: tylko ttl + response_json + cached_at.
     response_json = response.model_dump_json()
+    now_epoch = _now_epoch()
     put_item(
         pk,
         sk,
         {
-            "ttl": _now_epoch() + CACHE_TTL_SECONDS,
+            "ttl": now_epoch + CACHE_TTL_SECONDS,
             "response_json": response_json,
-            "cached_at": _now_iso(),
+            # `cached_at` jako epoch (spójne z `ttl`) — bez ISO/epoch mixu.
+            "cached_at": now_epoch,
         },
     )
 

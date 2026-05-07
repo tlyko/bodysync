@@ -425,7 +425,7 @@ def test_pk_isolation_alice_does_not_see_bob_cache(
             "SK": f"ADVISOR_CACHE#dinner#{today}",
             "ttl": int(_time.time()) + 3600,
             "response_json": json.dumps(fake_cached),
-            "cached_at": "2026-05-07T19:00:00+00:00",
+            "cached_at": int(_time.time()),
         }
     )
 
