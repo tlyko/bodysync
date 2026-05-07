@@ -199,11 +199,10 @@ def test_400_does_not_leak_user_input() -> None:
 
 
 @pytest.mark.usefixtures("ssm_params")
-def test_replay_hrv_multipoint_idempotent(dynamodb_table: Any) -> None:
-    """Replay całego payloadu = idempotent (Sprint 3.5 cumulative model).
-
-    HRV + steps używają conditional PutItem z timestampem w SK → drugi call
-    zwraca `stored=0` dla wszystkich 3 punktów.
+def test_replay_hrv_idempotent_steps_overwrite(dynamodb_table: Any) -> None:
+    """Replay całego payloadu (po PR #52):
+    - HRV (multi-point z timestampem różnym per reading) — idempotent skip
+    - Steps (cumulative monotonic) — overwrite "last snapshot wins"
     """
     from handlers.health_webhook import handler as h
 
@@ -214,9 +213,9 @@ def test_replay_hrv_multipoint_idempotent(dynamodb_table: Any) -> None:
     second = h.handler(_event(payload), _FakeContext())
     body = json.loads(second["body"])
     assert second["statusCode"] == 200
-    # Wszystkie 3 punkty (2 HRV + 1 steps) idempotent po Sprint 3.5
     assert body["received"] == 3
-    assert body["stored"] == 0
+    # 2 HRV idempotent (różne timestamps w SK) + 1 steps overwrite = 1 stored
+    assert body["stored"] == 1
 
 
 @pytest.mark.usefixtures("ssm_params")
