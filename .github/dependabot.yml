@@ -1,0 +1,23 @@
+# Auto-bump pinned SHA-1 references in workflows. Per CLAUDE.md "GitHub Actions"
+# konwencja — pinujemy actions na pełny SHA-1 (supply chain defense), Dependabot
+# mainttenance'uje to za nas.
+#
+# Dependabot otwiera PR co tydzień jeśli któraś z pinned actions ma nową wersję
+# (security update lub minor/patch). Komentarz po `#` w workflow zostaje
+# zaktualizowany automatycznie.
+version: 2
+
+updates:
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+      timezone: Europe/Warsaw
+    commit-message:
+      prefix: "chore(deps)"
+    labels:
+      - dependencies
+      - github-actions
+    open-pull-requests-limit: 5
