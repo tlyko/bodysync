@@ -196,6 +196,7 @@ Dziś 2 userów, ale design pod przyszłość:
 - [x] DynamoDB — encryption, PK isolation, PITR
 - [x] Terraform state remote, sensitive vars
 - [x] Dependencies audit
+- [x] **GitHub Actions pinned na pełny SHA-1** (NIE tag) — supply chain defense. Każde `uses: owner/action@<tag>` to RED FLAG, wymagaj `<sha40> # vX.Y.Z`. Tagi są mutable, atakujący przepina pod złośliwy commit (zob. tj-actions/changed-files 2025).
 ```
 
 ## Zasady
