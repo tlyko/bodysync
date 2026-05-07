@@ -10,6 +10,12 @@ locals {
 
   account_id = data.aws_caller_identity.current.account_id
 
+  # Custom domain dla API GW — frontend na bodysync.pl używa same-parent
+  # cookie domain (.bodysync.pl) by sesyjny JWT cookie był dostępny
+  # cross-subdomain.
+  domain_root = "${local.project}.pl"
+  api_domain  = "api.${local.domain_root}"
+
   # Single-table DDB (CLAUDE.md schemat). PK=USER#{id}, SK={TYPE}#{date}.
   # GSI-1 (inverted index SK→PK) służy do query po typie across users
   # (np. "wszystkie ACTIVITY z dzisiaj"). PITR włączony.

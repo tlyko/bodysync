@@ -74,6 +74,7 @@ def test_happy_path_alice(dynamodb_table: Any) -> None:
     assert "HttpOnly" in cookie
     assert "Secure" in cookie
     assert "SameSite=Lax" in cookie
+    assert "Domain=.bodysync.pl" in cookie  # cross-subdomain (api ↔ frontend)
 
     # JWT odkodowywalne secret'em z SSM, payload ma user_id
     token = cookie.split(";")[0].split("=", 1)[1]
