@@ -70,6 +70,7 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 - **ADR-003 terraform conventions** ✅ shipped (`docs/adr/ADR-003-terraform-conventions.md`)
 - **ADR-004 (TBD)** — multi-user model: PK isolation `USER#{id}` + GSI on entity type for cross-user admin queries.
 - **ADR-005 (TBD)** — sekrety: SSM SecureString hierarchy, rotacja, IAM scoping.
+- **ADR-006 advisor on-demand vs cron** ✅ shipped (`docs/adr/ADR-006-advisor-on-demand-vs-cron.md`) — supersedes Sprint 6 plan; primary = `POST /api/advisor/dinner` (LLM, on-demand, 1h cache); morning summary (deterministic cron, no LLM); weekly retro (LLM, Sun cron).
 
 ## SSM parameters (planowane)
 
