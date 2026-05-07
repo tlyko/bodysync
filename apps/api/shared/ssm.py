@@ -29,3 +29,27 @@ def get_param(name: str, *, decrypt: bool = True) -> str:
 def clear_cache() -> None:
     """Test-only — drop the module cache between fixtures."""
     _cache.clear()
+
+
+class SecretMisconfiguredError(RuntimeError):
+    """SSM parameter zawiera placeholder lub jest zbyt krótki dla swojego użycia.
+
+    Terraform tworzy SSM params z `value="PLACEHOLDER"`. Po deployu, dopóki
+    owner nie wpisze prawdziwych wartości w AWS Console, każdy `get_param`
+    zwróci string "PLACEHOLDER" — używanie tego jako secret = fail-open.
+    """
+
+
+def load_secure_secret(name: str, *, min_length: int = 32) -> str:
+    """Pobierz SecureString z SSM, fail-fast jeśli PLACEHOLDER lub za krótki.
+
+    `min_length` zależy od użycia:
+    - HMAC HS256 (JWT signing): ≥32 chars (256 bits entropy)
+    - Webhook Bearer (HAE, Strava): ≥32 chars (collision resistance)
+    """
+    secret = get_param(name)
+    if secret == "PLACEHOLDER" or len(secret) < min_length:
+        raise SecretMisconfiguredError(
+            f"SSM secret in {name} not configured (must be ≥{min_length} chars, not 'PLACEHOLDER')"
+        )
+    return secret
