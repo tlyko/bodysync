@@ -13,7 +13,7 @@ module "google_auth" {
   project       = local.project
   function_name = "google-auth"
   source_zip    = "${path.module}/../../apps/api/dist/google_auth.zip"
-  handler       = "handler.handler"
+  handler       = "handlers.google_auth.handler.handler"
   memory_size   = 512
   timeout       = 10
 

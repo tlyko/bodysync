@@ -61,10 +61,33 @@ def _install_deps(handler_dir: Path, target: Path) -> None:
 
 
 def _copy_sources(handler_dir: Path, target: Path) -> None:
-    # handler files (not __pycache__, not requirements.txt)
+    """Skopiuj kod handlera zachowując strukturę pakietu `handlers.{name}`
+    żeby `from handlers.{name}.schemas import X` działało w Lambda runtime.
+
+    Layout w zip:
+        handlers/__init__.py
+        handlers/{name}/__init__.py
+        handlers/{name}/handler.py
+        handlers/{name}/schemas.py
+        handlers/{name}/service.py
+        shared/__init__.py
+        shared/*.py
+    Lambda handler: `handlers.{name}.handler.handler`.
+    """
+    handler_name = handler_dir.name
+
+    # handlers/ namespace package + handlers/{name}/ pakiet
+    handlers_pkg = target / "handlers"
+    handlers_pkg.mkdir(parents=True, exist_ok=True)
+    (handlers_pkg / "__init__.py").touch()
+
+    handler_pkg = handlers_pkg / handler_name
+    handler_pkg.mkdir(exist_ok=True)
     for src in handler_dir.glob("*.py"):
-        shutil.copy2(src, target / src.name)
-    # shared/ as a sibling import target
+        shutil.copy2(src, handler_pkg / src.name)
+    (handler_pkg / "__init__.py").touch()  # idempotent — handler_dir może już mieć
+
+    # shared/ jako sibling
     shared_target = target / "shared"
     if shared_target.exists():
         shutil.rmtree(shared_target)
