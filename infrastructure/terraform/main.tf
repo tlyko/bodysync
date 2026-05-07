@@ -221,3 +221,70 @@ resource "aws_lambda_permission" "api_read_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# Sprint 6 — advisor_dinner. POST /api/advisor/dinner. JWT cookie auth,
+# Anthropic Haiku 4.5 z prompt cache (ephemeral) + DDB cache 1h TTL.
+# 1024MB / 30s — LLM call latency p95 ~3s + 2 retry budget. Per ADR-006.
+module "advisor_dinner" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "advisor-dinner"
+  source_zip    = "${path.module}/../../apps/api/dist/advisor_dinner.zip"
+  handler       = "handlers.advisor_dinner.handler.handler"
+  memory_size   = 1024
+  timeout       = 30
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Per CLAUDE.md "Reguła PK isolation" + sec audit H5 — IAM jako
+      # druga linia obrony. advisor_dinner czyta BIOMETRY (Query po
+      # USER#{id} + sk_prefix) i PROFILE (GetItem), pisze ADVISOR_CACHE
+      # (PutItem) — wszystko pod USER#{id} PK.
+      Sid      = "DDBReadBiometryWriteAdvisorCache"
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadAdvisorSecrets"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/anthropic/api_key",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "advisor_dinner" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.advisor_dinner.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "advisor_dinner" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/advisor/dinner"
+  target    = "integrations/${aws_apigatewayv2_integration.advisor_dinner.id}"
+}
+
+resource "aws_lambda_permission" "advisor_dinner_apigw" {
+  statement_id  = "AllowAPIGWInvoke"
+  action        = "lambda:InvokeFunction"
+  function_name = module.advisor_dinner.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
