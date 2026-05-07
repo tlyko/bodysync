@@ -60,6 +60,8 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**/*.py" = ["N802"]  # test_X funcs
+# HAE schema mirror'uje mixedCase HAE API fields (Min/Avg/Max, inBedStart, etc.)
+"handlers/health_webhook/schemas.py" = ["N815"]
 
 [tool.mypy]
 python_version = "3.12"
