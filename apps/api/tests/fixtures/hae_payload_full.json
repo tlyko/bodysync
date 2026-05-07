@@ -1,0 +1,118 @@
+{
+  "data": {
+    "metrics": [
+      {
+        "name": "heart_rate_variability",
+        "units": "ms",
+        "data": [
+          { "qty": 48.3, "date": "2026-05-06 07:14:21 +0200", "source": "Apple Watch" },
+          { "qty": 52.1, "date": "2026-05-06 19:02:11 +0200", "source": "Apple Watch" }
+        ]
+      },
+      {
+        "name": "heart_rate",
+        "units": "bpm",
+        "data": [
+          {
+            "Min": 52,
+            "Avg": 67,
+            "Max": 142,
+            "date": "2026-05-06 14:33:00 +0200",
+            "source": "Apple Watch"
+          }
+        ]
+      },
+      {
+        "name": "resting_heart_rate",
+        "units": "bpm",
+        "data": [
+          { "qty": 54, "date": "2026-05-06 23:59:59 +0200", "source": "Apple Watch" }
+        ]
+      },
+      {
+        "name": "step_count",
+        "units": "count",
+        "data": [
+          { "qty": 8421, "date": "2026-05-06 23:59:59 +0200", "source": "iPhone" }
+        ]
+      },
+      {
+        "name": "active_energy",
+        "units": "kcal",
+        "data": [
+          { "qty": 487.3, "date": "2026-05-06 23:59:59 +0200", "source": "Apple Watch" }
+        ]
+      },
+      {
+        "name": "basal_energy_burned",
+        "units": "kcal",
+        "data": [
+          { "qty": 1742.8, "date": "2026-05-06 23:59:59 +0200", "source": "Apple Watch" }
+        ]
+      },
+      {
+        "name": "weight_body_mass",
+        "units": "kg",
+        "data": [
+          { "qty": 78.4, "date": "2026-05-06 07:00:00 +0200", "source": "Xiaomi S400" }
+        ]
+      },
+      {
+        "name": "body_fat_percentage",
+        "units": "%",
+        "data": [
+          { "qty": 18.2, "date": "2026-05-06 07:00:00 +0200", "source": "Xiaomi S400" }
+        ]
+      },
+      {
+        "name": "dietary_energy",
+        "units": "kcal",
+        "data": [
+          { "qty": 2341, "date": "2026-05-06 23:59:59 +0200", "source": "Fitatu" }
+        ]
+      },
+      {
+        "name": "protein",
+        "units": "g",
+        "data": [
+          { "qty": 178.5, "date": "2026-05-06 23:59:59 +0200", "source": "Fitatu" }
+        ]
+      },
+      {
+        "name": "carbohydrates",
+        "units": "g",
+        "data": [
+          { "qty": 245.0, "date": "2026-05-06 23:59:59 +0200", "source": "Fitatu" }
+        ]
+      },
+      {
+        "name": "total_fat",
+        "units": "g",
+        "data": [
+          { "qty": 86.4, "date": "2026-05-06 23:59:59 +0200", "source": "Fitatu" }
+        ]
+      },
+      {
+        "name": "sleep_analysis",
+        "units": "hr",
+        "data": [
+          {
+            "date": "2026-05-06 08:30:00 +0200",
+            "inBedStart": "2026-05-05 23:42:00 +0200",
+            "inBedEnd":   "2026-05-06 08:30:00 +0200",
+            "sleepStart": "2026-05-05 23:58:00 +0200",
+            "sleepEnd":   "2026-05-06 08:11:00 +0200",
+            "inBed": 8.8,
+            "asleep": 8.21,
+            "core": 4.32,
+            "rem": 1.85,
+            "deep": 1.04,
+            "awake": 0.59,
+            "source": "Apple Watch"
+          }
+        ]
+      }
+    ],
+    "workouts": []
+  }
+}

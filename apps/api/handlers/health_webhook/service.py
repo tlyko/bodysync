@@ -24,7 +24,12 @@ from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from handlers.health_webhook.schemas import HAEPayload, HAEScalarPoint
+from handlers.health_webhook.schemas import (
+    HAEHeartRatePoint,
+    HAEPayload,
+    HAEScalarPoint,
+    HAESleepPoint,
+)
 from shared.dynamo import put_item, put_item_idempotent
 from shared.ssm import SecretMisconfiguredError, load_secure_secret
 
@@ -119,12 +124,88 @@ def _ingest_steps(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> b
     return True
 
 
+def _make_scalar_upsert(
+    short_name: str, value_key: str
+) -> Callable[[str, dict[str, Any], datetime], bool]:
+    """Factory dla mapperów single-point upsert: kcal, weight, body fat,
+    dietary, resting HR. SK bez timestamp = last-writer-wins.
+
+    `short_name` → fragment SK (e.g. 'weight', 'kcal_active').
+    `value_key` → nazwa attrs do zapisania value (e.g. 'kg', 'kcal').
+    """
+
+    def _ingest(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
+        point = HAEScalarPoint.model_validate(raw)
+        sk = f"BIOMETRY#{_local_date_iso(point.date)}#{short_name}"
+        attrs = {value_key: point.qty, **_common_attrs(point, ingested_at)}
+        put_item(f"USER#{user_id}", sk, attrs)
+        return True
+
+    return _ingest
+
+
+def _ingest_heart_rate(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
+    """`heart_rate` per okno czasowe — Min/Avg/Max. Multi-point z timestampem,
+    idempotent. Storage: 3 wartości per row, advisor czyta avg dziennie.
+    """
+    point = HAEHeartRatePoint.model_validate(raw)
+    sk = f"BIOMETRY#{_local_date_iso(point.date)}#hr#{point.date.isoformat()}"
+    attrs = {
+        "min_bpm": point.Min,
+        "avg_bpm": point.Avg,
+        "max_bpm": point.Max,
+        "source": "apple-health",
+        "device": point.source,
+        "recorded_at": point.date.isoformat(),
+        "ingested_at": ingested_at.isoformat(),
+    }
+    return put_item_idempotent(f"USER#{user_id}", sk, attrs)
+
+
+def _ingest_sleep(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
+    """`sleep_analysis` summary per noc. Single-point per dzień, upsert.
+
+    HAE wysyła sumaryczne wartości (inBed, asleep, core, rem, deep, awake)
+    po przebudzeniu. Replay = overwrite (nowa noc nadpisze, ale w praktyce
+    HAE wysyła raz, po wstaniu).
+    """
+    point = HAESleepPoint.model_validate(raw)
+    sk = f"BIOMETRY#{_local_date_iso(point.date)}#sleep"
+    attrs: dict[str, Any] = {
+        "source": "apple-health",
+        "device": point.source,
+        "recorded_at": point.date.isoformat(),
+        "ingested_at": ingested_at.isoformat(),
+    }
+    # Pomijamy None'y żeby nie zaśmiecać DDB.
+    for field in ("inBed", "asleep", "core", "rem", "deep", "awake"):
+        value = getattr(point, field)
+        if value is not None:
+            attrs[field] = value
+    for field in ("inBedStart", "inBedEnd", "sleepStart", "sleepEnd"):
+        value = getattr(point, field)
+        if value is not None:
+            attrs[field] = value.isoformat()
+    put_item(f"USER#{user_id}", sk, attrs)
+    return True
+
+
 METRIC_HANDLERS: dict[str, Callable[[str, dict[str, Any], datetime], bool]] = {
+    # multi-point z idempotency
     "heart_rate_variability": _ingest_hrv,
+    "heart_rate": _ingest_heart_rate,
+    # single-point upsert per dzień
     "step_count": _ingest_steps,
-    # PR B doda: heart_rate, sleep_analysis, active_energy, basal_energy_burned,
-    # weight_body_mass, body_fat_percentage, dietary_energy, protein,
-    # total_fat, carbohydrates
+    "sleep_analysis": _ingest_sleep,
+    "resting_heart_rate": _make_scalar_upsert("resting_hr", "bpm"),
+    "active_energy": _make_scalar_upsert("kcal_active", "kcal"),
+    "basal_energy_burned": _make_scalar_upsert("kcal_basal", "kcal"),
+    "weight_body_mass": _make_scalar_upsert("weight", "kg"),
+    "body_fat_percentage": _make_scalar_upsert("body_fat", "pct"),
+    "dietary_energy": _make_scalar_upsert("kcal_in", "kcal"),
+    "protein": _make_scalar_upsert("protein", "g"),
+    "total_fat": _make_scalar_upsert("fat", "g"),
+    "carbohydrates": _make_scalar_upsert("carbs", "g"),
 }
 
 

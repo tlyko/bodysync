@@ -33,13 +33,43 @@ HAEDateTime = Annotated[datetime, BeforeValidator(_parse_hae_date)]
 class HAEScalarPoint(BaseModel):
     """Większość metryk: pojedyncza wartość `qty` z timestampem.
 
-    HRV (ms), kroki, kcal, waga, body fat, dietary energy/protein/carbs/fat.
+    HRV (ms), kroki, kcal, waga, body fat, dietary energy/protein/carbs/fat,
+    resting_heart_rate.
     """
 
     model_config = ConfigDict(extra="allow")  # forward-compat — nowe iOS pola OK
     qty: float
     date: HAEDateTime
     source: str | None = None
+
+
+class HAEHeartRatePoint(BaseModel):
+    """`heart_rate` w HAE jest specjalny: per okno czasowe Min/Avg/Max."""
+
+    model_config = ConfigDict(extra="allow")
+    Min: float
+    Avg: float
+    Max: float
+    date: HAEDateTime
+    source: str | None = None
+
+
+class HAESleepPoint(BaseModel):
+    """`sleep_analysis` summary per noc — multi-field obiekt."""
+
+    model_config = ConfigDict(extra="allow")
+    date: HAEDateTime
+    source: str | None = None
+    inBedStart: HAEDateTime | None = None
+    inBedEnd: HAEDateTime | None = None
+    sleepStart: HAEDateTime | None = None
+    sleepEnd: HAEDateTime | None = None
+    inBed: float | None = None
+    asleep: float | None = None
+    core: float | None = None
+    rem: float | None = None
+    deep: float | None = None
+    awake: float | None = None
 
 
 class HAEMetric(BaseModel):
