@@ -29,11 +29,16 @@ class ProfileNotFoundError(Exception):
 
 
 def _to_python(value: Any) -> Any:
-    """Decimal → int/float dla JSON response (DDB zwraca Decimal)."""
+    """Decimal → int/float dla JSON response (DDB zwraca Decimal).
+
+    Float'y zaokrąglane do 4 miejsc — usuwa artifacty precyzji typu
+    `20.599999999999998` (Decimal('20.6') → float artifact). 4 miejsca
+    bezpieczne dla wszystkich obecnych metryk (kg, %, ms, h, bpm).
+    """
     if isinstance(value, Decimal):
         if value % 1 == 0:
             return int(value)
-        return float(value)
+        return round(float(value), 4)
     if isinstance(value, list):
         return [_to_python(v) for v in value]
     if isinstance(value, dict):
