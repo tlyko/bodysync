@@ -57,7 +57,15 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     bearer = _extract_bearer(event)
     if not bearer:
-        logger.warning("missing_auth", extra={"request_id": request_id})
+        # Diagnostic: log header KEYS (nie values) żeby zobaczyć co HAE
+        # wysyła. Bezpieczne — Bearer secret jest VALUE, nie name.
+        logger.warning(
+            "missing_auth",
+            extra={
+                "request_id": request_id,
+                "header_keys": sorted((event.get("headers") or {}).keys()),
+            },
+        )
         return _response(401, {"error": "missing or malformed Authorization header"})
 
     try:
