@@ -121,22 +121,59 @@ Aktualizowany na bieżąco. Sprint 0 = cleanup / ADRs / scaffold (✅). Sprint 1
 
 ---
 
-## Sprint 3 — Faza 1A: Apple Health webhook
+## Sprint 3 — Faza 1A: Apple Health webhook ✅ shipped
 
-**Effort:** ~4–5h
-**Cel:** Health Auto Export (iOS app) wysyła webhook → Lambda waliduje signature → DDB `BIOMETRY#{date}#{metric}`. Idempotent przez conditional `PutItem`.
+**Effort actual:** ~3h (3 PRy: scaffold + mappers + IaC)
+**Cel:** Health Auto Export (iOS app) wysyła webhook → Lambda waliduje Bearer → DDB `BIOMETRY#{date}#{metric}`. Idempotent przez conditional `PutItem` dla multi-point (HRV, HR), upsert dla single-point (steps, weight, dietary).
 
-**Pre-req (manual, user):** SSM `/bodysync/health-auto-export/webhook_secret_{user_id}` per user (HAE wysyła z osobnym Bearer per telefon).
+**Decyzje (z spec'u integratora 2026-05-07):**
+- Auth Bearer-only, server resolves `user_id` po `hmac.compare_digest` z SSM secrets per user (Opcja C — brak `user_id` w URL)
+- 13 mapperów: HRV (multi-point idempotent), heart_rate Min/Avg/Max, resting_heart_rate, sleep_analysis (10+ pól), step_count, active_energy, basal_energy_burned, weight_body_mass, body_fat_percentage, dietary_energy, protein, total_fat, carbohydrates
+- Workouts → silent drop (Strava sole source dla activities w Sprint 4)
+- Daily HRV summary → odłożone (advisor agreguje on-read)
+- Warsaw local date dla SK grouping (kroki sprzed 2:00 UTC trafiają do tego samego dnia życia)
+- HAE date format `"YYYY-MM-DD HH:mm:ss ±ZZZZ"` parsowany przez Pydantic BeforeValidator
 
-- `handlers/health_webhook/` — Pydantic input dla HAE payload, signature verify (Bearer + HMAC), mapping metric names → SK suffix, batch PutItem
-- `tests/` — happy (sample HAE JSON), missing/invalid auth → 401, invalid payload → 400, replay → no-op (idempotency)
-- HAE auth scheme z follow-up audytu — confirm tutaj
+**Implementation (PR #33/#34/#35):**
+- `apps/api/handlers/health_webhook/` — handler + schemas (HAEPayload, HAEScalarPoint, HAEHeartRatePoint, HAESleepPoint) + service (METRIC_HANDLERS registry + `_make_scalar_upsert` factory dla 9 mapperów)
+- `apps/api/tests/handlers/health_webhook/` — 25 testów (test_handler.py + test_mappers.py), fixtures `hae_payload_minimal.json` + `hae_payload_full.json`
+- `infrastructure/terraform/main.tf` — `module "health_webhook"` + IAM (LeadingKeys=USER#* + ssm:GetParameter na 2 secrets) + API GW route `POST /api/health/webhook`
 
-**Acceptance:**
-- [ ] Sample webhook z HAE produkuje rows DDB widoczne w Query `PK=USER#user_a, SK begins_with BIOMETRY#`
-- [ ] Replay tego samego payload nic nie zmienia (idempotency test)
-- [ ] User_a webhook nie pojawia się w Query user_b (PK isolation)
-- [ ] Manual: po deploy wpisać webhook URL + secret w HAE app na obu telefonach
+**Refactor bonus:**
+- `shared/ssm.py:load_secure_secret(name, min_length)` — DRY z H2 (JWT secret guard)
+- `shared/dynamo.py:_to_dynamodb()` — auto float→Decimal (DDB nie wspiera float, chroni wszystkie handlery)
+
+**Acceptance — actual:**
+- [x] `pytest -q`: 41 passed (16 google_auth + 25 health_webhook)
+- [x] `mypy strict + ruff`: clean
+- [x] PR #33+#34+#35 zmergowane → terraform apply → 8 zasobów AWS
+- [x] Smoke test post-deploy: `curl -H 'Authorization: Bearer wrong'` → **401** invalid bearer (warm 460ms)
+- [x] Smoke test bez auth: → **401** missing/malformed
+- [ ] **USER ACTION pending:** wpisać SSM secrets + skonfigurować HAE iOS automation (URL + Bearer) — wtedy real payload da 200 + DDB rows pod `USER#tomek/BIOMETRY#*`
+- [ ] PK isolation w prod (po pierwszym webhook obu telefonów)
+
+**USER ACTION (po merge #35, do wykonania manualnie):**
+```bash
+aws ssm put-parameter --name /bodysync/health-auto-export/webhook_secret_tomek \
+  --type SecureString --overwrite --value "$(openssl rand -base64 32)"
+aws ssm put-parameter --name /bodysync/health-auto-export/webhook_secret_partner \
+  --type SecureString --overwrite --value "$(openssl rand -base64 32)"
+# odczytaj wartości:
+aws ssm get-parameter --name /bodysync/health-auto-export/webhook_secret_tomek \
+  --with-decryption --query 'Parameter.Value' --output text
+```
+
+W HAE iOS app na każdym telefonie:
+- Automation → REST API → POST
+- URL: `https://8pyf98ekt2.execute-api.eu-west-1.amazonaws.com/api/health/webhook`
+- Header: `Authorization: Bearer <secret-z-SSM>`
+- Aggregation: Hour
+- Frequency: po treningu / co godzinę
+
+**Lessons learned (Sprint 3):**
+- DDB `float` → `Decimal` musi być konwertowane (boto3 rzuca `TypeError`); fix w `shared/dynamo.py` chroni wszystkie handlery
+- HAE date format nie jest ISO 8601 — wymaga custom `BeforeValidator` w Pydantic
+- Pydantic field names mirror'ujące mixedCase HAE API (`Min/Avg/Max`, `inBedStart`) wymagają per-file `# noqa: N815` w pyproject (DRY niż per-field aliasy)
 
 ---
 
