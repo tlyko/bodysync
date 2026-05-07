@@ -16,6 +16,7 @@ storm gdy HAE wyśle batch z 1 zepsutym point'em.
 from __future__ import annotations
 
 import json
+import os
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,8 +29,37 @@ from handlers.health_webhook.service import (
     resolve_user_from_bearer,
 )
 from shared.logging import get_logger
+from shared.s3 import archive_raw_payload
 
 logger = get_logger("health_webhook")
+
+
+def _archive_to_s3_best_effort(
+    user_id: str, raw_body: bytes, ingested_at: datetime, request_id: str
+) -> None:
+    """Zapisz raw HAE payload do S3 — best-effort, nie blokujący webhooka.
+
+    Klucz: `raw/health-auto-export/{user_id}/{YYYY}/{MM}/{DD}/{ingested_at_iso}.json`.
+    Każde S3-side błędy → `logger.warning` + return; webhook zwraca 200,
+    żeby HAE nie zaczął retry storm gdy S3 padło.
+    """
+    bucket = os.environ.get("RAW_BUCKET_NAME")
+    if not bucket:
+        logger.error(
+            "s3_archive_skipped_no_bucket_env",
+            extra={"request_id": request_id, "user_id": user_id},
+        )
+        return
+    key = f"raw/health-auto-export/{user_id}/{ingested_at:%Y/%m/%d}/{ingested_at.isoformat()}.json"
+    try:
+        archive_raw_payload(bucket, key, raw_body)
+    except Exception:
+        # Best-effort: log, ale nie blokuj 200 response (HAE retry storm
+        # przy 5xx > stracone payloady przy chwilowym S3 outage).
+        logger.warning(
+            "s3_archive_failed",
+            extra={"request_id": request_id, "user_id": user_id, "key": key},
+        )
 
 
 def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
@@ -72,6 +102,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         raw_body = base64.b64decode(raw_body).decode("utf-8")
 
+    ingested_at = datetime.now(UTC)
+    # Archive raw payload PRZED parsem — nawet gdy Pydantic odrzuci, raw
+    # JSON ląduje w S3 dla post-mortem (debug HAE shape changes).
+    _archive_to_s3_best_effort(user_id, raw_body.encode("utf-8"), ingested_at, request_id)
+
     try:
         payload_dict = json.loads(raw_body)
     except json.JSONDecodeError:
@@ -87,7 +122,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.warning("invalid_payload", extra={"request_id": request_id, "user_id": user_id})
         return _response(400, {"error": "invalid payload", "details": sanitized})
 
-    result = ingest(user_id, payload, ingested_at=datetime.now(UTC))
+    result = ingest(user_id, payload, ingested_at=ingested_at)
     logger.info(
         "hae_ingest_ok",
         extra={

@@ -49,4 +49,31 @@ resource "aws_s3_bucket_lifecycle_configuration" "data" {
       noncurrent_days = 90
     }
   }
+
+  # Sprint 3.5 — raw HAE payloads (post-mortem retention).
+  # IA → Glacier → expiration: ~$0.004/GB-month w Glacier vs $0.023 w STANDARD,
+  # przy <100MB/dzień to grosze. Po 365d expiration — debug horizon
+  # wystarczy na N follow-up PR-ów na shape changes HAE iOS.
+  rule {
+    id     = "hae-raw-archive"
+    status = "Enabled"
+
+    filter {
+      prefix = "raw/health-auto-export/"
+    }
+
+    transition {
+      days          = 30
+      storage_class = "STANDARD_IA"
+    }
+
+    transition {
+      days          = 90
+      storage_class = "GLACIER"
+    }
+
+    expiration {
+      days = 365
+    }
+  }
 }

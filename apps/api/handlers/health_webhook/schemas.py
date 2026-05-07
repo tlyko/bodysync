@@ -16,7 +16,7 @@ from __future__ import annotations
 from datetime import datetime
 from typing import Annotated, Any
 
-from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, BeforeValidator, ConfigDict, Field
 
 HAE_DATE_FORMAT = "%Y-%m-%d %H:%M:%S %z"
 
@@ -55,9 +55,21 @@ class HAEHeartRatePoint(BaseModel):
 
 
 class HAESleepPoint(BaseModel):
-    """`sleep_analysis` summary per noc — multi-field obiekt."""
+    """`sleep_analysis` summary per noc — multi-field obiekt.
 
-    model_config = ConfigDict(extra="allow")
+    Sprint 3.5 Step 3.6: HAE iOS może wysyłać sub-stages pod różnymi
+    nazwami (`asleepCore`/`asleepREM`/`asleepDeep` vs `core`/`rem`/`deep`).
+    Live DDB 2026-05-01..05-07 pokazuje `asleep=0` mimo `inBed=8.13h` —
+    schema nie matchował aktualnego payloadu HAE. Pessymistyczny
+    `validation_alias=AliasChoices(...)` próbuje wszystkich znanych
+    wariantów — pierwszy match wygrywa.
+
+    TODO(post-deploy): po pierwszym S3 archive object od HAE iOS
+    zweryfikować faktyczny shape `sleep_analysis.data[*]` i zaktualizować
+    `AliasChoices` w follow-up PR (Sprint 3.5 Step 3.6 action item).
+    """
+
+    model_config = ConfigDict(extra="allow", populate_by_name=True)
     date: HAEDateTime
     source: str | None = None
     inBedStart: HAEDateTime | None = None
@@ -65,11 +77,16 @@ class HAESleepPoint(BaseModel):
     sleepStart: HAEDateTime | None = None
     sleepEnd: HAEDateTime | None = None
     inBed: float | None = None
-    asleep: float | None = None
-    core: float | None = None
-    rem: float | None = None
-    deep: float | None = None
-    awake: float | None = None
+    asleep: float | None = Field(
+        default=None,
+        validation_alias=AliasChoices("asleep", "totalAsleep", "asleepTotal", "total_asleep"),
+    )
+    core: float | None = Field(default=None, validation_alias=AliasChoices("core", "asleepCore"))
+    rem: float | None = Field(default=None, validation_alias=AliasChoices("rem", "asleepREM"))
+    deep: float | None = Field(default=None, validation_alias=AliasChoices("deep", "asleepDeep"))
+    awake: float | None = Field(
+        default=None, validation_alias=AliasChoices("awake", "awakeMinutes", "awakeTotal")
+    )
 
 
 class HAEMetric(BaseModel):

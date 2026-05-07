@@ -28,6 +28,7 @@ def _aws_credentials() -> None:
     os.environ["AWS_SESSION_TOKEN"] = "testing"
     os.environ["AWS_DEFAULT_REGION"] = "eu-west-1"
     os.environ["TABLE_NAME"] = "bodysync-data-test"
+    os.environ["RAW_BUCKET_NAME"] = "bodysync-data-test-bucket"
 
 
 @pytest.fixture
@@ -64,6 +65,27 @@ def dynamodb_table() -> Iterator[Any]:
 
         importlib.reload(_dynamo)
         yield boto3.resource("dynamodb", region_name="eu-west-1").Table("bodysync-data-test")
+
+
+@pytest.fixture
+def s3_bucket(dynamodb_table: Any) -> Iterator[Any]:
+    """Pre-create the raw archive bucket inside the same `mock_aws` context.
+
+    Depends on `dynamodb_table` so the moto session is shared. Returns the
+    boto3 client so tests can `head_object`/`get_object` on the archive.
+    """
+    client = boto3.client("s3", region_name="eu-west-1")
+    client.create_bucket(
+        Bucket="bodysync-data-test-bucket",
+        CreateBucketConfiguration={"LocationConstraint": "eu-west-1"},
+    )
+    # Reset s3 module-level cached client so the fresh moto bucket binds.
+    import importlib
+
+    from shared import s3 as _s3
+
+    importlib.reload(_s3)
+    yield client
 
 
 @pytest.fixture

@@ -8,10 +8,15 @@ Flow:
 3. Unknown metric name → log warn + skip (forward-compat — nowy iOS metric
    nie blokuje całego batcha).
 
-Sprint 3 PR A obsługuje 2 metryki: HRV (multi-point per dzień, idempotent
-po `recorded_at`) i step_count (single-point per dzień, last-writer-wins).
-Pozostałe (heart_rate, sleep, kcal, weight, body_fat, dietary) dochodzą
-w PR B.
+Cumulative vs snapshot model (Sprint 3.5):
+- **Cumulative metrics** (HAE iOS `Aggregation: Hour` wysyła N punktów / dzień):
+  `step_count`, `active_energy`, `basal_energy_burned`, `dietary_energy`,
+  `protein`, `total_fat`, `carbohydrates` + `heart_rate` / `heart_rate_variability`.
+  SK ma `#{metric}#{point.date.isoformat()}` żeby każdy hourly bucket był
+  osobnym item — sum read-time przez `sum_metric_today`. Replay = idempotent.
+- **Snapshot metrics** (HAE wysyła sumaryczny punkt po pomiarze):
+  `weight_body_mass`, `body_fat_percentage`, `resting_heart_rate`,
+  `sleep_analysis`. SK bez timestamp = last-writer-wins.
 """
 
 from __future__ import annotations
@@ -23,6 +28,8 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 from zoneinfo import ZoneInfo
+
+from pydantic import ValidationError
 
 from handlers.health_webhook.schemas import (
     HAEHeartRatePoint,
@@ -85,6 +92,76 @@ def resolve_user_from_bearer(bearer: str) -> str:
     return matched
 
 
+# ─── Units handling (kJ→kcal, validation) ─────────────────────────────────
+
+# Współczynnik konwersji energii zgodny z HealthKit (1 kcal = 4.184 kJ).
+KJ_PER_KCAL = 4.184
+
+# Allowed units — fail-loud na nieoczekiwany format (np. "oz"/"lb"/"watts").
+# Lowercase porównanie po `_normalize_units`. `None` w secie = HAE legacy
+# payloads bez `units` na poziomie metric (fallback do interpretacji
+# domyślnej dla danej metryki — energia → kcal, masa → kg etc.).
+ENERGY_UNITS: set[str | None] = {
+    "kcal",
+    "kilocalorie",
+    "kilocalories",
+    "kj",
+    "kilojoule",
+    "kilojoules",
+    None,
+}
+ENERGY_KJ_UNITS: set[str] = {"kj", "kilojoule", "kilojoules"}
+COUNT_UNITS: set[str | None] = {"count", None}
+MS_UNITS: set[str | None] = {"ms", "millisecond", "milliseconds", None}
+BPM_UNITS: set[str | None] = {"count/min", "bpm", None}
+GRAM_UNITS: set[str | None] = {"g", "gram", "grams", None}
+KG_UNITS: set[str | None] = {"kg", "kilogram", "kilograms", None}
+PCT_UNITS: set[str | None] = {"%", "percent", None}
+
+
+def _normalize_units(units: str | None) -> str | None:
+    """Lowercase + strip dla forward-compat porównania.
+
+    HAE może wysyłać `kJ ` (trailing space) albo `KCal` (mixed case) —
+    `units.strip().lower()` daje stabilne porównanie z `*_UNITS` setami.
+    """
+    if units is None:
+        return None
+    return units.strip().lower()
+
+
+def _validate_units(units: str | None, allowed: set[str | None], *, metric_name: str) -> None:
+    """Fail-loud przy nieznanej jednostce — chroni przed silent corruption.
+
+    Raise `ValueError` żeby `ingest()` złapało w `_safe_ingest_metric` per-point
+    error handler (jeden bad point nie blokuje batcha; reszta metryk dalej leci).
+    """
+    norm = _normalize_units(units)
+    if norm not in allowed:
+        raise ValueError(
+            f"unsupported units {units!r} for metric {metric_name!r}; allowed={sorted(str(u) for u in allowed)}"
+        )
+
+
+def _convert_energy_to_kcal(qty: float, units: str | None) -> float:
+    """Konwertuje energię z HAE → kcal.
+
+    HAE iOS eksportuje energię w **kJ** (HealthKit SI base unit). Live evidence
+    2026-05-07: `kcal_in=3594.89` zapisane jako "kcal" → / 4.184 = 859 kcal,
+    match z Apple Health UI.
+
+    `units in {kcal, kilocalorie, None}` → passthrough (`None` = legacy
+    fixtures bez explicit units, traktujemy jak kcal dla backward-compat).
+    `units in {kJ, kilojoule}` → `qty / 4.184`.
+    Inne → ValueError (caller validates upfront przez `_validate_units`).
+    """
+    norm = _normalize_units(units)
+    if norm in ENERGY_KJ_UNITS:
+        return qty / KJ_PER_KCAL
+    # passthrough — kcal lub None (legacy fixtures bez units)
+    return qty
+
+
 # ─── Per-metric ingest functions ──────────────────────────────────────────
 
 
@@ -101,40 +178,55 @@ def _common_attrs(point: HAEScalarPoint, ingested_at: datetime) -> dict[str, Any
     }
 
 
-def _ingest_hrv(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
+MetricHandler = Callable[[str, dict[str, Any], datetime, str | None], bool]
+
+
+def _ingest_hrv(
+    user_id: str, raw: dict[str, Any], ingested_at: datetime, units: str | None
+) -> bool:
     """HRV: multi-point per dzień (HAE wysyła ~10-24 readings/dzień).
 
     SK z timestampem dla idempotency — replay tego samego point = NOOP.
     Atrybut `value_ms` w czytelnej jednostce.
     """
+    _validate_units(units, MS_UNITS, metric_name="heart_rate_variability")
     point = HAEScalarPoint.model_validate(raw)
     sk = f"BIOMETRY#{_local_date_iso(point.date)}#hrv#{point.date.isoformat()}"
     attrs = {"value_ms": point.qty, **_common_attrs(point, ingested_at)}
     return put_item_idempotent(f"USER#{user_id}", sk, attrs)
 
 
-def _ingest_steps(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
-    """Kroki: single-point per dzień (cumulative). HAE wysyła "do tej pory"
-    z dzisiaj — last-writer-wins. SK bez timestamp.
+def _ingest_steps(
+    user_id: str, raw: dict[str, Any], ingested_at: datetime, units: str | None
+) -> bool:
+    """Kroki: cumulative multi-point (HAE iOS `Aggregation: Hour`).
+
+    SK z timestampem hourly bucketu — replay = idempotent NOOP. Sumę dzienną
+    czyta `sum_metric_today` na żądanie (nie materialized — KISS).
     """
+    _validate_units(units, COUNT_UNITS, metric_name="step_count")
     point = HAEScalarPoint.model_validate(raw)
-    sk = f"BIOMETRY#{_local_date_iso(point.date)}#steps"
+    sk = f"BIOMETRY#{_local_date_iso(point.date)}#steps#{point.date.isoformat()}"
     attrs = {"count": int(point.qty), **_common_attrs(point, ingested_at)}
-    put_item(f"USER#{user_id}", sk, attrs)
-    return True
+    return put_item_idempotent(f"USER#{user_id}", sk, attrs)
 
 
 def _make_scalar_upsert(
-    short_name: str, value_key: str
-) -> Callable[[str, dict[str, Any], datetime], bool]:
-    """Factory dla mapperów single-point upsert: kcal, weight, body fat,
-    dietary, resting HR. SK bez timestamp = last-writer-wins.
+    short_name: str, value_key: str, *, allowed_units: set[str | None], metric_name: str
+) -> MetricHandler:
+    """Factory dla mapperów snapshot upsert: weight, body_fat, resting_hr.
 
-    `short_name` → fragment SK (e.g. 'weight', 'kcal_active').
-    `value_key` → nazwa attrs do zapisania value (e.g. 'kg', 'kcal').
+    HAE wysyła sumaryczny punkt po pomiarze — replay/follow-up payload =
+    overwrite OK. SK bez timestamp.
+
+    `allowed_units` — set jednostek które akceptujemy (fail-loud na resztę).
+    `metric_name` — używane w komunikacie błędu walidacji.
     """
 
-    def _ingest(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
+    def _ingest(
+        user_id: str, raw: dict[str, Any], ingested_at: datetime, units: str | None
+    ) -> bool:
+        _validate_units(units, allowed_units, metric_name=metric_name)
         point = HAEScalarPoint.model_validate(raw)
         sk = f"BIOMETRY#{_local_date_iso(point.date)}#{short_name}"
         attrs = {value_key: point.qty, **_common_attrs(point, ingested_at)}
@@ -144,10 +236,47 @@ def _make_scalar_upsert(
     return _ingest
 
 
-def _ingest_heart_rate(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
+def _make_scalar_cumulative(
+    short_name: str,
+    value_key: str,
+    *,
+    allowed_units: set[str | None],
+    metric_name: str,
+    energy_conversion: bool = False,
+) -> MetricHandler:
+    """Factory dla mapperów cumulative multi-point (hourly buckets).
+
+    HAE iOS z `Aggregation: Hour` wysyła N punktów / dzień (każdy = delta
+    tej godziny). SK z timestampem żeby każdy bucket był osobnym item.
+    Replay tego samego point = idempotent NOOP (conditional PutItem).
+
+    Sumy dzienne czyta `shared.dynamo.sum_metric_today` — read-time
+    aggregation, brak materialized view (per ADR-006 trade-off).
+
+    `energy_conversion=True` — qty traktowane jako energia, w razie potrzeby
+    konwertowane kJ→kcal (HealthKit eksportuje w SI). Storage zawsze w kcal.
+    """
+
+    def _ingest(
+        user_id: str, raw: dict[str, Any], ingested_at: datetime, units: str | None
+    ) -> bool:
+        _validate_units(units, allowed_units, metric_name=metric_name)
+        point = HAEScalarPoint.model_validate(raw)
+        qty = _convert_energy_to_kcal(point.qty, units) if energy_conversion else point.qty
+        sk = f"BIOMETRY#{_local_date_iso(point.date)}#{short_name}#{point.date.isoformat()}"
+        attrs = {value_key: qty, **_common_attrs(point, ingested_at)}
+        return put_item_idempotent(f"USER#{user_id}", sk, attrs)
+
+    return _ingest
+
+
+def _ingest_heart_rate(
+    user_id: str, raw: dict[str, Any], ingested_at: datetime, units: str | None
+) -> bool:
     """`heart_rate` per okno czasowe — Min/Avg/Max. Multi-point z timestampem,
     idempotent. Storage: 3 wartości per row, advisor czyta avg dziennie.
     """
+    _validate_units(units, BPM_UNITS, metric_name="heart_rate")
     point = HAEHeartRatePoint.model_validate(raw)
     sk = f"BIOMETRY#{_local_date_iso(point.date)}#hr#{point.date.isoformat()}"
     attrs = {
@@ -162,13 +291,21 @@ def _ingest_heart_rate(user_id: str, raw: dict[str, Any], ingested_at: datetime)
     return put_item_idempotent(f"USER#{user_id}", sk, attrs)
 
 
-def _ingest_sleep(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> bool:
+def _ingest_sleep(
+    user_id: str, raw: dict[str, Any], ingested_at: datetime, units: str | None
+) -> bool:
     """`sleep_analysis` summary per noc. Single-point per dzień, upsert.
 
     HAE wysyła sumaryczne wartości (inBed, asleep, core, rem, deep, awake)
     po przebudzeniu. Replay = overwrite (nowa noc nadpisze, ale w praktyce
     HAE wysyła raz, po wstaniu).
+
+    Sprint 3.5 Step 3.6 fallback: jeśli `asleep is None or 0` ale są
+    sub-stages (core/rem/deep), liczymy `asleep = core + rem + deep`
+    (live regression: prod payloads od kilku dni miały `asleep=0` mimo
+    sensownych sub-stages). Log warning żeby śledzić częstotliwość.
     """
+    del units  # sleep ma swoje sub-fields w hrs, brak top-level units
     point = HAESleepPoint.model_validate(raw)
     sk = f"BIOMETRY#{_local_date_iso(point.date)}#sleep"
     attrs: dict[str, Any] = {
@@ -177,8 +314,31 @@ def _ingest_sleep(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> b
         "recorded_at": point.date.isoformat(),
         "ingested_at": ingested_at.isoformat(),
     }
-    # Pomijamy None'y żeby nie zaśmiecać DDB.
-    for field in ("inBed", "asleep", "core", "rem", "deep", "awake"):
+    # Computed fallback dla `asleep` (post-mortem live bug 2026-05).
+    asleep = point.asleep
+    sub_total = (point.core or 0.0) + (point.rem or 0.0) + (point.deep or 0.0)
+    if (asleep is None or asleep == 0) and sub_total > 0:
+        logger.warning(
+            "sleep_asleep_fallback_computed",
+            extra={
+                "user_id": user_id,
+                "raw_asleep": asleep,
+                "computed_sum": sub_total,
+            },
+        )
+        asleep = sub_total
+    elif asleep is None and sub_total == 0 and (point.inBed or 0) > 0:
+        # Mamy inBed ale ani asleep ani sub-stages — payload broken.
+        # Skip storage (broken payload nie powinien zaśmiecać DDB).
+        logger.error(
+            "sleep_payload_broken_no_asleep",
+            extra={"user_id": user_id, "inBed": point.inBed},
+        )
+        return False
+
+    if asleep is not None:
+        attrs["asleep"] = asleep
+    for field in ("inBed", "core", "rem", "deep", "awake"):
         value = getattr(point, field)
         if value is not None:
             attrs[field] = value
@@ -190,22 +350,54 @@ def _ingest_sleep(user_id: str, raw: dict[str, Any], ingested_at: datetime) -> b
     return True
 
 
-METRIC_HANDLERS: dict[str, Callable[[str, dict[str, Any], datetime], bool]] = {
-    # multi-point z idempotency
+METRIC_HANDLERS: dict[str, MetricHandler] = {
+    # cumulative multi-point z timestamp w SK (idempotent, sum read-time)
     "heart_rate_variability": _ingest_hrv,
     "heart_rate": _ingest_heart_rate,
-    # single-point upsert per dzień
     "step_count": _ingest_steps,
+    # 3 energy mappery z konwersją kJ→kcal (HealthKit SI base unit)
+    "active_energy": _make_scalar_cumulative(
+        "kcal_active",
+        "kcal",
+        allowed_units=ENERGY_UNITS,
+        metric_name="active_energy",
+        energy_conversion=True,
+    ),
+    "basal_energy_burned": _make_scalar_cumulative(
+        "kcal_basal",
+        "kcal",
+        allowed_units=ENERGY_UNITS,
+        metric_name="basal_energy_burned",
+        energy_conversion=True,
+    ),
+    "dietary_energy": _make_scalar_cumulative(
+        "kcal_in",
+        "kcal",
+        allowed_units=ENERGY_UNITS,
+        metric_name="dietary_energy",
+        energy_conversion=True,
+    ),
+    # 3 macro mappery — gramy, fail-loud na "oz"/"lb"
+    "protein": _make_scalar_cumulative(
+        "protein", "g", allowed_units=GRAM_UNITS, metric_name="protein"
+    ),
+    "total_fat": _make_scalar_cumulative(
+        "fat", "g", allowed_units=GRAM_UNITS, metric_name="total_fat"
+    ),
+    "carbohydrates": _make_scalar_cumulative(
+        "carbs", "g", allowed_units=GRAM_UNITS, metric_name="carbohydrates"
+    ),
+    # snapshot single-point (last-writer-wins; HAE wysyła sumaryczny punkt)
     "sleep_analysis": _ingest_sleep,
-    "resting_heart_rate": _make_scalar_upsert("resting_hr", "bpm"),
-    "active_energy": _make_scalar_upsert("kcal_active", "kcal"),
-    "basal_energy_burned": _make_scalar_upsert("kcal_basal", "kcal"),
-    "weight_body_mass": _make_scalar_upsert("weight", "kg"),
-    "body_fat_percentage": _make_scalar_upsert("body_fat", "pct"),
-    "dietary_energy": _make_scalar_upsert("kcal_in", "kcal"),
-    "protein": _make_scalar_upsert("protein", "g"),
-    "total_fat": _make_scalar_upsert("fat", "g"),
-    "carbohydrates": _make_scalar_upsert("carbs", "g"),
+    "resting_heart_rate": _make_scalar_upsert(
+        "resting_hr", "bpm", allowed_units=BPM_UNITS, metric_name="resting_heart_rate"
+    ),
+    "weight_body_mass": _make_scalar_upsert(
+        "weight", "kg", allowed_units=KG_UNITS, metric_name="weight_body_mass"
+    ),
+    "body_fat_percentage": _make_scalar_upsert(
+        "body_fat", "pct", allowed_units=PCT_UNITS, metric_name="body_fat_percentage"
+    ),
 }
 
 
@@ -225,11 +417,13 @@ def ingest(user_id: str, payload: HAEPayload, *, ingested_at: datetime) -> Inges
         for raw_point in metric.data:
             result.received += 1
             try:
-                stored = handler(user_id, raw_point, ingested_at)
-            except Exception:
-                # Pojedynczy bad point nie wywala batcha — log + continue.
-                # Pełny payload retried przez HAE byłby gorszy (storm
-                # tych samych błędów).
+                stored = handler(user_id, raw_point, ingested_at, metric.units)
+            except (ValueError, ValidationError):
+                # Bad data per point (zły schemat, nieznane units) — log + continue.
+                # Replay całego payloadu byłby gorszy — storm tych samych błędów.
+                # Transient errors (boto3 ClientError, ProvisionedThroughputExceededException)
+                # NIE są łapane — bubble do handlera → 5xx → HAE retry → idempotent
+                # replay (multi-point timestamp w SK).
                 logger.exception(
                     "hae_point_ingest_failed",
                     extra={"metric_name": metric.name, "user_id": user_id},
