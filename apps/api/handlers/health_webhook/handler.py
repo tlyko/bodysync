@@ -57,19 +57,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     bearer = _extract_bearer(event)
     if not bearer:
-        # Diagnostic: log auth scheme prefix (np. "Bearer", "Token", "Basic")
-        # + length. Bez wycieku VALUE — tylko schemat + total length.
-        headers = event.get("headers") or {}
-        auth_raw = headers.get("authorization") or headers.get("Authorization") or ""
-        prefix = auth_raw.split(" ", 1)[0] if auth_raw else "<none>"
-        logger.warning(
-            "missing_auth",
-            extra={
-                "request_id": request_id,
-                "header_keys": sorted(headers.keys()),
-                "reason": f"prefix={prefix!r} len={len(auth_raw)}",
-            },
-        )
+        logger.warning("missing_auth", extra={"request_id": request_id})
         return _response(401, {"error": "missing or malformed Authorization header"})
 
     try:

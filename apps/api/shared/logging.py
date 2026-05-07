@@ -26,7 +26,6 @@ class JsonFormatter(logging.Formatter):
             "handler",
             "duration_ms",
             "reason",
-            "header_keys",
         ):
             value = getattr(record, key, None)
             if value is not None:
