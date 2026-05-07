@@ -95,8 +95,9 @@ module "health_webhook" {
   timeout       = 10
 
   environment = {
-    TABLE_NAME = aws_dynamodb_table.data.name
-    ENV        = "prod"
+    TABLE_NAME      = aws_dynamodb_table.data.name
+    ENV             = "prod"
+    RAW_BUCKET_NAME = aws_s3_bucket.data.id
   }
 
   extra_iam_statements = [
@@ -122,6 +123,15 @@ module "health_webhook" {
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/health-auto-export/webhook_secret_tomek",
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/health-auto-export/webhook_secret_weronika",
       ]
+    },
+    {
+      # Sprint 3.5 — raw HAE payloads archive dla post-mortem (debug HAE
+      # shape changes, np. faktyczny field name w sleep_analysis).
+      # Prefix-scoped: lambda nie pisze poza raw/health-auto-export/*.
+      Sid      = "S3ArchiveRawHaePayloads"
+      Effect   = "Allow"
+      Action   = ["s3:PutObject"]
+      Resource = "${aws_s3_bucket.data.arn}/raw/health-auto-export/*"
     },
   ]
 }
