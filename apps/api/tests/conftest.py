@@ -63,9 +63,7 @@ def dynamodb_table() -> Iterator[Any]:
         from shared import dynamo as _dynamo
 
         importlib.reload(_dynamo)
-        yield boto3.resource("dynamodb", region_name="eu-west-1").Table(
-            "bodysync-data-test"
-        )
+        yield boto3.resource("dynamodb", region_name="eu-west-1").Table("bodysync-data-test")
 
 
 @pytest.fixture

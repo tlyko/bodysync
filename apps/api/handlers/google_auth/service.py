@@ -31,7 +31,7 @@ class GoogleTokenError(Exception):
     """Google token nie przeszedł walidacji (zły issuer / audience / signature / exp)."""
 
 
-class EmailNotAllowed(Exception):
+class EmailNotAllowedError(Exception):
     """Email zweryfikowany przez Google, ale nie jest na 2-osobowej allowliście."""
 
 
@@ -60,15 +60,15 @@ def _resolve_user_id(email: str) -> str:
     try:
         entries = json.loads(raw)
     except json.JSONDecodeError as e:
-        raise EmailNotAllowed(f"allowlist not valid JSON: {e}") from e
+        raise EmailNotAllowedError(f"allowlist not valid JSON: {e}") from e
     if not isinstance(entries, list):
-        raise EmailNotAllowed("allowlist must be a JSON array")
+        raise EmailNotAllowedError("allowlist must be a JSON array")
     for entry in entries:
         if isinstance(entry, dict) and entry.get("email") == email:
             user_id = entry.get("user_id")
             if isinstance(user_id, str) and user_id:
                 return user_id
-    raise EmailNotAllowed(f"email not on allowlist: {email}")
+    raise EmailNotAllowedError(f"email not on allowlist: {email}")
 
 
 def login(req: LoginRequest) -> tuple[LoginResponse, str]:

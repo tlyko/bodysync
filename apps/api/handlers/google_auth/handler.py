@@ -18,7 +18,7 @@ from pydantic import ValidationError
 
 from handlers.google_auth.schemas import LoginRequest
 from handlers.google_auth.service import (
-    EmailNotAllowed,
+    EmailNotAllowedError,
     GoogleTokenError,
     login,
 )
@@ -30,9 +30,7 @@ COOKIE_NAME = "bodysync_session"
 COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 
 
-def _response(
-    status: int, body: dict[str, Any], cookie: str | None = None
-) -> dict[str, Any]:
+def _response(status: int, body: dict[str, Any], cookie: str | None = None) -> dict[str, Any]:
     out: dict[str, Any] = {
         "statusCode": status,
         "headers": {"Content-Type": "application/json"},
@@ -87,7 +85,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             extra={"request_id": request_id, "handler": "google_auth", "msg": str(e)},
         )
         return _response(401, {"error": "invalid google token"})
-    except EmailNotAllowed:
+    except EmailNotAllowedError:
         logger.info(
             "email not allowed",
             extra={"request_id": request_id, "handler": "google_auth"},
