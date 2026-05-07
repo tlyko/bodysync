@@ -42,7 +42,8 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Apple Health webhook (Bearer auth + 13 mapperów + idempotency) | ✅ shipped (PR #33/#34/#35; pending: SSM secrets + HAE iOS config) |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
-| Anthropic advisor (prompt cache, prompt injection guard) | 🟡 in progress (Sprint 6 MVP — `POST /api/advisor/dinner` per ADR-006; planned w `docs/TODO.md` Sprint 6) |
+| Anthropic advisor (prompt cache, prompt injection guard) | 🟡 in progress (Sprint 6 MVP — `POST /api/advisor/chat` z RAG per ADR-007, supersedes ADR-006; planned w `docs/TODO.md` Sprint 6) |
+| Recipe pipeline (PDF → DDB + FAISS) | 🟡 merged into Sprint 6 per ADR-007 (Sprint 8 nie istnieje osobno) |
 | Frontend dashboard | ❌ |
 
 ## Open PRs
@@ -72,13 +73,15 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 - **ADR-003 terraform conventions** ✅ shipped (`docs/adr/ADR-003-terraform-conventions.md`)
 - **ADR-004 (TBD)** — multi-user model: PK isolation `USER#{id}` + GSI on entity type for cross-user admin queries.
 - **ADR-005 (TBD)** — sekrety: SSM SecureString hierarchy, rotacja, IAM scoping.
-- **ADR-006 advisor on-demand vs cron** ✅ shipped (`docs/adr/ADR-006-advisor-on-demand-vs-cron.md`) — supersedes Sprint 6 plan; primary = `POST /api/advisor/dinner` (LLM, on-demand, 1h cache); morning summary (deterministic cron, no LLM); weekly retro (LLM, Sun cron).
+- **ADR-006 advisor on-demand vs cron** ⚠️ Superseded by ADR-007 (`docs/adr/ADR-006-advisor-on-demand-vs-cron.md`) — single-shot dinner endpoint odrzucony po user feedback 2026-05-07 (chat + RAG zamiast button "kolacja"). PR #50 infra zachowane jako baseline refactoru.
+- **ADR-007 chat assistant + RAG** ✅ shipped (`docs/adr/ADR-007-chat-assistant-rag.md`) — primary advisor feature: `POST /api/advisor/chat` (multi-turn, 24h TTL DDB history, RAG retrieval z FAISS+S3+OpenAI embeddings, recipes Lidla/Biedronki ~150-200 entries w DDB `RECIPES` PK, Anthropic Haiku 4.5 prompt cached, free-form polski text response). Supersedes ADR-006. Subsumes Sprint 8 (recipe pipeline merged into Sprint 6).
 
 ## SSM parameters (planowane)
 
 | name | type | who writes | who reads |
 |---|---|---|---|
-| `/bodysync/anthropic/api_key` | SecureString | owner (CLI) | advisor Lambda |
+| `/bodysync/anthropic/api_key` | SecureString | owner (CLI) | advisor Lambda + seed_recipes.py (Vision fallback) |
+| `/bodysync/openai/api_key` | SecureString | owner (CLI) | advisor Lambda (per-turn embed query) + seed_recipes.py (batch embed) — NEW per ADR-007 |
 | `/bodysync/strava/client_id` | String | owner (CLI) | api Lambda (oauth + fetcher) |
 | `/bodysync/strava/client_secret` | SecureString | owner (CLI) | api Lambda |
 | `/bodysync/strava/{user_id}/tokens` | SecureString | api Lambda (oauth callback + fetcher refresh) | fetcher Lambda |
