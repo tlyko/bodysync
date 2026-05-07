@@ -42,7 +42,7 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Apple Health webhook (Bearer auth + 13 mapperów + idempotency) | ✅ shipped (PR #33/#34/#35; pending: SSM secrets + HAE iOS config) |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
-| Anthropic advisor (prompt cache, prompt injection guard) | ❌ |
+| Anthropic advisor (prompt cache, prompt injection guard) | 🟡 in progress (Sprint 6 MVP — `POST /api/advisor/dinner` per ADR-006; planned w `docs/TODO.md` Sprint 6) |
 | Frontend dashboard | ❌ |
 
 ## Open PRs
