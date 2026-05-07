@@ -411,6 +411,157 @@ def test_cumulative_replay_idempotent(dynamodb_table: Any, ssm_params: None) -> 
     assert json.loads(second["body"])["stored"] == 0
 
 
+def test_sleep_alias_variants_computed_asleep(dynamodb_table: Any, ssm_params: None) -> None:
+    """Regression: payload z `asleepCore`/`asleepREM`/`asleepDeep` (alias variant)
+    + brak `asleep` field → DDB row `asleep == sum(core+rem+deep)`.
+    """
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "sleep_analysis",
+                    "units": "hr",
+                    "data": [
+                        {
+                            "date": "2026-05-06 08:30:00 +0200",
+                            "inBed": 8.13,
+                            "asleepCore": 4.32,
+                            "asleepREM": 1.85,
+                            "asleepDeep": 1.04,
+                            "source": "Apple Watch",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    h.handler(_event(payload), _FakeContext())
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    sleep = _by_sk(items, "#sleep")
+    assert sleep is not None
+    # Aliases zmapowały na core/rem/deep
+    assert float(sleep["core"]) == 4.32
+    assert float(sleep["rem"]) == 1.85
+    assert float(sleep["deep"]) == 1.04
+    # Computed fallback: asleep = sum(core+rem+deep)
+    assert abs(float(sleep["asleep"]) - 7.21) < 0.001
+
+
+def test_sleep_direct_asleep_field_no_fallback(dynamodb_table: Any, ssm_params: None) -> None:
+    """Happy path: payload z bezpośrednim `asleep` → DDB bez computed fallback."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "sleep_analysis",
+                    "units": "hr",
+                    "data": [
+                        {
+                            "date": "2026-05-06 08:30:00 +0200",
+                            "inBed": 8.8,
+                            "asleep": 8.21,
+                            "core": 4.32,
+                            "rem": 1.85,
+                            "deep": 1.04,
+                            "source": "Apple Watch",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    h.handler(_event(payload), _FakeContext())
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    sleep = _by_sk(items, "#sleep")
+    assert sleep is not None
+    # Direct field zachowane, fallback nie nadpisuje
+    assert float(sleep["asleep"]) == 8.21
+
+
+def test_sleep_live_bug_asleep_zero_with_substages(dynamodb_table: Any, ssm_params: None) -> None:
+    """Regression na live bug: `asleep=0` mimo sub-stages > 0 → fallback computed."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "sleep_analysis",
+                    "units": "hr",
+                    "data": [
+                        {
+                            "date": "2026-05-06 08:30:00 +0200",
+                            "inBed": 8.13,
+                            "asleep": 0,
+                            "core": 4.32,
+                            "rem": 1.85,
+                            "deep": 1.04,
+                            "awake": 0.59,
+                            "source": "Apple Watch",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    h.handler(_event(payload), _FakeContext())
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    sleep = _by_sk(items, "#sleep")
+    assert sleep is not None
+    assert float(sleep["asleep"]) > 0
+    assert abs(float(sleep["asleep"]) - 7.21) < 0.001
+
+
+def test_sleep_broken_payload_no_storage(dynamodb_table: Any, ssm_params: None) -> None:
+    """Broken: `inBed > 0` ale brak wszystkich asleep/core/rem/deep → log error
+    i skip storage (nie zaśmiecamy DDB rzędem `inBed-only`)."""
+    from handlers.health_webhook import handler as h
+
+    payload = {
+        "data": {
+            "metrics": [
+                {
+                    "name": "sleep_analysis",
+                    "units": "hr",
+                    "data": [
+                        {
+                            "date": "2026-05-06 08:30:00 +0200",
+                            "inBed": 8.0,
+                            "source": "Apple Watch",
+                        }
+                    ],
+                }
+            ],
+            "workouts": [],
+        }
+    }
+    result = h.handler(_event(payload), _FakeContext())
+    body = json.loads(result["body"])
+    assert body["received"] == 1
+    assert body["stored"] == 0
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert _by_sk(items, "#sleep") is None
+
+
 def test_heart_rate_replay_idempotent(dynamodb_table: Any, ssm_params: None) -> None:
     """HR per timestamp = idempotent (multi-point z conditional PutItem)."""
     from handlers.health_webhook import handler as h

@@ -297,6 +297,11 @@ def _ingest_sleep(
     HAE wysyła sumaryczne wartości (inBed, asleep, core, rem, deep, awake)
     po przebudzeniu. Replay = overwrite (nowa noc nadpisze, ale w praktyce
     HAE wysyła raz, po wstaniu).
+
+    Sprint 3.5 Step 3.6 fallback: jeśli `asleep is None or 0` ale są
+    sub-stages (core/rem/deep), liczymy `asleep = core + rem + deep`
+    (live regression: prod payloads od kilku dni miały `asleep=0` mimo
+    sensownych sub-stages). Log warning żeby śledzić częstotliwość.
     """
     del units  # sleep ma swoje sub-fields w hrs, brak top-level units
     point = HAESleepPoint.model_validate(raw)
@@ -307,8 +312,31 @@ def _ingest_sleep(
         "recorded_at": point.date.isoformat(),
         "ingested_at": ingested_at.isoformat(),
     }
-    # Pomijamy None'y żeby nie zaśmiecać DDB.
-    for field in ("inBed", "asleep", "core", "rem", "deep", "awake"):
+    # Computed fallback dla `asleep` (post-mortem live bug 2026-05).
+    asleep = point.asleep
+    sub_total = (point.core or 0.0) + (point.rem or 0.0) + (point.deep or 0.0)
+    if (asleep is None or asleep == 0) and sub_total > 0:
+        logger.warning(
+            "sleep_asleep_fallback_computed",
+            extra={
+                "user_id": user_id,
+                "raw_asleep": asleep,
+                "computed_sum": sub_total,
+            },
+        )
+        asleep = sub_total
+    elif asleep is None and sub_total == 0 and (point.inBed or 0) > 0:
+        # Mamy inBed ale ani asleep ani sub-stages — payload broken.
+        # Skip storage (broken payload nie powinien zaśmiecać DDB).
+        logger.error(
+            "sleep_payload_broken_no_asleep",
+            extra={"user_id": user_id, "inBed": point.inBed},
+        )
+        return False
+
+    if asleep is not None:
+        attrs["asleep"] = asleep
+    for field in ("inBed", "core", "rem", "deep", "awake"):
         value = getattr(point, field)
         if value is not None:
             attrs[field] = value
