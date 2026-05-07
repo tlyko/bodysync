@@ -316,13 +316,11 @@ def test_invalid_units_fail_loud_per_metric(
     assert len(items) == 0
 
 
-def test_kj_replay_idempotent_after_conversion(dynamodb_table: Any, ssm_params: None) -> None:
-    """Replay payloadu z kJ → drugi call stored=0.
+def test_kj_replay_overwrite_after_conversion(dynamodb_table: Any, ssm_params: None) -> None:
+    """Replay payloadu z kJ → drugi call stored=1 (overwrite cumulative).
 
-    Idempotency po SK (timestamp w SK identyczny dla obu call'ów). Wartość
-    `kcal` w atrybutach też jest deterministic — `qty / 4.184` na tym samym
-    floacie zwraca ten sam wynik (Python float division reproducible per
-    architecture, dla identycznego wejścia zawsze identyczne wyjście).
+    Wartość `kcal` deterministic (`qty / 4.184` reproducible) — overwrite
+    daje ten sam result, ale zapisuje (nie skip).
     """
     from handlers.health_webhook import handler as h
 
@@ -355,7 +353,7 @@ def test_kj_replay_idempotent_after_conversion(dynamodb_table: Any, ssm_params: 
     kcal_first = items_after_first[0]["kcal"]
 
     second = h.handler(_event(payload), _FakeContext())
-    assert json.loads(second["body"])["stored"] == 0
+    assert json.loads(second["body"])["stored"] == 1
 
     items_after_second = dynamodb_table.query(
         KeyConditionExpression="PK = :pk",
@@ -437,8 +435,13 @@ def test_steps_multi_point_hourly_buckets(dynamodb_table: Any, ssm_params: None)
     assert counts == [200, 300, 500]
 
 
-def test_cumulative_replay_idempotent(dynamodb_table: Any, ssm_params: None) -> None:
-    """Każdy z 7 cumulative mapperów: drugi call tego samego payloadu = stored=0."""
+def test_cumulative_replay_overwrites(dynamodb_table: Any, ssm_params: None) -> None:
+    """Każdy z 7 cumulative mapperów (PR #52 overwrite): drugi call tego
+    samego payloadu = stored=7 (overwrite "last snapshot wins").
+
+    Day aggregation HAE wysyła stały SK przez cały dzień; cumulative
+    monotonic rośnie w trakcie dnia → musimy nadpisywać.
+    """
     from handlers.health_webhook import handler as h
 
     payload = {
@@ -467,8 +470,52 @@ def test_cumulative_replay_idempotent(dynamodb_table: Any, ssm_params: None) -> 
     first = h.handler(_event(payload), _FakeContext())
     assert json.loads(first["body"])["stored"] == 7
 
+    # Replay = overwrite (cumulative monotonic), NIE skip
     second = h.handler(_event(payload), _FakeContext())
-    assert json.loads(second["body"])["stored"] == 0
+    assert json.loads(second["body"])["stored"] == 7
+
+    # Items count się nie zmienia (overwrite, nie new row)
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues={":pk": "USER#tomek", ":sk": "BIOMETRY#"},
+    )["Items"]
+    assert len(items) == 7
+
+
+def test_cumulative_overwrite_with_higher_value(dynamodb_table: Any, ssm_params: None) -> None:
+    """Day aggregation use case: pierwszy export 1559 kcal, drugi export
+    1976 kcal (po kolacji) — DDB ma 1976 (nie 1559)."""
+    from handlers.health_webhook import handler as h
+
+    def _payload(qty: float) -> dict[str, Any]:
+        return {
+            "data": {
+                "metrics": [
+                    {
+                        "name": "dietary_energy",
+                        "units": "kcal",
+                        "data": [
+                            {
+                                "qty": qty,
+                                "date": "2026-05-07 00:00:00 +0200",  # Day agg = midnight
+                                "source": "Fitatu",
+                            }
+                        ],
+                    }
+                ],
+                "workouts": [],
+            }
+        }
+
+    h.handler(_event(_payload(1559.85)), _FakeContext())
+    h.handler(_event(_payload(1976.0)), _FakeContext())
+
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues={":pk": "USER#tomek", ":sk": "BIOMETRY#2026-05-07#kcal_in"},
+    )["Items"]
+    assert len(items) == 1
+    assert float(items[0]["kcal"]) == 1976.0
 
 
 def test_sleep_alias_variants_computed_asleep(dynamodb_table: Any, ssm_params: None) -> None:

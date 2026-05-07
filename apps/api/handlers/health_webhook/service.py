@@ -199,16 +199,18 @@ def _ingest_hrv(
 def _ingest_steps(
     user_id: str, raw: dict[str, Any], ingested_at: datetime, units: str | None
 ) -> bool:
-    """Kroki: cumulative multi-point (HAE iOS `Aggregation: Hour`).
+    """Kroki: cumulative monotonic — overwrite "last snapshot wins".
 
-    SK z timestampem hourly bucketu — replay = idempotent NOOP. Sumę dzienną
-    czyta `sum_metric_today` na żądanie (nie materialized — KISS).
+    Day aggregation (1 bucket/dzień, stały SK) → overwrite kolejnymi
+    wyższymi wartościami. Hour aggregation (różne timestamps) → różne
+    SK = no collision. Per PR #52 fix.
     """
     _validate_units(units, COUNT_UNITS, metric_name="step_count")
     point = HAEScalarPoint.model_validate(raw)
     sk = f"BIOMETRY#{_local_date_iso(point.date)}#steps#{point.date.isoformat()}"
     attrs = {"count": int(point.qty), **_common_attrs(point, ingested_at)}
-    return put_item_idempotent(f"USER#{user_id}", sk, attrs)
+    put_item(f"USER#{user_id}", sk, attrs)
+    return True
 
 
 def _make_scalar_upsert(
@@ -244,17 +246,24 @@ def _make_scalar_cumulative(
     metric_name: str,
     energy_conversion: bool = False,
 ) -> MetricHandler:
-    """Factory dla mapperów cumulative multi-point (hourly buckets).
+    """Factory dla mapperów cumulative metrics — overwrite "last cumulative
+    snapshot wins".
 
-    HAE iOS z `Aggregation: Hour` wysyła N punktów / dzień (każdy = delta
-    tej godziny). SK z timestampem żeby każdy bucket był osobnym item.
-    Replay tego samego point = idempotent NOOP (conditional PutItem).
+    Cumulative wartości (kcal/steps/macros) są **monotonic** — w ciągu dnia
+    tylko rosną. HAE wysyła snapshot-to-now per export — kolejne webhooki
+    dnia mają wyższe qty. Use case:
+    - `Aggregation: Day` (jeden bucket per dzień, `recorded_at=startofday`):
+      stały SK przez cały dzień → overwrite z 1559 → 1976 po kolacji.
+    - `Aggregation: Hour` (różne timestamps per godzina): każdy hourly
+      bucket ma inny SK → no collision, overwrite zachowuje się jak put.
 
-    Sumy dzienne czyta `shared.dynamo.sum_metric_today` — read-time
-    aggregation, brak materialized view (per ADR-006 trade-off).
+    Spec PR #46 zakładał idempotent `put_item_idempotent` z conditional
+    `attribute_not_exists(SK)` — first-write-wins blokowało aktualizacje
+    Day aggregation. Naprawione w PR #52.
 
-    `energy_conversion=True` — qty traktowane jako energia, w razie potrzeby
-    konwertowane kJ→kcal (HealthKit eksportuje w SI). Storage zawsze w kcal.
+    Sumy dzienne czyta `shared.dynamo.sum_metric_today` (Hour aggregation)
+    lub bezpośrednio z single bucket'u (Day). `energy_conversion=True` —
+    qty kJ→kcal (HealthKit SI base unit).
     """
 
     def _ingest(
@@ -265,7 +274,8 @@ def _make_scalar_cumulative(
         qty = _convert_energy_to_kcal(point.qty, units) if energy_conversion else point.qty
         sk = f"BIOMETRY#{_local_date_iso(point.date)}#{short_name}#{point.date.isoformat()}"
         attrs = {value_key: qty, **_common_attrs(point, ingested_at)}
-        return put_item_idempotent(f"USER#{user_id}", sk, attrs)
+        put_item(f"USER#{user_id}", sk, attrs)
+        return True
 
     return _ingest
 
