@@ -28,11 +28,20 @@ apps/api/
 
 ## Local setup
 
+Wymaga [uv](https://docs.astral.sh/uv/) (`brew install uv`).
+
 ```bash
 cd apps/api
-python3.12 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[dev]"
+uv python install 3.12      # one-time
+uv venv --python 3.12        # creates .venv/
+uv pip install -e ".[dev]"   # all dev deps + pip (potrzebne dla scripts/build.py)
+```
+
+Aktywacja venv: `source .venv/bin/activate` albo `uv run <command>` bez aktywacji.
+
+Alternatywnie classic pip (jeśli masz Python 3.12 w PATH):
+```bash
+python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 ```
 
 ## Komendy

@@ -38,7 +38,7 @@ class EmailNotAllowedError(Exception):
 def _verify_google_token(id_token_str: str) -> dict[str, Any]:
     client_id = get_param(GOOGLE_CLIENT_ID_SSM, decrypt=False)
     try:
-        return google_id_token.verify_oauth2_token(  # type: ignore[no-any-return]
+        return google_id_token.verify_oauth2_token(  # type: ignore[no-untyped-call,no-any-return]
             id_token_str,
             google_requests.Request(),
             audience=client_id,

@@ -82,7 +82,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     except GoogleTokenError as e:
         logger.info(
             "google token rejected",
-            extra={"request_id": request_id, "handler": "google_auth", "msg": str(e)},
+            extra={"request_id": request_id, "handler": "google_auth", "reason": str(e)},
         )
         return _response(401, {"error": "invalid google token"})
     except EmailNotAllowedError:
