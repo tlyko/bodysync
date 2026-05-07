@@ -53,6 +53,14 @@ resource "aws_lambda_function" "this" {
     variables = var.environment
   }
 
+  # JSON log format pozwala CloudWatch metric filterom parsować
+  # `{ $.msg = "..." }` na każdej linii — bez Lambda runtime prefix
+  # (`[INFO] timestamp reqid\t...`) który łamał JSON pattern matching.
+  # Wymóg dla advisor_dinner cost guard (Sprint 6 Step 7).
+  logging_config {
+    log_format = "JSON"
+  }
+
   depends_on = [
     aws_cloudwatch_log_group.this,
     aws_iam_role_policy_attachment.basic_exec,

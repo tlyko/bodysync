@@ -28,6 +28,7 @@ dev = [
     "google-auth>=2.35",
     "boto3>=1.35",
     "boto3-stubs[dynamodb,ssm]>=1.35",
+    "anthropic>=0.40",
 ]
 
 [build-system]
