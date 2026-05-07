@@ -30,7 +30,7 @@ locals {
     "/bodysync/google/oauth_client_secret",
     "/bodysync/google/service_account_json",
     "/bodysync/health-auto-export/webhook_secret_tomek",
-    "/bodysync/health-auto-export/webhook_secret_partner",
+    "/bodysync/health-auto-export/webhook_secret_weronika",
     "/bodysync/jwt/signing_secret",
   ]
 

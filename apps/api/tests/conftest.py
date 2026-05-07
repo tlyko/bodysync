@@ -102,8 +102,8 @@ def ssm_params(dynamodb_table: Any) -> Iterator[None]:
         Type="SecureString",
     )
     client.put_parameter(
-        Name="/bodysync/health-auto-export/webhook_secret_partner",
-        Value="partner-webhook-secret-bbbbbbbbbbbbbb",
+        Name="/bodysync/health-auto-export/webhook_secret_weronika",
+        Value="weronika-webhook-secret-bbbbbbbbbbbbbb",
         Type="SecureString",
     )
     # Reset module-level cache so the test's SSM values are read fresh.

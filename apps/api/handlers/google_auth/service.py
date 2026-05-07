@@ -57,7 +57,7 @@ def _resolve_user_id(email: str) -> str:
 
     Format SSM `/bodysync/auth/allowed_emails`:
         [{"email": "tlyko94@gmail.com", "user_id": "tomek"},
-         {"email": "...", "user_id": "partner"}]
+         {"email": "...", "user_id": "weronika"}]
     """
     raw = get_param(ALLOWED_EMAILS_SSM, decrypt=False)
     try:

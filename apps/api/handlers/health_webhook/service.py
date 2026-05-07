@@ -44,7 +44,7 @@ LOCAL_TZ = ZoneInfo("Europe/Warsaw")
 # parametryzacji per Lambda env (DRY: secret list jest stała dla 2 userów).
 USER_SECRET_PARAMS: dict[str, str] = {
     "tomek": "/bodysync/health-auto-export/webhook_secret_tomek",
-    "partner": "/bodysync/health-auto-export/webhook_secret_partner",
+    "weronika": "/bodysync/health-auto-export/webhook_secret_weronika",
 }
 SECRET_MIN_LENGTH = 32
 

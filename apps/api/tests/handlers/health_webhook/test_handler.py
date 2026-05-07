@@ -17,7 +17,7 @@ import pytest
 FIXTURES = Path(__file__).resolve().parents[2] / "fixtures"
 
 TOMEK_SECRET = "tomek-webhook-secret-aaaaaaaaaaaaaaaa"
-PARTNER_SECRET = "partner-webhook-secret-bbbbbbbbbbbbbb"
+WERONIKA_SECRET = "weronika-webhook-secret-bbbbbbbbbbbbbb"
 
 
 def _event(
@@ -75,23 +75,23 @@ def test_happy_path_minimal_payload(dynamodb_table: Any) -> None:
 
 
 @pytest.mark.usefixtures("ssm_params")
-def test_happy_path_partner(dynamodb_table: Any) -> None:
-    """Bearer = PARTNER_SECRET → all writes pod USER#partner, nic pod USER#tomek."""
+def test_happy_path_weronika(dynamodb_table: Any) -> None:
+    """Bearer = WERONIKA_SECRET → all writes pod USER#weronika, nic pod USER#tomek."""
     from handlers.health_webhook import handler as h
 
-    result = h.handler(_event(_load_minimal_payload(), bearer=PARTNER_SECRET), _FakeContext())
+    result = h.handler(_event(_load_minimal_payload(), bearer=WERONIKA_SECRET), _FakeContext())
     assert result["statusCode"] == 200
 
     tomek = dynamodb_table.query(
         KeyConditionExpression="PK = :pk",
         ExpressionAttributeValues={":pk": "USER#tomek"},
     )["Items"]
-    partner = dynamodb_table.query(
+    weronika = dynamodb_table.query(
         KeyConditionExpression="PK = :pk",
-        ExpressionAttributeValues={":pk": "USER#partner"},
+        ExpressionAttributeValues={":pk": "USER#weronika"},
     )["Items"]
     assert len(tomek) == 0
-    assert len(partner) == 3
+    assert len(weronika) == 3
 
 
 @pytest.mark.usefixtures("ssm_params")
@@ -100,7 +100,7 @@ def test_pk_isolation_two_users(dynamodb_table: Any) -> None:
     from handlers.health_webhook import handler as h
 
     h.handler(_event(_load_minimal_payload(), bearer=TOMEK_SECRET), _FakeContext())
-    h.handler(_event(_load_minimal_payload(), bearer=PARTNER_SECRET), _FakeContext())
+    h.handler(_event(_load_minimal_payload(), bearer=WERONIKA_SECRET), _FakeContext())
 
     tomek = dynamodb_table.query(
         KeyConditionExpression="PK = :pk",
@@ -153,7 +153,7 @@ def test_401_when_secrets_are_placeholder() -> None:
         Type="SecureString",
     )
     client.put_parameter(
-        Name="/bodysync/health-auto-export/webhook_secret_partner",
+        Name="/bodysync/health-auto-export/webhook_secret_weronika",
         Value="PLACEHOLDER",
         Type="SecureString",
     )
