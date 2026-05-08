@@ -58,6 +58,16 @@ class JsonFormatter(logging.Formatter):
             "top_score",
             "results_count",
             "slugs",
+            # Sprint 4 Strava webhook observability — identity check fields,
+            # idempotency duplicate flag. NIGDY nie loggujemy full payload
+            # (PII: athlete name + activity coordinates) — tylko enums + ids.
+            "object_id",
+            "object_type",
+            "aspect_type",
+            "subscription_id",
+            "owner_id",
+            "received_sub",
+            "duplicate",
         ):
             value = getattr(record, key, None)
             if value is not None:
