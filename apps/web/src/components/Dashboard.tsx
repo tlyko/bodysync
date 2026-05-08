@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { getBiometry } from '../api';
 import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
 import type { BiometryDay, Me } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
+import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { StatCard } from './dashboard/StatCard';
 import { WeightChart } from './dashboard/WeightChart';
 
@@ -13,7 +14,16 @@ type Props = {
 
 type Tab = 'biometry' | 'chat';
 
-const BIOMETRY_DAYS = 30;
+const FETCH_DAYS = 30;
+
+const RANGE_LABELS: Record<Range, string> = {
+  '1d': 'Dziś',
+  '7d': 'Ostatni tydzień',
+  '30d': 'Ostatnie 30 dni',
+};
+const RANGE_DAYS: Record<Range, number> = { '1d': 1, '7d': 7, '30d': 30 };
+// Trend window per range: 30d → 7d vs 7-14d ago, 7d → 3d vs 3-6d ago, 1d → brak.
+const RANGE_TREND_WINDOW: Record<Range, number | null> = { '1d': null, '7d': 3, '30d': 7 };
 
 export function Dashboard({ me, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('biometry');
@@ -23,7 +33,7 @@ export function Dashboard({ me, onLogout }: Props) {
   useEffect(() => {
     if (activeTab !== 'biometry') return;
     if (days !== null) return;
-    getBiometry(BIOMETRY_DAYS)
+    getBiometry(FETCH_DAYS)
       .then((res) => setDays(res.days))
       .catch((e) => setError(e instanceof Error ? e.message : 'fetch failed'));
   }, [activeTab, days]);
@@ -70,6 +80,17 @@ type BiometryProps = {
 };
 
 function BiometryView({ days, error }: BiometryProps) {
+  const [range, setRange] = useState<Range>('30d');
+
+  // Slice 30d → ostatnie N dni (sortuj po date żeby slice trafił poprawnie).
+  // Wszystkie series budujemy z tego zakresu — sparkline + trend reagują
+  // automatycznie bez round-trip do backendu.
+  const sliced = useMemo<BiometryDay[]>(() => {
+    if (!days) return [];
+    const sorted = [...days].sort((a, b) => a.date.localeCompare(b.date));
+    return sorted.slice(-RANGE_DAYS[range]);
+  }, [days, range]);
+
   if (error) return <p className="error">Błąd: {error}</p>;
   if (!days) return <p>Wczytywanie…</p>;
   if (days.length === 0) {
@@ -83,17 +104,22 @@ function BiometryView({ days, error }: BiometryProps) {
     );
   }
 
-  const hrvSeries = buildSeries(days, 'hrv');
-  const sleepSeries = buildSeries(days, 'sleep');
-  const stepsSeries = buildSeries(days, 'steps');
-  const kcalActiveSeries = buildSeries(days, 'kcal_active');
-  const restingHrSeries = buildSeries(days, 'resting_hr');
-  const bodyFatSeries = buildSeries(days, 'body_fat');
-  const weightSeries = buildSeries(days, 'weight');
+  const trendWindow = RANGE_TREND_WINDOW[range];
+
+  const hrvSeries = buildSeries(sliced, 'hrv');
+  const sleepSeries = buildSeries(sliced, 'sleep');
+  const stepsSeries = buildSeries(sliced, 'steps');
+  const kcalActiveSeries = buildSeries(sliced, 'kcal_active');
+  const restingHrSeries = buildSeries(sliced, 'resting_hr');
+  const bodyFatSeries = buildSeries(sliced, 'body_fat');
+  const weightSeries = buildSeries(sliced, 'weight');
 
   return (
     <>
-      <h2>Ostatnie {BIOMETRY_DAYS} dni</h2>
+      <div className="section-header">
+        <h2>{RANGE_LABELS[range]}</h2>
+        <RangeToggle value={range} onChange={setRange} />
+      </div>
       <div className="stat-grid">
         <MetricStatCard
           label="HRV (avg ms)"
@@ -101,6 +127,7 @@ function BiometryView({ days, error }: BiometryProps) {
           unit="ms"
           accent="cyan"
           fmt={(v) => v.toFixed(1)}
+          trendWindow={trendWindow}
         />
         <MetricStatCard
           label="Sen"
@@ -108,12 +135,14 @@ function BiometryView({ days, error }: BiometryProps) {
           unit="h"
           accent="purple"
           fmt={(v) => v.toFixed(1)}
+          trendWindow={trendWindow}
         />
         <MetricStatCard
           label="Kroki"
           series={stepsSeries}
           accent="green"
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
+          trendWindow={trendWindow}
         />
         <MetricStatCard
           label="Kcal aktywne"
@@ -121,6 +150,7 @@ function BiometryView({ days, error }: BiometryProps) {
           unit="kcal"
           accent="orange"
           fmt={(v) => Math.round(v).toString()}
+          trendWindow={trendWindow}
         />
         <MetricStatCard
           label="Resting HR"
@@ -128,6 +158,7 @@ function BiometryView({ days, error }: BiometryProps) {
           unit="bpm"
           accent="red"
           fmt={(v) => Math.round(v).toString()}
+          trendWindow={trendWindow}
         />
         <MetricStatCard
           label="Body fat"
@@ -135,13 +166,14 @@ function BiometryView({ days, error }: BiometryProps) {
           unit="%"
           accent="muted"
           fmt={(v) => v.toFixed(1)}
+          trendWindow={trendWindow}
         />
       </div>
 
       <h2 style={{ marginTop: '2rem' }}>Waga</h2>
       <WeightChart data={weightSeries.map((p) => ({ date: p.date, weight: p.value }))} />
       <div className="stat-grid" style={{ marginTop: '1rem' }}>
-        <WeightSummaryCards series={weightSeries} />
+        <WeightSummaryCards series={weightSeries} rangeLabel={RANGE_LABELS[range]} />
       </div>
     </>
   );
@@ -153,29 +185,35 @@ type MetricStatCardProps = {
   unit?: string;
   accent: 'cyan' | 'green' | 'orange' | 'purple' | 'red' | 'muted';
   fmt: (v: number) => string;
+  trendWindow: number | null;
 };
 
-function MetricStatCard({ label, series, unit, accent, fmt }: MetricStatCardProps) {
+function MetricStatCard({ label, series, unit, accent, fmt, trendWindow }: MetricStatCardProps) {
   const last = latestValue(series);
-  const trend = trendPct(series);
+  // Pomijamy sparkline + trend dla "Dziś" view — pojedynczy punkt nie ma kształtu.
+  const sparkData = trendWindow === null ? undefined : series.map((p) => p.value);
+  const trend = trendWindow === null ? null : trendPct(series, trendWindow);
   return (
     <StatCard
       label={label}
       value={last ? fmt(last.value) : null}
       unit={unit}
       accent={accent}
-      sparkData={series.map((p) => p.value)}
+      sparkData={sparkData}
       change={trend}
     />
   );
 }
 
-function WeightSummaryCards({ series }: { series: SeriesPoint[] }) {
+type WeightSummaryProps = { series: SeriesPoint[]; rangeLabel: string };
+
+function WeightSummaryCards({ series, rangeLabel }: WeightSummaryProps) {
+  const deltaLabel = `Zmiana (${rangeLabel.toLowerCase()})`;
   if (series.length === 0) {
     return (
       <>
         <StatCard label="Aktualna waga" value={null} unit="kg" accent="green" />
-        <StatCard label={`Zmiana ${BIOMETRY_DAYS}d`} value={null} unit="kg" accent="cyan" />
+        <StatCard label={deltaLabel} value={null} unit="kg" accent="cyan" />
         <StatCard label="Średnia" value={null} unit="kg" accent="purple" />
       </>
     );
@@ -193,7 +231,7 @@ function WeightSummaryCards({ series }: { series: SeriesPoint[] }) {
         accent="green"
       />
       <StatCard
-        label={`Zmiana ${BIOMETRY_DAYS}d`}
+        label={deltaLabel}
         value={`${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`}
         unit="kg"
         accent="cyan"
