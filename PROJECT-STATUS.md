@@ -44,15 +44,38 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Google Sheets read | ❌ |
 | Anthropic advisor (prompt cache, prompt injection guard) | ✅ Sprint 6.1 + 6.2 live (PRy #59/#62/#63/#65/#66/#67) — `POST /api/advisor/chat` multi-turn z RAG retrieval (139 przepisów Lidla/Biedronki, k=5 cosine), used_recipes populated, system prompt + retrieved_recipes oba cached (~13956 tokens razem) |
 | Recipe pipeline (PDF → DDB + FAISS) | ✅ Sprint 6.2 PR2 live (PR #65 + #67) — `seed_recipes.py` parsed 139 recipes z 5 PDFów; DDB `PK=RECIPES`; S3 `recipes/faiss-index.bin` (834KB) + `recipes-metadata.json` (21KB); embed cost ~$0.0003 |
-| Frontend dashboard | ❌ |
+| Frontend dashboard + chat UI | ✅ Sprint 7 shipped 2026-05-08 (PRy #70/#71/#72/#73/#74/#75/#76) — login → tab Biometria/Chat → multi-turn chat z RecipeCard+RecipeModal, logout endpoint, vitest 5/5. Smoke verified live w przeglądarce |
 
 ## Open PRs
 
 `gh pr list` — żadnych otwartych w danej chwili.
 
-## Aktywny sprint — żaden (Sprint 6 zamknięty 2026-05-08)
+## Aktywny sprint — żaden (Sprint 6 + 7 zamknięte 2026-05-08)
 
-Sprint 6 (chat advisor + RAG) **fully shipped i live verified end-to-end** w ciągu jednego dnia (2026-05-08). Następny ruch wybierany z backlogu — Sprint 4 Strava (zaległy), Sprint 4.5 Garmin Connect, lub Sprint 7 Frontend chat UI.
+Sprint 6 (chat advisor + RAG) + Sprint 7 (frontend chat UI) **fully shipped i live verified end-to-end** w ciągu jednego dnia (2026-05-08). Następny ruch wybierany z backlogu — Sprint 4 Strava (zaległy), Sprint 4.5 Garmin Connect, Sprint 8 dashboard polish (StatCard/Sparkline port z prototype), lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, frontend bundle code-split, PDF hosting).
+
+**Sprint 7 — Frontend chat UI — DONE (PRy #70 + #71 + #72 + #73 + #74 + #75 + #76, 7 stepów w jednej sesji):**
+- ✅ Step 1 (PR #70) — `react-markdown` + `remark-gfm` + vitest infra + `--purple` token + chat types
+- ✅ Step 2 (PR #71) — `api.ts`: `postAdvisorChat`, `postLogout`, `AbortController`, `chatErrorMessage` PL mapper (400/401/429/502 → readable banner)
+- ✅ Step 3 (PR #72) — backend `auth_logout` Lambda 256MB/5s, `Set-Cookie` z `Max-Age=0`, idempotent, 4 testy. Mirror `google_auth` Domain/Path
+- ✅ Step 4 (PR #73) — `export_recipes_frontend.py` z DDB `PK=RECIPES` → `apps/web/src/recipes.json` (324KB / 139 recipes, deterministic re-run)
+- ✅ Step 5a (PR #74) — `ChatMessage`/`ChatInput`/`RecipeCard`/`RecipeModal` + 270 linii CSS (chat thread, markdown styling, recipe modal z 4-color macro grid, ESC/overlay close)
+- ✅ Step 5b (PR #75) — `ChatScreen` orchestracja (state, AbortController cleanup, scroll-to-bottom, optimistic user bubble, error banner z retry-friendly UX), tab nav `biometry`/`chat` w Dashboard, `App.tsx` `postLogout` integration
+- ✅ Step 6 (PR #76) — vitest config + 5 smoke testów (happy, 429, 401, pending disable, recipe modal open+ESC) — 5/5 pass w 0.8s
+- ✅ Smoke test live w przeglądarce — owner verified "działa elegancko"
+
+**Sprint 7 metryki:**
+- Bundle: JS 198 → 592 KB raw / 62.74 → 142.56 KB gzip (akceptowalne; code-split do follow-up jeśli first paint zacznie boleć)
+- CSS: 2.50 → 8.64 KB / 0.88 → 2.11 KB gzip
+- Test coverage: ChatScreen 5 smoke testów. Vitest infra ready dla future component tests.
+
+**Sprint 7 known limitations / follow-upy:**
+- **PDF hosting** odłożone (PDFy 16-29MB każdy, 127MB total) — RecipeCard click pokazuje pełne dane z DDB (ingredients/instructions) bez linka do source PDF. Sprint 7.5 mini-decyzja jeśli owner chce.
+- **Bundle >500KB warning** Vite (recipes.json 324KB raw) — code-split (`React.lazy(ChatScreen)` + dynamic `recipes.json` import) post-MVP follow-up
+- **Conversation history persistence cross-session** — backend ma 24h TTL DDB, ale brak `GET /api/advisor/chat/history` endpointu. Refresh strony = lose UI state. ADR-007 OPEN-2 (post-MVP)
+- **Streaming SSE** odłożone — single JSON + spinner OK dla 4-12s response
+
+
 
 **Sprint 6.1 PR1 — chat refactor multi-turn — DONE (PRy #59 + #61 + #62 + #63):**
 - ✅ `POST /api/advisor/chat` multi-turn z 24h DDB TTL (`CHAT#{date}#{turn_idx:04d}`)
@@ -85,9 +108,12 @@ Sprint 6 (chat advisor + RAG) **fully shipped i live verified end-to-end** w ci�
 
 **Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2.
 
-**Backlog post-Sprint 6 (do TaskList):**
+**Backlog post-Sprint 6+7 (do TaskList):**
 - **#17 Telegram bot subscriber** — replacement Gmail email który auto-unsub'uje SNS notifications (cost-guard alarm musi dzwonić)
 - **#18 Restore test_rag.py** — investigate faiss-cpu + pytest assertion rewrite segfault na macOS aarch64 + Linux GHA. Granular RAG unit tests skipped (`pytest.mark.skip`); coverage w `test_handler.py` integration tests
+- **#19 Frontend bundle code-split** — `React.lazy(ChatScreen)` + dynamic `recipes.json` import. Aktualnie 592KB raw / 142.56KB gzip; w MVP OK, ale jak first paint zacznie boleć
+- **#20 PDF hosting decision** — Sprint 7.5 mini-sprint jeśli owner chce link do source PDF z RecipeCard. Opcje: R2 bucket / S3 public / Cloudflare Pages assets. PDFy 16-29MB × 5 = 127MB
+- **#21 Conversation history GET endpoint** — chat history fetch z backend (24h TTL DDB już ma). UI refresh-page lose-state UX po Sprint 7
 - **API GW per-second throttle** — burst attack z valid JWT może przebić 30/dzień quotę zanim się przeliczy. CloudWatch alarm jako absolute backstop działa
 - **`requirements.txt` bez `--require-hashes`** — `pip-compile --generate-hashes` przed kolejnym sprintem z native deps
 
