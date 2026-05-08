@@ -3,6 +3,7 @@ import { getBiometry } from '../api';
 import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
 import type { BiometryDay, Me } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
+import { ActivitiesView } from './dashboard/ActivitiesView';
 import {
   DropletIcon,
   EggIcon,
@@ -91,7 +92,7 @@ export function Dashboard({ me, onLogout }: Props) {
               userLabel={userLabel}
             />
           )}
-          {activeTab === 'activities' && <ActivitiesPlaceholder />}
+          {activeTab === 'activities' && <ActivitiesView />}
           {activeTab === 'recipes' && <ChatScreen />}
           {activeTab === 'settings' && <ProfileTargetsForm />}
         </div>
@@ -412,19 +413,6 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
         />
       </div>
     </>
-  );
-}
-
-// ─── Activities placeholder ─────────────────────────────────────────────
-
-function ActivitiesPlaceholder() {
-  return (
-    <SectionPanel title="Aktywności">
-      <p className="placeholder-text">
-        Integracja Strava jest w backlogu (Sprint 4 zaległy). Po jej shipowaniu
-        zobaczysz tu listę ostatnich treningów + statystyki tygodnia.
-      </p>
-    </SectionPanel>
   );
 }
 

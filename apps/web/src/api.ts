@@ -3,6 +3,7 @@
 
 import { API_URL } from './config';
 import type {
+  ActivitiesResponse,
   BiometryResponse,
   ChatMessageDTO,
   ChatRequest,
@@ -100,6 +101,17 @@ export async function putProfileTargets(t: ProfileTargetsUpdate): Promise<Profil
     method: 'PUT',
     body: JSON.stringify(t),
   });
+}
+
+export async function getActivities(limit = 20): Promise<ActivitiesResponse> {
+  return request<ActivitiesResponse>(`/api/activities?limit=${limit}`);
+}
+
+// Strava OAuth start endpoint zwraca 302 do strava.com — frontend
+// nawiguje przez `window.location.assign(stravaOAuthStartUrl())`.
+// `credentials: include` dla JWT cookie potrzebny — zwracamy bezwarunkowy URL.
+export function stravaOAuthStartUrl(): string {
+  return `${API_URL}/api/strava/oauth/start`;
 }
 
 // PL message dla UI banner — mapuje status code na czytelny komunikat.

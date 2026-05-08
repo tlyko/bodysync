@@ -76,3 +76,25 @@ export type ProfileTargetsUpdate = {
   fat_target_g: number;
   carbs_target_g: number;
 };
+
+// ─── Activities (Sprint 4, mirror handlers/activities_list) ───
+
+export type Activity = {
+  strava_id: number;
+  name: string;
+  sport_type: string; // Strava enum: Run / Ride / Walk / Swim / Hike / etc.
+  type: string;
+  distance_m: number;
+  moving_time_s: number;
+  elapsed_time_s: number;
+  elevation_gain_m: number;
+  start_date: string; // ISO 8601 UTC
+  start_date_local: string; // ISO 8601 lokalny
+  calories: number | null;
+  average_heartrate: number | null;
+  max_heartrate: number | null;
+};
+
+export type ActivitiesResponse = {
+  items: Activity[];
+};
