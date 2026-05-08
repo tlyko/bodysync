@@ -870,7 +870,7 @@ Branch base: `main` (po merge debug PRs / refactor jako feat branch)
 
 ---
 
-### Step 1: Lambda function rename + route rename → modyfikuje `infrastructure/terraform/main.tf` + `cloudwatch.tf` + `apps/api/scripts/build.py`
+### Step 1: Lambda function rename + route rename → modyfikuje `infrastructure/terraform/main.tf` + `cloudwatch.tf` + `apps/api/scripts/build.py` ✅ shipped (commit f113b30 — module + API GW resources renamed `advisor_dinner` → `advisor_chat`, route `POST /api/advisor/chat`, cloudwatch metric filter log group rename. `scripts/build.py` autodiscovery — brak zmiany potrzebna. Lambda destroy+create akceptowalne — PR #50 było smoke test)
 - **Modyfikuje:**
   - `infrastructure/terraform/main.tf`:
     - `module "advisor_dinner"` → `module "advisor_chat"` (rename block name)
@@ -904,7 +904,7 @@ Branch base: `main` (po merge debug PRs / refactor jako feat branch)
 
 ---
 
-### Step 2: Schemas chat shape → modyfikuje `apps/api/handlers/advisor_chat/schemas.py`
+### Step 2: Schemas chat shape → modyfikuje `apps/api/handlers/advisor_chat/schemas.py` ✅ shipped (commit f113b30 + 26972f1 — `ChatRequest`, `ChatMessage`, `UsedRecipe`, `TokenUsage`, `ChatResponse` + zachowany `TodayState`. `Dinner*` classes dropped. `26972f1` dodał `field_validator` `_validate_content` rejecting whitespace-only + closing-tag literals + history-line spoofing — bug_008 prompt injection guard z ultrareview)
 - **Modyfikuje** `apps/api/handlers/advisor_chat/schemas.py`:
   - **DROP:** `DinnerAdvisorRequest`, `DinnerAdvisorResponse`, `DinnerSuggestion`, `DinnerAdvisorLLMOutput`
   - **KEEP:** `TodayState` (wszystkie fields bez zmian — re-use w `<today_context>` block)
@@ -947,7 +947,7 @@ Branch base: `main` (po merge debug PRs / refactor jako feat branch)
 
 ---
 
-### Step 3: Service layer — chat history + build_chat_messages → modyfikuje `apps/api/handlers/advisor_chat/service.py`
+### Step 3: Service layer — chat history + build_chat_messages → modyfikuje `apps/api/handlers/advisor_chat/service.py` ✅ shipped (commit f113b30 + 26972f1 — `read_history`, `count_today_turns` (dropped w 26972f1 — dead code, handler inlines), `append_message`, `build_chat_messages`, `call_chat`. Zachowane `build_today_state`, `get_anthropic_client`, retry. `26972f1` dodał `put_item_idempotent` z retry-on-collision (max 5) zabezpieczając przed TOCTOU silent overwrite, oraz refactor `AdvisorBackendError(reason, status_code)` z fixed vocabulary — Anthropic SDK body NIE leakuje do logów, ADR-007 OPEN-4)
 - **Modyfikuje** `apps/api/handlers/advisor_chat/service.py`:
   - **DROP:** `get_cached_or_call`, `_cache_key`, dinner-specific `build_user_message`, tool_use parsing logic, `DinnerAdvisorLLMOutput` references
   - **KEEP (no change):** `get_anthropic_client`, `MODEL`, `MAX_TOKENS`, `build_today_state` (wszystkie helpers + PROFILE fallback), retry logic via Anthropic SDK `max_retries=2`, structured Anthropic log emit (`event=anthropic_call` z usage fields)
@@ -1002,7 +1002,7 @@ Branch base: `main` (po merge debug PRs / refactor jako feat branch)
 
 ---
 
-### Step 4: Handler refactor + rate limit → modyfikuje `apps/api/handlers/advisor_chat/handler.py`
+### Step 4: Handler refactor + rate limit → modyfikuje `apps/api/handlers/advisor_chat/handler.py` ✅ shipped (commit f113b30 + 26972f1 — JWT verify → `ChatRequest` parse → rate limit (30 user turn/dzień → 429 `daily_quota`) → append user (FIRST, UX continuity) → `call_chat` → append assistant. `26972f1` przekazuje `history` snapshot do user-append (eliminuje duplicate `read_history` Query — bug_007), rename log fields `tokens_input/output` → `input_tokens/output_tokens` (bug_016), `logger.exception` → `logger.error` z structured `reason`/`status_code`/`exc_type` extras — no traceback w CloudWatch (M3))
 - **Modyfikuje** `apps/api/handlers/advisor_chat/handler.py`:
   - **DROP:** dinner request parsing (`force` query param, `notes` field), `get_cached_or_call` import, dinner response shape
   - **KEEP:** JWT verify (`shared.auth.verify_jwt`, `COOKIE_NAME = "bodysync_session"`), Warsaw TZ today, structured log z `request_id` + `user_id`
@@ -1039,7 +1039,7 @@ Branch base: `main` (po merge debug PRs / refactor jako feat branch)
 
 ---
 
-### Step 5: System prompt rewrite → modyfikuje `apps/api/handlers/advisor_chat/system_prompt.txt`
+### Step 5: System prompt rewrite → modyfikuje `apps/api/handlers/advisor_chat/system_prompt.txt` ✅ shipped (commit f113b30 — 5 sekcji PL (PERSONA / UMIEJĘTNOŚCI / ZASADY METODOLOGICZNE / ANTI-INJECTION / FORMAT), ~7KB, 3 markery `# TODO(PR2)`, NO `<retrieved_recipes>` mention — PR1 invariant)
 - **Modyfikuje** `apps/api/handlers/advisor_chat/system_prompt.txt`:
   - **Rewrite całości** na 5-section structure per ADR-007 D7 (po polsku):
     1. **PERSONA** — "Jesteś asystentem dietetycznym dla użytkownika aplikacji bodysync.pl. Twoja rola: odpowiadać na pytania o jedzenie, makra, propozycje posiłków, oceniać dotychczasowy bilans dnia. Polski, bezpośredni, bez moralizowania." (**PR1: bez wzmianki o "bibliotece Lidla/Biedronki"** — to dochodzi w PR2 razem z `<retrieved_recipes>` block. Komentarz w pliku: `# TODO(PR2): dodać "Masz dostęp do biblioteki przepisów Lidla i Biedronki..."`)
@@ -1064,7 +1064,7 @@ Branch base: `main` (po merge debug PRs / refactor jako feat branch)
 
 ---
 
-### Step 6: Tests full rewrite → tworzy `apps/api/tests/handlers/advisor_chat/{test_handler.py, test_service.py, conftest.py}`
+### Step 6: Tests full rewrite → tworzy `apps/api/tests/handlers/advisor_chat/{test_handler.py, test_service.py, conftest.py}` ✅ shipped (commit f113b30 + 26972f1 — 22 nowe testy w f113b30 (handler 14 + service 8). `26972f1` dodał +14 review fix testów (attack closing-tag, history-spoof, whitespace, collision retry, exhausted retries, history-snapshot-no-duplicate-Query, M3 SDK message log leak, observability fields). Drop `count_today_turns` test. Total advisor_chat: 38 testów. Repo total: 102 → 139 (+37). Cost-guard `tests/shared/test_logging.py` dodatkowo z H1 fix)
 - **Modyfikuje (po git mv ze Step 1):**
   - **DROP** stare 23 testy z `test_handler.py` + `test_service.py` (dinner-specific — tool_use, force, dinner cache shape)
   - **KEEP** `conftest.py` fixtures shape (moto DDB + SSM + `responses` lib mock dla Anthropic), zaktualizowane:
