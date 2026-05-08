@@ -222,16 +222,17 @@ resource "aws_lambda_permission" "api_read_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
-# Sprint 6 — advisor_dinner. POST /api/advisor/dinner. JWT cookie auth,
-# Anthropic Haiku 4.5 z prompt cache (ephemeral) + DDB cache 1h TTL.
-# 1024MB / 30s — LLM call latency p95 ~3s + 2 retry budget. Per ADR-006.
-module "advisor_dinner" {
+# Sprint 6.1 — advisor_chat. POST /api/advisor/chat. JWT cookie auth,
+# Anthropic Haiku 4.5 z prompt cache (ephemeral) + multi-turn DDB history.
+# 1024MB / 30s — LLM call latency p95 ~3s + 2 retry budget. Per ADR-007
+# (supersedes ADR-006 dinner advisor — chat refactor PR1, RAG dochodzi w PR2).
+module "advisor_chat" {
   source = "./modules/lambda"
 
   project       = local.project
-  function_name = "advisor-dinner"
-  source_zip    = "${path.module}/../../apps/api/dist/advisor_dinner.zip"
-  handler       = "handlers.advisor_dinner.handler.handler"
+  function_name = "advisor-chat"
+  source_zip    = "${path.module}/../../apps/api/dist/advisor_chat.zip"
+  handler       = "handlers.advisor_chat.handler.handler"
   memory_size   = 1024
   timeout       = 30
 
@@ -243,10 +244,11 @@ module "advisor_dinner" {
   extra_iam_statements = [
     {
       # Per CLAUDE.md "Reguła PK isolation" + sec audit H5 — IAM jako
-      # druga linia obrony. advisor_dinner czyta BIOMETRY (Query po
-      # USER#{id} + sk_prefix) i PROFILE (GetItem), pisze ADVISOR_CACHE
-      # (PutItem) — wszystko pod USER#{id} PK.
-      Sid      = "DDBReadBiometryWriteAdvisorCache"
+      # druga linia obrony. advisor_chat czyta BIOMETRY (Query po
+      # USER#{id} + sk_prefix) + PROFILE (GetItem) + chat history (Query
+      # CHAT#{date}#*), pisze chat turns (PutItem CHAT#{date}#{idx})
+      # — wszystko pod USER#{id} PK.
+      Sid      = "DDBReadBiometryWriteChat"
       Effect   = "Allow"
       Action   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"]
       Resource = aws_dynamodb_table.data.arn
@@ -268,23 +270,23 @@ module "advisor_dinner" {
   ]
 }
 
-resource "aws_apigatewayv2_integration" "advisor_dinner" {
+resource "aws_apigatewayv2_integration" "advisor_chat" {
   api_id                 = module.api_gateway.api_id
   integration_type       = "AWS_PROXY"
-  integration_uri        = module.advisor_dinner.invoke_arn
+  integration_uri        = module.advisor_chat.invoke_arn
   payload_format_version = "2.0"
 }
 
-resource "aws_apigatewayv2_route" "advisor_dinner" {
+resource "aws_apigatewayv2_route" "advisor_chat" {
   api_id    = module.api_gateway.api_id
-  route_key = "POST /api/advisor/dinner"
-  target    = "integrations/${aws_apigatewayv2_integration.advisor_dinner.id}"
+  route_key = "POST /api/advisor/chat"
+  target    = "integrations/${aws_apigatewayv2_integration.advisor_chat.id}"
 }
 
-resource "aws_lambda_permission" "advisor_dinner_apigw" {
+resource "aws_lambda_permission" "advisor_chat_apigw" {
   statement_id  = "AllowAPIGWInvoke"
   action        = "lambda:InvokeFunction"
-  function_name = module.advisor_dinner.function_name
+  function_name = module.advisor_chat.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
