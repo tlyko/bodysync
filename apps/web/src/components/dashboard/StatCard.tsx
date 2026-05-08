@@ -7,10 +7,11 @@ const ACCENT_COLOR: Record<Accent, string> = {
   orange: '#f59e0b',
   purple: '#a78bfa',
   red: '#ef4444',
+  pink: '#f472b6',
   muted: '#94a3b8',
 };
 
-type Accent = 'cyan' | 'green' | 'orange' | 'purple' | 'red' | 'muted';
+type Accent = 'cyan' | 'green' | 'orange' | 'purple' | 'red' | 'pink' | 'muted';
 
 type Props = {
   label: string;
@@ -22,9 +23,6 @@ type Props = {
   icon?: ReactNode;
 };
 
-// Karta z metrykiem: label (uppercase muted) → value (large bold) + unit →
-// optional bottom row z change% (▲/▼ green/red) + sparkline (right).
-// Empty state: value === null|"—" → "—" + sparkline ukryty.
 export function StatCard({
   label,
   value,
@@ -43,8 +41,10 @@ export function StatCard({
 
   return (
     <div className={`stat-card ${accentClass}`}>
-      {icon && <div className="stat-card-icon">{icon}</div>}
-      <div className="stat-card-label">{label}</div>
+      <div className="stat-card-header">
+        {icon && <span className="stat-card-icon">{icon}</span>}
+        <span className="stat-card-label">{label}</span>
+      </div>
       <div className="stat-card-value-row">
         <span className="stat-card-value">{isEmpty ? '—' : value}</span>
         {!isEmpty && unit && <span className="stat-card-unit">{unit}</span>}

@@ -1,14 +1,25 @@
 :root {
   --bg: #0a0e17;
+  --surface: #111827;
   --card: #1a2332;
+  --card-hover: #1e2a3d;
   --border: #2a3548;
+  --border-light: #374357;
   --text: #e2e8f0;
   --text-muted: #94a3b8;
+  --text-dim: #5a6f8e;
   --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.12);
   --green: #10b981;
+  --green-dim: rgba(16, 185, 129, 0.12);
   --orange: #f59e0b;
+  --orange-dim: rgba(245, 158, 11, 0.12);
   --red: #ef4444;
+  --red-dim: rgba(239, 68, 68, 0.12);
   --purple: #a78bfa;
+  --purple-dim: rgba(167, 139, 250, 0.12);
+  --pink: #f472b6;
+  --pink-dim: rgba(244, 114, 182, 0.12);
 
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   line-height: 1.5;
@@ -85,69 +96,274 @@ code {
   color: var(--red);
 }
 
-/* ─── Dashboard ─── */
+/* ─── App shell — sidebar + content (Sprint 9, prototype port) ─── */
 
-.dashboard {
-  max-width: 1200px;
-  margin: 0 auto;
-  padding: 1.5rem;
+.app-shell {
+  display: grid;
+  grid-template-columns: 240px 1fr;
+  min-height: 100vh;
 }
-.dashboard header {
+.app-sidebar {
+  background: var(--surface);
+  border-right: 1px solid var(--border);
+  padding: 1.5rem 1rem;
   display: flex;
-  align-items: center;
-  justify-content: space-between;
+  flex-direction: column;
   gap: 1.5rem;
-  margin-bottom: 2rem;
-  padding-bottom: 1rem;
-  border-bottom: 1px solid var(--border);
-  flex-wrap: wrap;
+  position: sticky;
+  top: 0;
+  height: 100vh;
 }
-.dashboard h1 {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 1.75rem;
-  margin: 0;
-  color: var(--cyan);
-  letter-spacing: -0.02em;
-}
-.user-info {
+.app-sidebar-brand {
   display: flex;
-  gap: 1rem;
   align-items: center;
-  color: var(--text-muted);
-  font-size: 0.9rem;
+  gap: 0.7rem;
+  padding: 0 0.4rem;
 }
-.user-info small {
+.app-sidebar-logo {
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: linear-gradient(135deg, var(--cyan), var(--purple));
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.25);
+}
+.app-sidebar-brand-text {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
-  opacity: 0.7;
-  font-size: 0.85em;
+  font-size: 1.1rem;
+  font-weight: 700;
+  color: var(--text);
+  letter-spacing: -0.01em;
 }
-
-.dashboard-tabs {
+.app-sidebar-nav {
   display: flex;
-  gap: 0.5rem;
+  flex-direction: column;
+  gap: 0.25rem;
 }
-.dashboard-tab {
+.app-sidebar-nav-item {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.6rem 0.85rem;
   background: transparent;
   border: 1px solid transparent;
+  border-radius: 10px;
   color: var(--text-muted);
-  padding: 0.4rem 1rem;
-  border-radius: 6px;
   font-size: 0.9rem;
   font-weight: 500;
   cursor: pointer;
+  text-align: left;
+  font-family: inherit;
   transition:
-    color 0.15s,
-    border-color 0.15s,
-    background 0.15s;
+    background 0.15s,
+    color 0.15s;
 }
-.dashboard-tab:hover {
+.app-sidebar-nav-item:hover:not(.active) {
+  background: var(--card);
   color: var(--text);
-  border-color: var(--border);
+  border-color: transparent;
 }
-.dashboard-tab.active {
+.app-sidebar-nav-item.active {
+  background: var(--cyan-dim);
   color: var(--cyan);
-  border-color: var(--cyan);
-  background: rgba(34, 211, 238, 0.08);
+}
+.app-sidebar-nav-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.app-sidebar-foot {
+  margin-top: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  padding: 0 0.4rem;
+  font-size: 0.8rem;
+  color: var(--text-dim);
+}
+.app-sidebar-user {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.app-sidebar-logout {
+  font-size: 0.8rem;
+  padding: 0.45rem 0.75rem;
+  text-align: left;
+}
+
+.app-content {
+  display: flex;
+  flex-direction: column;
+  padding: 2rem 2.5rem 3rem;
+  max-width: 1240px;
+  width: 100%;
+  box-sizing: border-box;
+}
+.app-content-header {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 2rem;
+}
+.app-content-title {
+  margin: 0;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 2rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  background: linear-gradient(135deg, var(--text) 30%, var(--cyan));
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+.app-content-subtitle {
+  margin: 0.3rem 0 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.app-content-body {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+
+/* Mobile: stack sidebar i content kolumną */
+@media (max-width: 768px) {
+  .app-shell {
+    grid-template-columns: 1fr;
+  }
+  .app-sidebar {
+    position: static;
+    height: auto;
+    border-right: 0;
+    border-bottom: 1px solid var(--border);
+  }
+  .app-sidebar-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .app-sidebar-foot {
+    flex-direction: row;
+    justify-content: space-between;
+    align-items: center;
+  }
+  .app-content {
+    padding: 1.25rem;
+  }
+}
+
+/* Section panel — used dla Recovery / Aktywności w overview, Activities placeholder */
+.section-panel {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 1.5rem;
+}
+.section-panel-title {
+  margin: 0 0 1rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text);
+}
+.placeholder-text {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+
+/* Overview grid — Recovery + Activities side by side, stack na mobile */
+.overview-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.25rem;
+}
+@media (max-width: 768px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Mini stat — subtle row inside Recovery panel */
+.mini-stat-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.6rem;
+}
+.mini-stat {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.7rem 0.85rem;
+  background: var(--surface);
+  border-radius: 10px;
+  border: 1px solid var(--border);
+}
+.mini-stat-icon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+}
+.mini-stat-accent-cyan .mini-stat-icon {
+  color: var(--cyan);
+}
+.mini-stat-accent-green .mini-stat-icon {
+  color: var(--green);
+}
+.mini-stat-accent-orange .mini-stat-icon {
+  color: var(--orange);
+}
+.mini-stat-accent-purple .mini-stat-icon {
+  color: var(--purple);
+}
+.mini-stat-accent-red .mini-stat-icon {
+  color: var(--red);
+}
+.mini-stat-accent-pink .mini-stat-icon {
+  color: var(--pink);
+}
+.mini-stat-accent-muted .mini-stat-icon {
+  color: var(--text-muted);
+}
+.mini-stat-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.1rem;
+}
+.mini-stat-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.mini-stat-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.mini-stat-unit {
+  font-size: 0.7rem;
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* ─── Dashboard ─── */
+
+.empty {
+  padding: 2rem;
+  border: 1px dashed var(--border);
+  border-radius: 12px;
+  background: var(--card);
+  text-align: center;
+  color: var(--text-muted);
 }
 
 .section-header {
@@ -192,115 +408,61 @@ code {
   color: var(--cyan);
 }
 
-.dashboard h2 {
-  margin: 0 0 1rem;
-  font-size: 1.1rem;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-}
-.dashboard .empty {
-  padding: 2rem;
-  border: 1px dashed var(--border);
-  border-radius: 8px;
-  background: var(--card);
-  text-align: center;
-}
-.table-wrapper {
-  overflow-x: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--card);
-}
-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 0.9rem;
-}
-th,
-td {
-  padding: 0.75rem 1rem;
-  text-align: left;
-  border-bottom: 1px solid var(--border);
-}
-th {
-  background: rgba(34, 211, 238, 0.05);
-  font-weight: 600;
-  color: var(--text-muted);
-  text-transform: uppercase;
-  font-size: 0.75rem;
-  letter-spacing: 0.05em;
-  white-space: nowrap;
-}
-tr:last-child td {
-  border-bottom: 0;
-}
-td.date {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  color: var(--cyan);
-  white-space: nowrap;
-}
-
 /* ─── Stat cards (Sprint 8) ─── */
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 1rem;
 }
 
+/* Per-accent tinted full-card background: subtle bg + matching border.
+   Każda karta dostaje accent kolor jako tło 12% alpha + accent border 30%. */
 .stat-card {
   background: var(--card);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 1.1rem 1.25rem;
+  border-radius: 16px;
+  padding: 1.5rem;
   display: flex;
   flex-direction: column;
-  gap: 0.6rem;
-  min-height: 124px;
+  gap: 0.75rem;
   position: relative;
   overflow: hidden;
+  transition:
+    border-color 0.2s ease,
+    background 0.2s ease;
 }
-.stat-card::before {
-  content: '';
-  position: absolute;
-  top: -30px;
-  right: -30px;
-  width: 96px;
-  height: 96px;
-  border-radius: 50%;
-  opacity: 0.18;
-  pointer-events: none;
+.stat-card-accent-cyan {
+  background: linear-gradient(135deg, var(--cyan-dim), var(--card) 75%);
 }
-.stat-card-accent-cyan::before {
-  background: var(--cyan);
+.stat-card-accent-green {
+  background: linear-gradient(135deg, var(--green-dim), var(--card) 75%);
 }
-.stat-card-accent-green::before {
-  background: var(--green);
+.stat-card-accent-orange {
+  background: linear-gradient(135deg, var(--orange-dim), var(--card) 75%);
 }
-.stat-card-accent-orange::before {
-  background: var(--orange);
+.stat-card-accent-purple {
+  background: linear-gradient(135deg, var(--purple-dim), var(--card) 75%);
 }
-.stat-card-accent-purple::before {
-  background: var(--purple);
+.stat-card-accent-red {
+  background: linear-gradient(135deg, var(--red-dim), var(--card) 75%);
 }
-.stat-card-accent-red::before {
-  background: var(--red);
+.stat-card-accent-pink {
+  background: linear-gradient(135deg, var(--pink-dim), var(--card) 75%);
 }
-.stat-card-accent-muted::before {
-  background: var(--text-muted);
-  opacity: 0.08;
+.stat-card-accent-muted {
+  background: var(--card);
 }
 
-.stat-card-icon {
-  position: absolute;
-  top: 0.85rem;
-  right: 0.95rem;
+.stat-card-header {
   display: flex;
   align-items: center;
+  gap: 0.5rem;
+}
+.stat-card-icon {
+  display: inline-flex;
+  align-items: center;
   justify-content: center;
-  z-index: 1;
-  opacity: 0.85;
 }
 .stat-card-accent-cyan .stat-card-icon {
   color: var(--cyan);
@@ -317,18 +479,20 @@ td.date {
 .stat-card-accent-red .stat-card-icon {
   color: var(--red);
 }
+.stat-card-accent-pink .stat-card-icon {
+  color: var(--pink);
+}
 .stat-card-accent-muted .stat-card-icon {
   color: var(--text-muted);
 }
 
 .stat-card-label {
-  font-size: 0.7rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
   text-transform: uppercase;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.08em;
   color: var(--text-muted);
   font-weight: 500;
-  position: relative;
-  padding-right: 1.5rem;
 }
 .stat-card-value-row {
   display: flex;
@@ -339,9 +503,10 @@ td.date {
 .stat-card-value {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 2rem;
-  font-weight: 700;
+  font-weight: 800;
   line-height: 1;
   color: var(--text);
+  letter-spacing: -0.02em;
 }
 .stat-card-unit {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
