@@ -316,3 +316,30 @@ def test_anthropic_cache_marker_present(
     assert block["type"] == "text"
     assert block["text"] == "SYSTEM TEXT"
     assert block["cache_control"] == {"type": "ephemeral"}
+
+
+def test_system_prompt_meets_haiku_cache_minimum() -> None:
+    """Regression — system_prompt.txt musi mieć >= 14000 chars (~4500 PL
+    tokens) żeby Anthropic prompt cache działał dla Haiku 4.5.
+
+    Per docs.anthropic.com/.../prompt-caching minimum tokens dla cache
+    marker:
+      - Haiku 4.5: 4096
+      - Sonnet 4.6: 2048
+      - Sonnet 4.5: 1024
+
+    Polska gęstość ~3.5 chars/token, więc 14000 chars ≈ 4000 tokens
+    z marginesem do 4096. Nie skracaj poniżej tej wartości — Anthropic
+    silently odrzuca cache marker i każdy call jest billed full input
+    tokens (~10x drożej niż cached read).
+    """
+    from pathlib import Path
+
+    prompt_path = (
+        Path(__file__).resolve().parents[3] / "handlers" / "advisor_chat" / "system_prompt.txt"
+    )
+    content = prompt_path.read_text(encoding="utf-8")
+    assert len(content) >= 14000, (
+        f"system_prompt.txt={len(content)} chars; needs >=14000 (~4500 PL "
+        f"tokens) dla Haiku 4.5 cache marker minimum (4096 tokens)"
+    )
