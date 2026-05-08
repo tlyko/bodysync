@@ -2015,3 +2015,429 @@ Pre-req: Sprint 7 deployed (chat działa). Backend `GET /api/biometry?days=N` (l
 - **R3:** Bundle dochodzi >700KB raw. **M:** Sparkline/StatCard są inline SVG ~ tiny. WeightChart ~tiny. Recharts NIE używamy. Bundle wzrost ~3-5KB.
 - **R4:** Sprint 8 nie wykorzystuje `change`/`trend` jak prototype (% vs okres). **M:** `trendPct` w `biometry.ts` (Step 3) liczy 7d vs 7-14d ago. Akceptowalny KISS scope.
 
+---
+
+
+## Sprint 4 — Strava OAuth + webhook + fetcher (port wzorca z sprawdzamszlak)
+Phase: 5 (activity tracking — pierwszy real-world third-party OAuth flow w bodysync)
+Estimated effort: ~7-9h (7 stepów)
+Branch base: `main` po merge ostatniego PR-a (PROJECT-STATUS.md mówi czysto na 2026-05-08).
+Pre-req: Sprint 9 closed — sidebar ma już tab `Aktywności` z placeholderem (`Dashboard.tsx:420-428`). SSM placeholders dla `/bodysync/strava/{client_id,client_secret,verify_token}` już istnieją w `locals.tf:40-50` (puste wartości, lifecycle ignore).
+
+**Driving use case:**
+> Owner (tomek lub weronika) loguje się przez Google OAuth, wchodzi w tab "Aktywności", klika "Połącz ze Stravą" → backend redirect → Strava authorize → callback persists tokens (per-user SSM SecureString z `athlete_id` mapping) → po następnym treningu Strava POST-uje webhook → fetcher Lambda fetchuje `/activities/{id}` + `/streams` → DDB `ACTIVITY#{strava_id}` + S3 raw streams → tab "Aktywności" pokazuje listę 10 ostatnich aktywności (sport_type, distance km, duration, kcal, average_heartrate, start_date_local).
+
+**Source-of-truth:** `~/repos/sprawdzamszlak/` repo (TypeScript reference, W4 shipped 2026-05-04, 3 PR-y):
+- `apps/api/src/strava/{oauth,webhook,fetcher,fetcher-handler}.ts` — handler logic
+- `apps/api/scripts/strava-{subscribe,unsubscribe,replay}.ts` — owner CLIs
+- `infrastructure/terraform/{lambda,dynamodb}.tf` — fetcher Lambda + DDB Streams trigger
+- `PROJECT-STATUS.md §"W4 — what landed"` — high-level recap
+
+**NIE kopiujemy 1:1.** sprawdzamszlak to TypeScript Node.js + osobne DDB tables + GeoJSON do mapy szlaków. bodysync to Python 3.12 + single-table + multi-user + brak mapy. Adaptujemy wzorzec, nie kod.
+
+**Decyzje scope (KISS defaults zatwierdzone):**
+- **D1 Multi-user tokens** — `/bodysync/strava/{user_id}/tokens` SSM SecureString (vs sprawdzamszlak single-tenant). 2 osoby, 2 osobne paramy. JSON shape: `{access_token, refresh_token, expires_at, athlete_id, connected_at}`.
+- **D2 CSRF state w single-table** zamiast osobnej tabeli — `PK=STRAVA_OAUTH_STATE#{state}`, `SK=META`, atrybut `ttl` (10 min epoch). DDB ma już `ttl` enabled (`dynamodb.tf:47`). Conditional `DeleteItem` z `attribute_exists(PK)` daje atomic single-use nonce — wzorzec ze sprawdzamszlak `oauth.ts:103-119`.
+- **D2.1 State carries `user_id`** — żeby callback wiedział KTO klikał (state mintowany przez authenticated `/api/strava/oauth/start`, więc znamy user_id z JWT). Atrybut `user_id` w state row, callback czyta przed token exchange. Bez tego nie wiemy w callbacku który SSM path zapisać.
+- **D3 Events idempotency** — `PK=EVENT#strava`, `SK={subscription_id}#{object_id}#{event_time}`, `ttl` 7d (vs sprawdzamszlak 30d — bodysync miał oryginalnie 7d, single-tenant mniej replay scenariuszy bo solo dev nie wyjeżdża z 30d budżetem failure'ów). DDB Streams już produkujemy z głównej tabeli? **NIE** — `dynamodb.tf` dziś NIE ma `stream_enabled`. Step 5 włącza stream view `NEW_IMAGE`.
+- **D4 Activity rows (CLAUDE.md schema)** — `PK=USER#{user_id}`, `SK=ACTIVITY#{strava_id}`, atrybuty: `sport_type, name, distance_m, moving_time_s, elapsed_time_s, total_elevation_gain_m, start_date, start_date_local, calories, average_heartrate, max_heartrate, has_heartrate, suffer_score, perceived_exertion, source: "strava", strava_activity_id, fetched_at`. NIE persist polyline, NIE GeoJSON (bodysync nie ma mapy).
+- **D5 S3 raw streams** — `s3://bodysync-data-{account_id}/strava/streams/{user_id}/{strava_activity_id}.json` raw payload z `?keys=heartrate,cadence,watts,time,distance,altitude&key_by_type=true&resolution=high`. Lifecycle: po 90 dniach do Glacier (już dziś `s3.tf` może mieć lifecycle — zweryfikować w Step 5).
+- **D6 Sport_type — BEZ allowlist** (różnica vs sprawdzamszlak który filtrował 5 trail typów). bodysync chce wszystko (Run, Ride, Walk, Swim, Hike, WeightTraining, Yoga, Workout, ...). Filtr scope = explicit `aspect_type ∈ {create, update}` (delete → log + skip jak sprawdzamszlak `fetcher.ts:432-438`).
+- **D7 Owner→athlete_id mapping** — webhook payload zawiera `owner_id` (Strava athlete ID, integer). Fetcher musi zmapować na bodysync `user_id` żeby wiedzieć którą tokens-SSM otworzyć i pod jakie `PK=USER#{user_id}` zapisać. Mapowanie: query GSI-1 z `SK=STRAVA_ATHLETE#{athlete_id}` → row `{PK=USER#{user_id}, SK=STRAVA_ATHLETE#{athlete_id}, athlete_id}` zapisany przy callbacku. KISS alternatywa: SSM Parameter `/bodysync/strava/athlete-to-user` z JSON `{"12345678": "tomek", "87654321": "weronika"}` (dwóch userów, 2 entries, no GSI lookup, latency win). **Wybór: SSM map** — aktualizowany OAuth callback'em, refreshed lazy w fetcher; znacząco prostszy niż GSI Query.
+- **D8 Webhook identity check** — sprawdzamszlak waliduje `(subscription_id, owner_id)` przed Put. bodysync waliduje analogicznie: `subscription_id == /bodysync/strava/subscription_id` (single subscription per app — Strava limit) i `owner_id ∈ {athlete_ids zarejestrowanych userów}`. Mismatch → return 200 (denial-of-service oracle prevention) + `logger.warn`.
+- **D9 Synthetic subscription_id dla replay** — port ze sprawdzamszlak (`webhook.ts:36`): `999999`. Owner CLI `strava:replay` POST-uje webhook ze syntetycznym sub_id + real athlete_id, omijając Strava ale przechodząc identity check.
+- **D10 Brak photos persistence** — sprawdzamszlak persistuje fotki z aktywności (`fetcher.ts:219-323`). bodysync to skip — niepotrzebne dla biometry/training-load context. Może wrócić w przyszłym sprincie jeśli owner zechce timeline.
+- **D11 Brak retry/DLQ** — per-record try/catch w fetcher, błąd → `logger.error` + skip. Event row stays w DDB 7d, manual replay przez `strava:replay` CLI. Sprawdzamszlak też tak (no DLQ — `lambda.tf:80`). Akceptowalne dla 2 userów, ~2-5 aktywności tygodniowo.
+- **D12 Frontend list** — `GET /api/activities?days=30&limit=10` (auth JWT) → DDB Query `PK=USER#{user_id} AND begins_with(SK, 'ACTIVITY#')` z sort descending po SK lub `start_date` (Strava activity_id rosnący monotonicznie więc SK sort = chronologia). Limit 10 dla MVP. Tab "Aktywności" w `Dashboard.tsx` zastępuje `ActivitiesPlaceholder` pełną listą.
+- **D13 Cost guard** — Strava API rate limit 200/15min, 2000/dzień. Bodysync użycie: ~5-10 webhook/dzień × 2 calls (activity + streams) = 10-20 calls. Brak realnego ryzyka, ale dodajemy CloudWatch metric filter `strava_api_calls` na log line `"strava_api_call"` (jak `cloudwatch.tf` ma dla advisor) — alarm jeśli >200/h dziennie (bug indicator).
+- **D14 Webhook signature** — Strava webhook NIE podpisuje payloadów (znany ograniczenie API). Identity check (D8) + verify_token (D9 handshake GET) to jedyna obrona. Bodysync NIE dodaje custom HMAC tu — Strava nie wysyła nagłówka, więc nie ma czego weryfikować.
+
+**Pre-req owner actions (manualne, PRZED Step 1):**
+1. **Strava API app** — https://www.strava.com/settings/api → Create App: name `bodysync`, category Other, website `https://bodysync.pl`, authorization callback domain `api.bodysync.pl`. Owner zapisuje `client_id` (~6-digit int) + `client_secret`.
+2. **SSM populate** (parametry już istnieją z placeholder, owner overwrite-uje value):
+   ```bash
+   aws ssm put-parameter --overwrite --region eu-west-1 --name /bodysync/strava/client_id --type String --value '<6-digit-int>'
+   aws ssm put-parameter --overwrite --region eu-west-1 --name /bodysync/strava/client_secret --type SecureString --value '<40-char-hex>'
+   # verify_token + subscription_id NIE wpisujemy — generuje strava:subscribe CLI w Step 7
+   ```
+3. **Po Step 4 deploy + Step 7 ship**, owner odpala raz `python -m apps.api.scripts.strava_subscribe` (CLI generuje verify_token, POST-uje `/push_subscriptions`, persistuje subscription_id w SSM `/bodysync/strava/subscription_id`).
+4. **Po Step 6 ship**, każdy user (tomek + weronika) musi raz kliknąć "Połącz ze Stravą" w UI żeby tokens trafiły do `/bodysync/strava/{user_id}/tokens`. Wcześniej webhook nie zna `athlete_id` → identity check blokuje.
+
+**TODO(architect)** triggers w plikach:
+- Step 2 jeśli pojawia się chęć trzymania OAuth state w in-memory cache zamiast DDB (reject — DDB Single-table = KISS, atomic delete = correct)
+- Step 5 jeśli stream-trigger okazuje się unstable / produces duplicates — escalate ADR (alternatywa: SQS queue zamiast Streams)
+- Step 6 jeśli `GET /api/activities` ma N+1 problem przy join z biometry — escalate (raczej nie będzie, list jest flat)
+
+**Eskalacja do `architect`:**
+- D2 jeśli implementer zauważy że trzymanie OAuth state w głównym single-table konfliktuje (np. partition hot key `STRAVA_OAUTH_STATE#*` przy bursach) — ADR o powrocie do osobnej tabeli. Dla 2 userów ~2 OAuth flow rocznie nierealne.
+- D3 jeśli single-table włączenie `stream_enabled` powoduje nadmiarowe stream events na rzeczywistych metric writes (HAE webhook → biometry write → stream → fetcher Lambda invoked dla nie-Strava events) — fetcher musi filter `record.eventName === 'INSERT' AND PK starts with EVENT#strava`. Step 5 robi ten filtr explicit, ale architect ADR jeśli stream cost rośnie.
+- D7 jeśli SSM map approach (D7) okazuje się trudny do utrzymania (np. third user) — escalate ADR o GSI lookup (`SK=STRAVA_ATHLETE#{athlete_id}` w głównej tabeli). YAGNI dla 2 userów.
+
+**Out of scope (post-MVP, NIE w Sprint 4):**
+- ActivityRow design polish — minimal table najpierw, design po owner feedback
+- Fotki z aktywności (D10)
+- Polyline → GeoJSON (D4) — bodysync nie ma mapy
+- Multi-segment / lap detail
+- Historical bulk import (`activities/?per_page=200`) — sprawdzamszlak miał `replay-many` ale bodysync może użyć jednego endpointu `strava:replay <id1> <id2>` ad-hoc
+- Strava on-delete cleanup (event aspect_type=delete → today: log + skip)
+- Strava webhook deduplication beyond `event_id` idempotency
+- Garmin Connect (osobny Sprint 4.5 backlog)
+
+---
+
+### Step 1: SSM `/bodysync/strava/athlete-to-user` placeholder + Pydantic schemas → modyfikuje `infrastructure/terraform/locals.tf` + tworzy `apps/api/handlers/strava_oauth_start/` shell + `apps/api/shared/strava.py`
+- **Modyfikuje:**
+  - `infrastructure/terraform/locals.tf`:
+    - DODAJ do `ssm_strings`: `"/bodysync/strava/athlete-to-user"` (JSON map `{}` empty start, owner-CLI nie wymagany — overwrite po pierwszym OAuth callback)
+    - DODAJ do `ssm_strings`: `"/bodysync/strava/subscription_id"` (placeholder, populated przez `strava:subscribe` CLI w Step 7)
+    - **NIE dodawaj** `/bodysync/strava/{user_id}/tokens` per-user — tworzą się dynamicznie przez OAuth callback `PutParameter` (wymaga IAM ssm:PutParameter na `arn:aws:ssm:*:*:parameter/bodysync/strava/*/tokens` — Step 4 IAM block).
+- **Tworzy:**
+  - `apps/api/shared/strava.py` — pure helpers (no I/O):
+    - `class StravaTokens(BaseModel)`: `access_token: str, refresh_token: str, expires_at: int, athlete_id: int, connected_at: int`
+    - `class StravaWebhookEvent(BaseModel)`: `object_type: str, object_id: int (>0), aspect_type: Literal['create', 'update', 'delete'], owner_id: int (>0), subscription_id: int (>0), event_time: int (>0), updates: dict[str, Any] = {}`
+    - `class StravaActivity(BaseModel)`: minimal — `id: int, name: str, sport_type: str, type: str, distance: float, moving_time: int, elapsed_time: int, total_elevation_gain: float, start_date: str, start_date_local: str, timezone: str, calories: float | None, average_heartrate: float | None, max_heartrate: float | None, has_heartrate: bool = False, suffer_score: float | None = None, perceived_exertion: float | None = None` (z `model_config = ConfigDict(extra='ignore')` — Strava sends ~80 fields, ignorujemy nadmiarowe)
+    - `SYNTHETIC_SUBSCRIPTION_ID = 999999` constant
+    - `REFRESH_THRESHOLD_SECONDS = 60` constant
+    - `STATE_TTL_SECONDS = 600` constant (10 min)
+    - `EVENT_TTL_SECONDS = 7 * 24 * 3600` constant
+  - `apps/api/handlers/strava_oauth_start/__init__.py` (empty)
+  - `apps/api/handlers/strava_oauth_start/handler.py` (skeleton — `def handler(event, context): return {"statusCode": 501, "body": "WIP"}`)
+  - `apps/api/handlers/strava_oauth_start/requirements.txt` (empty)
+- **Depends on:** nic
+- **Test:**
+  - `cd apps/api && python -c "from shared.strava import StravaTokens, StravaWebhookEvent, StravaActivity"` → no errors
+  - `pytest apps/api/tests/shared/test_strava_schemas.py -v` (tworzy nowy test file Step 1):
+    - `test_tokens_validates_required_fields` — missing `athlete_id` → ValidationError
+    - `test_webhook_event_aspect_type_literal` — `aspect_type='wrong'` → ValidationError
+    - `test_activity_extra_fields_ignored` — unknown Strava field nie wybucha
+  - `cd infrastructure/terraform && terraform fmt -check && terraform validate`
+- **Acceptance:**
+  - 3 Pydantic models, 4 constants exported z `shared/strava.py`
+  - 3+ tests pass
+  - 2 nowe SSM params w `locals.tf` (athlete-to-user + subscription_id)
+  - terraform plan = 2 nowe `aws_ssm_parameter` resources
+- **Effort:** ~45min
+
+---
+
+### Step 2: OAuth start handler → tworzy `apps/api/handlers/strava_oauth_start/`
+- **Tworzy / modyfikuje:**
+  - `apps/api/handlers/strava_oauth_start/handler.py`:
+    - `def handler(event, context)`:
+      - Verify JWT cookie → 401 jeśli brak (oauth start wymaga zalogowanego użytkownika by znać `user_id`, który zapisujemy w state)
+      - `secrets.token_urlsafe(32)` → state
+      - DDB `PutItem` `PK=STRAVA_OAUTH_STATE#{state}`, `SK=META`, atrybuty `{user_id, ttl: now+600}`
+      - SSM read `/bodysync/strava/client_id` (cached lazy module-level)
+      - Build `https://www.strava.com/oauth/authorize?client_id=...&redirect_uri=https://api.bodysync.pl/api/strava/oauth/callback&response_type=code&approval_prompt=auto&scope=read,activity:read_all&state={state}`
+      - Return `{statusCode: 302, headers: {Location: <authorize_url>}}`
+      - Logger info `strava_oauth_start_initiated user_id=X`
+  - `apps/api/handlers/strava_oauth_start/service.py` — separation jak `health_webhook/service.py`: pure logic dla `mint_state(user_id, ddb_client) -> str`, oauth URL builder
+  - `apps/api/tests/handlers/strava_oauth_start/test_handler.py`:
+    - `test_oauth_start_unauthenticated` — no JWT → 401
+    - `test_oauth_start_creates_state_row_with_user_id` — moto DDB → assert PK starts with STRAVA_OAUTH_STATE# + user_id atribut
+    - `test_oauth_start_returns_302_with_authorize_url` — assert Location contains `client_id`, `state`, `scope=read,activity:read_all`
+    - `test_oauth_start_state_has_ttl_10min` — TTL ±5s
+- **Depends on:** Step 1 (schemas)
+- **Test:**
+  - `pytest apps/api/tests/handlers/strava_oauth_start/ -v` → 4/4 pass
+  - `python apps/api/scripts/build.py strava_oauth_start` → zip created (autodiscovery)
+- **Acceptance:**
+  - Handler 302 z poprawnym URL
+  - State zapisany w DDB z `user_id` atributem + TTL
+  - Lambda zip <500KB (no external deps)
+- **Effort:** ~1h
+
+---
+
+### Step 3: OAuth callback handler → tworzy `apps/api/handlers/strava_oauth_callback/`
+- **Tworzy:**
+  - `apps/api/handlers/strava_oauth_callback/handler.py`:
+    - `def handler(event, context)`:
+      - Read `event.queryStringParameters` → `code`, `state`, `error`
+      - Jeśli `error` (user denied) → 302 do `https://bodysync.pl/?strava=denied`
+      - Jeśli brak `code` lub `state` → 302 do `https://bodysync.pl/?strava=missing_params`
+      - DDB `DeleteItem` `PK=STRAVA_OAUTH_STATE#{state}, SK=META, ConditionExpression='attribute_exists(PK)', ReturnValues='ALL_OLD'` — atomic single-use nonce
+      - Catch `ConditionalCheckFailedException` → 302 `?strava=invalid_state`
+      - Verify `ttl > now` (DDB TTL is best-effort sweep, sprawdź ręcznie) → jeśli expired → 302 `?strava=expired_state`
+      - Extract `user_id` from deleted row
+      - SSM read client_id + client_secret (cached)
+      - HTTP POST `https://www.strava.com/api/v3/oauth/token` z `{client_id, client_secret, code, grant_type: 'authorization_code'}` — użyj `httpx.Client` (już dep w api Lambdas) z `timeout=10`
+      - Validate response z `StravaTokens` — `athlete_id = response['athlete']['id']`, `connected_at = int(time.time())`
+      - SSM `PutParameter` `Name=/bodysync/strava/{user_id}/tokens`, `Type=SecureString`, `Value=json.dumps(tokens.model_dump())`, `Overwrite=true`
+      - SSM read `/bodysync/strava/athlete-to-user` (JSON map), update `{**existing, str(athlete_id): user_id}`, `PutParameter Overwrite=true`
+      - 302 do `https://bodysync.pl/?strava=ok` (frontend pokaże toast)
+      - Logger info `strava_oauth_callback user_id=X athlete_id=Y` (NIE log token)
+  - `apps/api/handlers/strava_oauth_callback/requirements.txt`: `httpx==0.27.x` (sprawdź — może jest w shared)
+  - `apps/api/tests/handlers/strava_oauth_callback/test_handler.py`:
+    - `test_callback_strava_returned_error` — query `error=access_denied` → 302 z `strava=denied`
+    - `test_callback_missing_code` → 302 missing_params
+    - `test_callback_state_not_in_ddb` (moto) → 302 invalid_state
+    - `test_callback_state_expired` → 302 expired_state
+    - `test_callback_happy_path` (httpx-mock + moto + ssm mock) — code valid → ssm tokens written, athlete-to-user updated, 302 ok
+    - `test_callback_does_not_log_token` — capture log records, assert no `access_token` value in any structured field
+    - `test_callback_pk_isolation_two_users` — two userów po kolei OAuth → two SSM paths, athlete-to-user map ma 2 entries
+- **Modyfikuje:**
+  - `apps/api/shared/ssm.py` — DODAJ `put_parameter(name, value, secure: bool, overwrite: bool=True)` jeśli brak (sprawdzić istniejący API)
+  - `infrastructure/terraform/locals.tf` — DODAJ blok IAM dla per-user tokens path (Step 4 IAM consolidation)
+- **Depends on:** Step 1 (schemas), Step 2 (state row PK convention)
+- **Test:**
+  - `pytest apps/api/tests/handlers/strava_oauth_callback/ -v` → 7/7 pass
+  - `python apps/api/scripts/build.py strava_oauth_callback` → zip created
+- **Acceptance:**
+  - Tokens persisted w SSM SecureString z `athlete_id`
+  - athlete-to-user map updated
+  - Brak token leak w logach (test enforces)
+  - PK isolation — user_a OAuth nie nadpisuje user_b tokens
+- **Effort:** ~1.5h
+
+---
+
+### Step 4: Webhook handler (GET handshake + POST event) → tworzy `apps/api/handlers/strava_webhook/`
+- **Tworzy:**
+  - `apps/api/handlers/strava_webhook/handler.py`:
+    - `def handler(event, context)`:
+      - `if event['requestContext']['http']['method'] == 'GET'`: → `handle_handshake`
+      - `else`: → `handle_event`
+    - `handle_handshake`:
+      - Read query `hub.mode`, `hub.verify_token`, `hub.challenge`
+      - Jeśli `mode != 'subscribe'` lub brak token/challenge → `{statusCode: 400, body: 'bad request'}`
+      - SSM read `/bodysync/strava/verify_token` (cached, decrypted) — **constant-time compare** z `hmac.compare_digest`
+      - Mismatch → 403, log warn
+      - Match → `{statusCode: 200, headers: {'Content-Type': 'application/json'}, body: json.dumps({'hub.challenge': challenge})}`
+    - `handle_event`:
+      - Parse body → `StravaWebhookEvent` schema; jeśli ValidationError → 200 (Strava nie retry-uje malformed; log warn)
+      - SSM read `/bodysync/strava/subscription_id` (cached) i `/bodysync/strava/athlete-to-user` (cached, lazy refresh w przypadku unknown athlete miss → re-read raz)
+      - Identity check: `subscription_id ∈ {real_sub_id, SYNTHETIC_SUBSCRIPTION_ID}`, `owner_id ∈ athlete_to_user.keys()` — mismatch → 200 (no oracle), log warn
+      - Idempotency: DDB `PutItem` `PK=EVENT#strava`, `SK={subscription_id}#{object_id}#{event_time}`, atrybuty `{owner_id, object_type, aspect_type, event_time, updates, received_at, ttl: event_time + EVENT_TTL_SECONDS}`, `ConditionExpression='attribute_not_exists(PK) AND attribute_not_exists(SK)'`
+      - Catch `ConditionalCheckFailedException` → 200 (duplicate ignored)
+      - Catch DDB error → 200 + log error (don't burn Strava retry budget)
+      - Return 200 < 2s (mierzony w log: `latency_ms`)
+      - Logger info `strava_webhook_event sub=X owner=Y obj=Z aspect=create` (NIE log full payload)
+  - `apps/api/tests/handlers/strava_webhook/test_handler.py`:
+    - GET handshake: `test_handshake_valid_token`, `test_handshake_wrong_token_403`, `test_handshake_constant_time_compare` (compare with hmac.compare_digest), `test_handshake_missing_params_400`
+    - POST event: `test_event_writes_to_ddb_with_ttl`, `test_event_duplicate_idempotent` (second POST → no second write), `test_event_unknown_subscription_dropped_200`, `test_event_unknown_owner_dropped_200`, `test_event_synthetic_sub_with_known_owner_accepted` (replay support), `test_event_malformed_body_returns_200`, `test_event_does_not_log_payload`
+- **Modyfikuje:**
+  - `infrastructure/terraform/main.tf` — DODAJ moduł `strava_webhook` (Lambda) + 2 routes:
+    ```hcl
+    module "strava_webhook" {
+      source        = "./modules/lambda"
+      function_name = "${local.project}-strava-webhook"
+      source_zip    = "${path.module}/../../apps/api/dist/strava_webhook.zip"
+      handler       = "handlers.strava_webhook.handler.handler"
+      memory_size   = 512
+      timeout       = 5  # < 2s budget Strava + headroom
+      extra_iam_statements = [
+        # SSM read verify_token, subscription_id, athlete-to-user
+        # DDB PutItem na main table dla EVENT#strava idempotency row
+      ]
+    }
+    resource "aws_apigatewayv2_route" "get_strava_webhook" { route_key = "GET /api/strava/webhook" ... }
+    resource "aws_apigatewayv2_route" "post_strava_webhook" { route_key = "POST /api/strava/webhook" ... }
+    ```
+  - Analogiczne moduły + routes dla `strava_oauth_start` (GET /api/strava/oauth/start) i `strava_oauth_callback` (GET /api/strava/oauth/callback) — IAM dla SSM `PutParameter` (callback) + DDB write (start, callback DeleteItem).
+  - **WAŻNE IAM:** callback Lambda potrzebuje `ssm:PutParameter` na `arn:aws:ssm:*:*:parameter/bodysync/strava/*/tokens` (per-user wildcard) + `arn:aws:ssm:*:*:parameter/bodysync/strava/athlete-to-user`. Webhook Lambda tylko `ssm:GetParameter` na `verify_token`, `subscription_id`, `athlete-to-user`.
+- **Depends on:** Step 1 (schemas), Step 2 (oauth_start exists for IAM consolidation), Step 3 (oauth_callback)
+- **Test:**
+  - `pytest apps/api/tests/handlers/strava_webhook/ -v` → 12+/12+ pass
+  - `python apps/api/scripts/build.py strava_webhook strava_oauth_start strava_oauth_callback` (autodiscovery) → 3 zips
+  - `cd infrastructure/terraform && terraform fmt -check && terraform validate`
+  - PR → terraform-plan → 3 lambdas + 4 routes + 4 integrations + 4 permissions + IAM stmts
+- **Acceptance:**
+  - Webhook GET handshake: poprawny verify_token → 200 echo challenge; zły → 403
+  - Webhook POST: identity-mismatch → 200 silent; duplicate event → 200 silent
+  - Latency p50 <500ms (cold) / <50ms (warm) — verified po deploy
+- **Effort:** ~2h (najwięcej testów)
+
+---
+
+### Step 5: Fetcher Lambda + DDB Streams trigger + activities API → tworzy `apps/api/handlers/strava_fetcher/` + `apps/api/handlers/activities_list/`
+- **Tworzy:**
+  - `apps/api/handlers/strava_fetcher/handler.py`:
+    - `def handler(event, context)` — DynamoDBStreamEvent
+    - For each record:
+      - Skip jeśli `record['eventName'] != 'INSERT'`
+      - Unmarshall NewImage → `{PK, SK, owner_id, object_type, object_id, aspect_type}`
+      - **CRITICAL**: skip jeśli `PK != 'EVENT#strava'` — single-table stream może produkować eventy dla biometry/activity/recipe writes, nie chcemy je przetwarzać
+      - Skip jeśli `aspect_type == 'delete'` (log + skip per D6/D11)
+      - Skip jeśli `object_type != 'activity'`
+      - `process_activity_event(...)`:
+        - Map `owner_id` → `user_id` przez SSM athlete-to-user (lazy cached, refresh on miss)
+        - Load tokens z `/bodysync/strava/{user_id}/tokens`
+        - Refresh access_token jeśli `expires_at - now < 60s` → POST `/oauth/token` `grant_type=refresh_token` → SSM PutParameter
+        - GET `https://www.strava.com/api/v3/activities/{object_id}` Authorization Bearer
+        - 404 → log warn, skip (Strava deletion race)
+        - Validate z `StravaActivity` (extra=ignore)
+        - GET `/streams?keys=heartrate,cadence,watts,time,distance,altitude&key_by_type=true&resolution=high` (best-effort — failure → log + skip streams, persist activity anyway)
+        - S3 PutObject `strava/streams/{user_id}/{object_id}.json` (raw JSON), `ContentType: application/json`
+        - DDB PutItem `PK=USER#{user_id}, SK=ACTIVITY#{strava_id}` z polami z D4 + `streams_s3_key, fetched_at`
+        - Per-record try/catch — błąd nie przerywa batch
+      - Logger info `strava_fetcher_processed user=X strava_id=Y sport=Z` + `strava_api_call` log line dla CloudWatch metric filter
+  - `apps/api/handlers/activities_list/handler.py`:
+    - `GET /api/activities?days=30&limit=10` z JWT
+    - Verify JWT → user_id
+    - Pydantic query params: `days: int = 30 (1..90)`, `limit: int = 10 (1..50)`
+    - DDB Query `PK=USER#{user_id} AND begins_with(SK, 'ACTIVITY#')`, `ScanIndexForward=False` (most recent first), `Limit=limit`
+    - Return JSON `{items: [{strava_id, name, sport_type, distance_m, moving_time_s, start_date_local, calories, average_heartrate}, ...]}`
+  - `apps/api/tests/handlers/strava_fetcher/test_handler.py`:
+    - `test_fetcher_skips_non_event_pk` — record z PK=`USER#tomek` SK=`BIOMETRY#...` → no API call (CRITICAL — single-table stream filter)
+    - `test_fetcher_skips_delete_aspect` — log + skip
+    - `test_fetcher_skips_non_activity_object_type` — log + skip
+    - `test_fetcher_404_logs_and_skips` (httpx-mock 404)
+    - `test_fetcher_token_refresh_when_expired` (httpx-mock /oauth/token)
+    - `test_fetcher_token_no_refresh_when_valid` (>60s buffer)
+    - `test_fetcher_persists_activity_with_pk_user` — moto DDB + S3 → assert row z `PK=USER#{owner_user_id}`
+    - `test_fetcher_persists_streams_to_s3` — assert key `strava/streams/{user_id}/{id}.json`
+    - `test_fetcher_streams_failure_still_persists_activity` — streams 500, activity 200 → DDB row OK, S3 absent
+    - `test_fetcher_unknown_athlete_id_skips_with_log` — owner_id NIE w athlete-to-user map → log warn, no exception
+    - `test_fetcher_per_record_isolation` — batch z 2 records, jeden raise'uje, drugi przechodzi
+  - `apps/api/tests/handlers/activities_list/test_handler.py`:
+    - `test_activities_list_unauthenticated_401`
+    - `test_activities_list_returns_activities_for_user` (PK isolation — user_a NIE widzi activities user_b)
+    - `test_activities_list_descending_order_by_sk`
+    - `test_activities_list_limit_default_10`
+    - `test_activities_list_invalid_days_400`
+- **Modyfikuje:**
+  - `infrastructure/terraform/dynamodb.tf` — DODAJ `stream_enabled = true`, `stream_view_type = "NEW_IMAGE"`
+  - `infrastructure/terraform/main.tf` — DODAJ moduły `strava_fetcher` (1024MB / 60s — Strava API może być wolne) i `activities_list` (512MB / 5s)
+  - DODAJ `aws_lambda_event_source_mapping` `fetcher_from_main_stream`:
+    ```hcl
+    resource "aws_lambda_event_source_mapping" "strava_fetcher_from_stream" {
+      event_source_arn  = aws_dynamodb_table.data.stream_arn
+      function_name     = module.strava_fetcher.function_arn
+      starting_position = "LATEST"
+      batch_size        = 10
+      maximum_batching_window_in_seconds = 0
+      filter_criteria {
+        filter {
+          pattern = jsonencode({
+            eventName = ["INSERT"]
+            dynamodb = { Keys = { PK = { S = ["EVENT#strava"] } } }
+          })
+        }
+      }
+    }
+    ```
+    **Filter criteria** zwiększa cost-efficiency — fetcher invoked TYLKO na INSERT z PK=`EVENT#strava` (bez filter każdy biometry write trigger by fetcher cold start).
+  - DODAJ route `aws_apigatewayv2_route.get_activities` `route_key = GET /api/activities`
+  - IAM dla `strava_fetcher`: ssm:GetParameter na `/bodysync/strava/*` + ssm:PutParameter na tokens + DDB Query/PutItem na main table + S3 PutObject na `strava/streams/*`
+  - `cloudwatch.tf` — DODAJ metric filter `strava_api_calls` na log line `strava_api_call` + alarm jeśli sum > 200/h (D13)
+- **Depends on:** Step 1, 4 (DDB events table convention)
+- **Test:**
+  - `pytest apps/api/tests/handlers/strava_fetcher/ apps/api/tests/handlers/activities_list/ -v` → ~16/16 pass
+  - `python apps/api/scripts/build.py strava_fetcher activities_list` → zips
+  - terraform plan: 2 lambdas + 1 stream mapping + 1 ddb stream enable + 1 route + 1 metric filter + 1 alarm
+- **Acceptance:**
+  - Stream filter blocks non-EVENT#strava records (test enforces)
+  - Activity row + S3 streams persisted z `USER#{user_id}` PK isolation
+  - GET /api/activities zwraca 10 ostatnich descending
+  - Alarm widoczny w CloudWatch console
+- **Effort:** ~2.5h (most code-heavy step)
+
+---
+
+### Step 6: Frontend "Aktywności" tab — connect button + activity list → modyfikuje `apps/web/src/components/Dashboard.tsx` + `apps/web/src/api.ts`
+- **Modyfikuje:**
+  - `apps/web/src/api.ts`:
+    - DODAJ `getActivities(days = 30, limit = 10): Promise<{items: Activity[]}>` — `request<...>('/api/activities?days=30&limit=10')`
+    - DODAJ `getStravaConnectUrl(): string` — return `/api/strava/oauth/start` (browser nawiguje, redirect 302 z backend → Strava authorize)
+    - DODAJ Activity TS type (mirror backend response shape)
+  - `apps/web/src/components/Dashboard.tsx`:
+    - Replace `ActivitiesPlaceholder` z `ActivitiesView`:
+      - `useQuery`/state: `activities`, `loading`, `error`, `connectStatus` (z URL `?strava=ok|denied|error|invalid_state|...`)
+      - On mount: `getActivities()` → if 0 results AND no connect-status → show empty state "Brak aktywności" + button "Połącz ze Stravą"
+      - Empty state: link `<a href={getStravaConnectUrl()}>Połącz ze Stravą</a>` — Anchor, NIE button (302 musi być cross-origin nav, nie fetch)
+      - 1+ results: ActivityRow list (sport_type icon, name, distance km/duration min/start_date_local/heartrate avg)
+      - Toast po `?strava=ok`: "Strava połączona — pierwsza aktywność pojawi się po następnym treningu" (auto-dismiss 5s)
+      - Toast po `?strava=denied/error/...`: error variant
+    - `Dashboard.tsx:420-428` `ActivitiesPlaceholder` usunąć (replaced przez ActivitiesView)
+  - `apps/web/src/index.css`:
+    - DODAJ `.activity-row`, `.activity-meta`, `.activity-empty-state`, `.btn-strava-connect` (orange Strava brand color hint OK, np. `#fc4c02` jeśli design system pozwala — bodysync palette ma `--orange: #f59e0b`, użyj go dla brand consistency)
+- **Tworzy:**
+  - `apps/web/src/components/dashboard/ActivityRow.tsx` (jeśli decyzja D12 — wystarczy inline w Dashboard, ale separate komponent łatwiejszy do testów)
+- **Depends on:** Step 5 (backend GET /api/activities ready, redirect routes ready)
+- **Test:**
+  - `cd apps/web && npm run typecheck && npm run build` → clean
+  - Vitest:
+    - `test_activities_view_empty_state_shows_connect_button`
+    - `test_activities_view_renders_list_when_data`
+    - `test_activities_view_strava_ok_toast`
+    - `test_activities_view_strava_denied_toast`
+  - Manual local: `npm run dev` → login → tab Aktywności → empty state → click "Połącz ze Stravą" → backend redirect (mock) → po Step 7 ship: real Strava
+- **Acceptance:**
+  - Empty state UX czytelny
+  - Toast widoczny po callback `?strava=ok`
+  - Lista 10 ostatnich aktywności z sensible formatting (km / min / kcal / avg HR)
+  - typecheck + 4 vitest pass
+- **Effort:** ~1.5h
+
+---
+
+### Step 7: `strava:subscribe` / `unsubscribe` / `replay` CLIs → tworzy `apps/api/scripts/strava_{subscribe,unsubscribe,replay}.py`
+- **Tworzy:**
+  - `apps/api/scripts/strava_subscribe.py`:
+    - Read SSM client_id, client_secret
+    - Check `/bodysync/strava/subscription_id` — jeśli jest → exit 1 "Already subscribed"
+    - Generate verify_token jeśli brak `/bodysync/strava/verify_token` (`secrets.token_urlsafe(32)`) → SSM PutParameter SecureString
+    - POST `https://www.strava.com/api/v3/push_subscriptions` z `client_id, client_secret, callback_url=https://api.bodysync.pl/api/strava/webhook, verify_token`
+    - Strava natychmiast wykonuje GET handshake → webhook Lambda już deployed musi odpowiedzieć
+    - Save subscription_id do SSM
+    - Print: `Subscribed. subscription_id=N stored.`
+  - `apps/api/scripts/strava_unsubscribe.py`:
+    - DELETE `https://www.strava.com/api/v3/push_subscriptions/{id}?client_id=X&client_secret=Y`
+    - SSM DeleteParameter `/bodysync/strava/subscription_id`
+  - `apps/api/scripts/strava_replay.py`:
+    - Argparse: `<activity_id>` + optional `--user-id <tomek|weronika>` (default tomek), `--aspect <create|update>` (default create)
+    - Build synthetic webhook payload: `{object_type: 'activity', object_id: int(activity_id), aspect_type, owner_id: <athlete_id z tokens>, subscription_id: 999999, event_time: int(time.time())}`
+    - POST `https://api.bodysync.pl/api/strava/webhook` z payload (Strava-style)
+    - Print: `Replay sent. Watch logs: aws logs tail /aws/lambda/bodysync-strava-fetcher --follow`
+  - `apps/api/scripts/strava_replay_many.py` — bulk version dla initial backfill (owner ma 50 aktywności w Stravie z ostatniego roku, chce zaimportować). Per activity_id call replay logic.
+  - `apps/api/tests/scripts/test_strava_replay.py` — happy path z httpx-mock na webhook endpoint
+- **Modyfikuje:** brak Terraform changes, CLIs runują się lokalnie z owner AWS SSO creds
+- **Depends on:** Step 4 (webhook endpoint live), Step 5 (fetcher live), Step 3 (tokens persisted by user)
+- **Test:**
+  - `python -m apps.api.scripts.strava_subscribe` (post-deploy real run): success → SSM ma subscription_id, GET /api/strava/webhook handshake OK w logs
+  - `python -m apps.api.scripts.strava_replay 12345678` z prawdziwym ID — owner manualny smoke
+  - `pytest apps/api/tests/scripts/test_strava_replay.py -v` → 1+ pass
+- **Acceptance:**
+  - Subscribe success raz, idempotent (drugie run → "already subscribed")
+  - Replay sends synthetic webhook → DDB EVENT row + S3 streams + DDB ACTIVITY row written
+  - Owner widzi aktywność w UI po replay
+- **Effort:** ~1h
+
+---
+
+### Decyzja Sprint 4: 7 PRów (split per step)
+Każdy step = 1 PR żeby był reviewable, sequencing pilnuje dependencies:
+
+1. **PR1 Step 1** — schemas + 2 SSM placeholders (~30min review, low risk)
+2. **PR2 Step 2** — oauth_start handler + tests (~45min review)
+3. **PR3 Step 3** — oauth_callback handler + tests (~1h review, tokens persist logic)
+4. **PR4 Step 4** — webhook handler + 3 lambdas Terraform + IAM (~1.5h review, najlonger — full infra slice)
+5. **PR5 Step 5** — fetcher Lambda + DDB Streams + activities_list + filter (~1.5h review, biggest code change)
+6. **PR6 Step 6** — frontend ActivitiesView + connect button (~45min review)
+7. **PR7 Step 7** — CLIs + post-deploy owner subscribe (~30min review, no infra)
+
+PR4 i PR5 muszą być sequential (PR5 deploy wymaga aby webhook był live żeby strava:subscribe handshake się powiódł). PR6 może iść parallel z PR7 po PR5 merged.
+
+### Ryzyka i mitygacje (Sprint 4)
+- **R1 — DDB Streams na single-table = nadmiarowe invocations.** Każdy biometry write, advisor cache write, profile update wywoła stream record. Filter criteria (Step 5) ogranicza do `PK=EVENT#strava` na poziomie EventBridge przed Lambda invoke (cost saving). **M:** test `test_fetcher_skips_non_event_pk` enforces filter, ale faktyczna oszczędność tylko gdy filter w event-source-mapping (verify w terraform plan).
+- **R2 — Strava webhook NIE podpisuje payloadów.** Identity check (subscription_id + owner_id allowlist) to jedyna obrona. Atak: ktoś POST-uje syntactically valid payload z prawdziwym athlete_id (publicznie dostępny) + naszym subscription_id (publicznie dostępny w `/push_subscriptions` GET — but ten endpoint sam wymaga client_secret). Realny atak: spoofujący widzi webhook URL (np. nasz Strava app config), zna `athlete_id` Toma (publiczny w activity URLs), nie zna subscription_id (który jest secret-ish). **M:** identity check kosztuje 1 SSM read (cached). Akceptowalny risk — atakujący trigger-uje fetch nieistniejącego activity_id → 404 z Stravy → nasz fetcher silent skip. Worst case: cost spike $0 (Strava limit zatrzymuje atak po 200req/15min na ich końcu).
+- **R3 — Token refresh race.** Dwie aktywności w 6h+ window → fetcher invocation A i B czytają tokens równocześnie, oba widzą expired, oba refresh-ują, drugi nadpisuje pierwszego. **M:** Strava `/oauth/token` zwraca tokens nielinkowane (nie unieważnia poprzedniego refresh_token), więc oba A i B kończą z valid different access_token. Persistence race: ostatni `PutParameter` wygrywa. Akceptowalny — nie tracimy access (oba są ważne 6h). Owner-tier debt — long-term ADR jeśli się pokazuje w logach (raczej nie — webhook events spaced).
+- **R4 — Streams lag.** DDB Streams typowo <1s, ale ma teoretyczny SLA do minut. Owner po treningu otwiera UI i nie widzi → "broken". **M:** UI pokazuje toast "Pierwsza aktywność pojawi się po następnym treningu" po `?strava=ok`. Brak push notification do frontu — refresh manual.
+- **R5 — Strava API cost / rate limit.** 200/15min = realny limit jeśli błąd w fetcher → retry loop. **M:** brak retry (D11) — błąd = log + skip. Acceptable for 2 userów z ~5 treningów/tydzień.
+- **R6 — Single-table TTL collision.** Jeśli kiedykolwiek dodamy inny EVENT#* z TTL, partition key prefix musi pozostać unikalny. **M:** convention: `EVENT#{provider}` strict.
+- **R7 — Frontend redirect-back loop.** User klika "Połącz", Strava redirects, callback fail (np. `expired_state`), user ponownie klika → endless loop possible. **M:** error toast jest "stuck" do user dismiss, link "Spróbuj ponownie" (znowu mintuje fresh state).
+
+### Eskalacja do `architect`
+- Po PR5 merge jeśli stream filter NIE zatrzymuje wszystkich biometry events (np. AWS provider 6.x bug w `filter_criteria`) → ADR o osobnej DDB tabeli `bodysync-strava-events`. Reverting do separate-table jest acceptable trade-off jeśli filter nie działa.
+- Jeśli owner zauważy że refresh_token race (R3) faktycznie się pojawia w logach (oba context simultaneous activity webhooks) → ADR o token lock — DDB conditional write jako mutex.
+- Jeśli post-MVP owner chce import historyczny (>50 activities) → mini ADR o Strava `/athlete/activities?per_page=200&before=X` paginated import script jako one-shot CLI (nie webhook trigger).
+- Jeśli owner chce Garmin Connect (Sprint 4.5) → ADR o tym jak rozszerzyć schemat ACTIVITY (additional `source: "garmin" | "strava"` discriminator + GSI lookup po source).
+
+### Wzorce ze sprawdzamszlak które WADLIWE / poprawiamy w bodysync
+1. **Brak filter_criteria na DDB Streams** — sprawdzamszlak ma osobną events table więc każdy stream record z tej tabeli to faktyczny webhook event. Bodysync na single-table by dziedziczył wszystkie writes (biometry, advisor, profile) bez `filter_criteria`. **Poprawa:** `event-source-mapping.filter_criteria` z pattern PK=`EVENT#strava` (Step 5). Cost-efficient + correctness — fetcher cold start payload smaller.
+2. **Owner-tier replay logic kruche** — sprawdzamszlak `strava:replay` POST-uje webhook z `subscription_id=999999` (synthetic), polega na cache invalidation by webhook handler accept-ował. Jeśli identity cache niefresh (5min Lambda warm) → reject. **Poprawa:** w bodysync odpalamy replay jako bezpośredni invoke fetcher Lambdy (`aws lambda invoke --payload {...}`) zamiast GraphQL przez webhook endpoint. Bardziej deterministic, mniej state. (Wybór: zachowujemy webhook-replay path bo owner trigger-uje przez `curl https://api.bodysync.pl/api/strava/webhook` — łatwiejszy debug niż lambda invoke. Ale dokumentujemy alternatywę jako post-MVP option.)
+3. **Brak structured token leak guard.** Sprawdzamszlak `oauth.ts:141-146` log-uje `body: await tokenResp.text()` przy token exchange failure — to faktycznie może zawierać access_token jeśli error response wraca payload (bug — Strava error body NIE ma tokens, ale defensywnie złe). **Poprawa:** bodysync `oauth_callback` log-uje TYLKO `status_code` + `error_text` constrained do pierwszych 200 znaków + assert no `access_token` substring (test enforces).
+4. **Brak test'a na PK isolation w fetcher.** Sprawdzamszlak nie jest multi-user, więc nie testuje że user_a webhook NIE może zapisać activity pod user_b PK. **Poprawa:** Step 5 `test_fetcher_persists_activity_with_pk_user` enforces `owner_id → user_id` mapping przez SSM athlete-to-user → activity PK = mapowany user_id, nie spoofowany.
+5. **Brak cost guard na Strava API call count.** Sprawdzamszlak nie monitoruje API quota — solo dev, ~10 activities/m. **Poprawa:** bodysync CloudWatch metric filter `strava_api_calls` (D13) → alarm > 200/h (jasny bug indicator: retry loop w fetcher). Tani win, $0.10/m metric cost.
+

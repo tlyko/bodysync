@@ -48,6 +48,14 @@ locals {
 
   ssm_strings = [
     "/bodysync/strava/client_id",
+    # Sprint 4 — JSON map `{"<athlete_id>": "<bodysync_user_id>"}`, empty `{}`
+    # przy starcie. Aktualizowany przez OAuth callback (PutParameter Overwrite=true).
+    # Webhook handler reads to map `event.owner_id` na bodysync user_id.
+    "/bodysync/strava/athlete-to-user",
+    # Sprint 4 — populated przez `scripts/strava_subscribe.py` CLI po deploy.
+    # Webhook identity check: event.subscription_id musi matchować ten id
+    # (lub SYNTHETIC_SUBSCRIPTION_ID=999999 dla replay testów).
+    "/bodysync/strava/subscription_id",
     "/bodysync/google/oauth_client_id",
     "/bodysync/auth/allowed_emails",
   ]
