@@ -2,7 +2,21 @@ import { useEffect, useMemo, useState } from 'react';
 import { getBiometry } from '../api';
 import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
 import type { BiometryDay, Me } from '../types';
+import type { ReactNode } from 'react';
 import { ChatScreen } from './chat/ChatScreen';
+import {
+  DropletIcon,
+  EggIcon,
+  FlameIcon,
+  FootprintsIcon,
+  HeartIcon,
+  HeartPulseIcon,
+  MoonIcon,
+  PercentIcon,
+  ScaleIcon,
+  UtensilsIcon,
+  WheatIcon,
+} from './dashboard/icons';
 import { ProfileTargetsForm } from './dashboard/ProfileTargetsForm';
 import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { StatCard } from './dashboard/StatCard';
@@ -139,6 +153,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={hrvSeries}
           unit="ms"
           accent="cyan"
+          icon={<HeartPulseIcon />}
           fmt={(v) => v.toFixed(1)}
           trendWindow={trendWindow}
         />
@@ -147,6 +162,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={sleepSeries}
           unit="h"
           accent="purple"
+          icon={<MoonIcon />}
           fmt={(v) => v.toFixed(1)}
           trendWindow={trendWindow}
         />
@@ -154,6 +170,7 @@ function BiometryView({ days, error }: BiometryProps) {
           label="Kroki"
           series={stepsSeries}
           accent="green"
+          icon={<FootprintsIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
         />
@@ -162,6 +179,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={kcalActiveSeries}
           unit="kcal"
           accent="orange"
+          icon={<FlameIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
         />
@@ -170,6 +188,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={restingHrSeries}
           unit="bpm"
           accent="red"
+          icon={<HeartIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
         />
@@ -178,6 +197,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={bodyFatSeries}
           unit="%"
           accent="muted"
+          icon={<PercentIcon />}
           fmt={(v) => v.toFixed(1)}
           trendWindow={trendWindow}
         />
@@ -190,6 +210,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={kcalInSeries}
           unit="kcal"
           accent="cyan"
+          icon={<UtensilsIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
         />
@@ -198,6 +219,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={proteinSeries}
           unit="g"
           accent="green"
+          icon={<EggIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
         />
@@ -206,6 +228,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={fatSeries}
           unit="g"
           accent="orange"
+          icon={<DropletIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
         />
@@ -214,6 +237,7 @@ function BiometryView({ days, error }: BiometryProps) {
           series={carbsSeries}
           unit="g"
           accent="purple"
+          icon={<WheatIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
         />
@@ -235,9 +259,18 @@ type MetricStatCardProps = {
   accent: 'cyan' | 'green' | 'orange' | 'purple' | 'red' | 'muted';
   fmt: (v: number) => string;
   trendWindow: number | null;
+  icon?: ReactNode;
 };
 
-function MetricStatCard({ label, series, unit, accent, fmt, trendWindow }: MetricStatCardProps) {
+function MetricStatCard({
+  label,
+  series,
+  unit,
+  accent,
+  fmt,
+  trendWindow,
+  icon,
+}: MetricStatCardProps) {
   const last = latestValue(series);
   // Pomijamy sparkline + trend dla "Dziś" view — pojedynczy punkt nie ma kształtu.
   const sparkData = trendWindow === null ? undefined : series.map((p) => p.value);
@@ -248,6 +281,7 @@ function MetricStatCard({ label, series, unit, accent, fmt, trendWindow }: Metri
       value={last ? fmt(last.value) : null}
       unit={unit}
       accent={accent}
+      icon={icon}
       sparkData={sparkData}
       change={trend}
     />
@@ -261,7 +295,13 @@ function WeightSummaryCards({ series, rangeLabel }: WeightSummaryProps) {
   if (series.length === 0) {
     return (
       <>
-        <StatCard label="Aktualna waga" value={null} unit="kg" accent="green" />
+        <StatCard
+          label="Aktualna waga"
+          value={null}
+          unit="kg"
+          accent="green"
+          icon={<ScaleIcon />}
+        />
         <StatCard label={deltaLabel} value={null} unit="kg" accent="muted" />
         <StatCard label="Średnia" value={null} unit="kg" accent="muted" />
       </>
@@ -273,7 +313,13 @@ function WeightSummaryCards({ series, rangeLabel }: WeightSummaryProps) {
   const avg = series.reduce((a, p) => a + p.value, 0) / series.length;
   return (
     <>
-      <StatCard label="Aktualna waga" value={last.toFixed(1)} unit="kg" accent="green" />
+      <StatCard
+        label="Aktualna waga"
+        value={last.toFixed(1)}
+        unit="kg"
+        accent="green"
+        icon={<ScaleIcon />}
+      />
       <StatCard
         label={deltaLabel}
         value={`${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`}

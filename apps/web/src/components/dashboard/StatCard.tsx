@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Sparkline } from './Sparkline';
 
 const ACCENT_COLOR: Record<Accent, string> = {
@@ -18,12 +19,21 @@ type Props = {
   accent?: Accent;
   sparkData?: number[];
   change?: number | null;
+  icon?: ReactNode;
 };
 
 // Karta z metrykiem: label (uppercase muted) → value (large bold) + unit →
 // optional bottom row z change% (▲/▼ green/red) + sparkline (right).
 // Empty state: value === null|"—" → "—" + sparkline ukryty.
-export function StatCard({ label, value, unit, accent = 'cyan', sparkData, change }: Props) {
+export function StatCard({
+  label,
+  value,
+  unit,
+  accent = 'cyan',
+  sparkData,
+  change,
+  icon,
+}: Props) {
   const isEmpty = value === null || value === '—' || value === undefined;
   const accentClass = `stat-card-accent-${accent}`;
   const sparkColor = ACCENT_COLOR[accent];
@@ -33,6 +43,7 @@ export function StatCard({ label, value, unit, accent = 'cyan', sparkData, chang
 
   return (
     <div className={`stat-card ${accentClass}`}>
+      {icon && <div className="stat-card-icon">{icon}</div>}
       <div className="stat-card-label">{label}</div>
       <div className="stat-card-value-row">
         <span className="stat-card-value">{isEmpty ? '—' : value}</span>
