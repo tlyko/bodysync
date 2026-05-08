@@ -31,11 +31,6 @@ type Props = {
 
 const FETCH_DAYS = 30;
 
-const RANGE_LABELS: Record<Range, string> = {
-  '1d': 'Dziś',
-  '7d': 'Ostatni tydzień',
-  '30d': 'Ostatnie 30 dni',
-};
 const RANGE_DAYS: Record<Range, number> = { '1d': 1, '7d': 7, '30d': 30 };
 const RANGE_TREND_WINDOW: Record<Range, number | null> = { '1d': null, '7d': 3, '30d': 7 };
 
@@ -45,6 +40,46 @@ const PL_DATE = new Intl.DateTimeFormat('pl-PL', {
   month: 'long',
   year: 'numeric',
 });
+
+const PL_DATE_SHORT = new Intl.DateTimeFormat('pl-PL', {
+  day: 'numeric',
+  month: 'long',
+});
+
+function localTodayIso(): string {
+  // Lokalna data użytkownika (browser timezone). Używamy do labelowania
+  // "Dziś"/"Wczoraj" względem najnowszego BIOMETRY day.
+  const now = new Date();
+  const y = now.getFullYear();
+  const m = String(now.getMonth() + 1).padStart(2, '0');
+  const d = String(now.getDate()).padStart(2, '0');
+  return `${y}-${m}-${d}`;
+}
+
+function latestDate(days: BiometryDay[]): string | null {
+  if (days.length === 0) return null;
+  // days może nie być sortowany — bierzemy max po date string (ISO leksyko OK).
+  let max = days[0].date;
+  for (const d of days) {
+    if (d.date > max) max = d.date;
+  }
+  return max;
+}
+
+function rangeLabel(range: Range, latest: string | null): string {
+  if (range === '7d') return 'Ostatni tydzień';
+  if (range === '30d') return 'Ostatnie 30 dni';
+  // 1d view — pokazujemy aktualną datę żeby user wiedział czy widzi dziś
+  // (HAE webhook może być opóźniony, najnowszy bucket może być wczorajszy).
+  if (!latest) return 'Dziś';
+  const today = localTodayIso();
+  if (latest === today) return 'Dziś';
+  const yesterday = new Date();
+  yesterday.setDate(yesterday.getDate() - 1);
+  const yIso = `${yesterday.getFullYear()}-${String(yesterday.getMonth() + 1).padStart(2, '0')}-${String(yesterday.getDate()).padStart(2, '0')}`;
+  if (latest === yIso) return `Wczoraj (${PL_DATE_SHORT.format(new Date(latest))})`;
+  return `Najnowsze: ${PL_DATE_SHORT.format(new Date(latest))}`;
+}
 
 export function Dashboard({ me, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<AppTab>('overview');
@@ -201,7 +236,7 @@ function DashboardOverview({
 
   return (
     <>
-      <SectionHeader title={`Podsumowanie · ${RANGE_LABELS[range]}`}>
+      <SectionHeader title={`Podsumowanie · ${rangeLabel(range, latestDate(days))}`}>
         <RangeToggle value={range} onChange={onRangeChange} />
       </SectionHeader>
 
@@ -353,7 +388,7 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
 
   return (
     <>
-      <SectionHeader title={`Biometria · ${RANGE_LABELS[range]}`}>
+      <SectionHeader title={`Biometria · ${rangeLabel(range, latestDate(days))}`}>
         <RangeToggle value={range} onChange={onRangeChange} />
       </SectionHeader>
 
@@ -416,7 +451,7 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
       <SectionHeader title="Waga" />
       <WeightChart data={weightSeries.map((p) => ({ date: p.date, weight: p.value }))} />
       <div className="stat-grid">
-        <WeightSummaryCards series={weightSeries} rangeLabel={RANGE_LABELS[range]} />
+        <WeightSummaryCards series={weightSeries} rangeLabel={rangeLabel(range, latestDate(days))} />
       </div>
     </>
   );
@@ -432,7 +467,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
 
   return (
     <>
-      <SectionHeader title={`Makroskładniki · ${RANGE_LABELS[range]}`}>
+      <SectionHeader title={`Makroskładniki · ${rangeLabel(range, latestDate(days))}`}>
         <RangeToggle value={range} onChange={onRangeChange} />
       </SectionHeader>
       <div className="stat-grid">
