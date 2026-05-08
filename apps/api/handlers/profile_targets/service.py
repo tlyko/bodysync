@@ -40,9 +40,7 @@ def get_targets(user_id: str) -> tuple[int, int, int, int, bool]:
     fat = profile.get("fat_target_g")
     carbs = profile.get("carbs_target_g")
 
-    is_default = (
-        kcal is None or protein is None or fat is None or carbs is None
-    )
+    is_default = kcal is None or protein is None or fat is None or carbs is None
 
     return (
         int(kcal) if kcal is not None else DEFAULT_KCAL_TARGET,

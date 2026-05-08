@@ -121,9 +121,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 payload_obj = TargetsPayload.model_validate(parsed)
             except ValidationError as e:
                 # Sanityzowane error details (loc + type, no input echo).
-                sanitized = [
-                    {"loc": err["loc"], "type": err["type"]} for err in e.errors()
-                ]
+                sanitized = [{"loc": err["loc"], "type": err["type"]} for err in e.errors()]
                 return _response(400, {"error": "invalid payload", "details": sanitized})
 
             update_targets(
