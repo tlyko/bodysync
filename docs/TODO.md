@@ -1868,3 +1868,150 @@ Razem ~6 PR-ów, większość małych (Step 5 mega) — split żeby każdy był 
 - Jeśli vitest CI integration potrzebny → mini ADR o GHA workflow `web-tests.yml`
 
 ---
+
+
+## Sprint 8 — Biometry dashboard polish (StatCard + Sparkline + WeightChart)
+Phase: 4 (frontend polish — port StatCard/Sparkline/WeightChart wzorca z prototype)
+Estimated effort: ~5-7h (4 stepów)
+Branch base: `main` po merge PR #77
+Pre-req: Sprint 7 deployed (chat działa). Backend `GET /api/biometry?days=N` (limit 90) już akceptuje param.
+
+**Driving use case:**
+> Owner otwiera tab Biometria zamiast surowego table 7 dni × N metryk widzi grid kart: HRV, sen, kroki, kcal aktywne, waga (z wykresem 30 dni), body fat, resting HR. Każda karta ma label + duża wartość + jednostka + opcjonalny trend ↗/↘ vs 7d ago + mini sparkline.
+
+**Decyzje scope (KISS defaults zatwierdzone 2026-05-08):**
+- **D1 Co portujemy** — `Sparkline`, `StatCard`, `WeightChart` z `docs/health-dashboard-prototype.jsx`. NIE `NutritionDonut` (wymaga kalorii spożytych live, niepewne czy stack pokrywa), NIE `ActivityRow` (czeka na Sprint 4 Strava), NIE `SourceBadge` (post-MVP).
+- **D2 Sparkline lib** — inline SVG path (no deps). Prototype już ma wzorzec (linie 158-193): `polyline` + gradient `polygon` fill.
+- **D3 Range** — 30 dni (sparkline potrzebuje historii). Frontend zmienia request `getBiometry(30)`. Backend już akceptuje (`MAX_BIOMETRY_DAYS = 90`).
+- **D4 Layout** — CSS grid `auto-fill 280px`. Card minimum 200px wide.
+- **D5 Aggregation per metric** — smart:
+  - HRV → daily avg ze wszystkich pomiarów
+  - Sen → last value (1 wpis dziennie z `asleep` hours)
+  - Kroki → last value (1 wpis dziennie z `count`)
+  - Kcal_active → last value (1 wpis dziennie z `kcal`)
+  - Waga → last value (waga + delta 30d)
+  - Body fat → last value
+  - Resting HR → last value
+- **D6 Empty states** — per-card "brak pomiarów". Card jest zawsze renderowane, ale value = "—" + spark hidden.
+- **D7 Trend** — % change ostatni vs poprzedni okres (np. avg 7d vs 7-14d ago). KISS: showOnly jeśli oba okresy mają dane.
+- **D8 Refactor istniejącego table** — drop biometry table z `Dashboard.tsx` (zastąpić StatCardami). Owner sam zaakceptował; jeśli ktoś chce raw view → osobny "Tabela" toggle w follow-up.
+
+**Pre-req owner actions:** brak.
+
+**Out of scope:**
+- ActivityRow / Strava integration
+- NutritionDonut
+- Date picker / multi-day range comparison
+- Mobile responsive layout (default desktop, mobile = single column auto)
+- Historical trend chart per metric (tylko sparkline 30d, no zoom)
+
+**Eskalacja triggers:**
+- Step 3 jeśli `buildSeries` aggregation per metric wymaga >7 if-branchów → ADR/abstract registry
+- Step 3 jeśli refactor Dashboard.tsx wymaga useReducer (multi-state) → KISS check, raczej overkill
+
+---
+
+### Step 1: Sparkline + StatCard reusable components → tworzy `apps/web/src/components/dashboard/{Sparkline,StatCard}.tsx`
+- **Tworzy:**
+  - `apps/web/src/components/dashboard/Sparkline.tsx`:
+    - Props: `{ data: number[], color?: string, width?: number (default 120), height?: number (default 40) }`
+    - `data.length < 2` → return null
+    - SVG polyline + gradient polygon fill (port linii 158-193 prototype, ale TSX strict)
+  - `apps/web/src/components/dashboard/StatCard.tsx`:
+    - Props: `{ label, value, unit?, accent: 'cyan'|'green'|'orange'|'purple'|'red'|'muted', sparkData?: number[], change?: number }`
+    - Layout: label (uppercase muted) → value (large bold) + unit (muted) → bottom row z change% (green/red ▲▼) + sparkline (right)
+    - `value === null|undefined|"—"` → empty state, no sparkline
+- **Modyfikuje:** `apps/web/src/index.css` — dodaj `.stat-card`, `.stat-card-label`, `.stat-card-value`, `.stat-card-unit`, `.stat-card-trend.up/.down`, `.stat-card-sparkline-wrap`, accent classes
+- **Depends on:** nic (czysty presentational)
+- **Test:** Step 4
+- **Acceptance:**
+  - typecheck + build clean
+  - components NIE importowane jeszcze (tree-shaked) — bundle stable
+- **Effort:** ~1h
+
+---
+
+### Step 2: WeightChart component → tworzy `apps/web/src/components/dashboard/WeightChart.tsx`
+- **Tworzy:**
+  - `apps/web/src/components/dashboard/WeightChart.tsx`:
+    - Props: `{ data: Array<{date: string, weight: number}> }`
+    - Empty state gdy `data.length === 0`
+    - SVG line chart 30 dni z osią Y (kg range padded), grid lines optional
+    - Width 100% (responsive parent), height 200px
+    - Tooltip on hover (pokazuje date + kg) — *może zaczekać do follow-up jeśli skomplikowane*
+- **Modyfikuje:** `apps/web/src/index.css` — `.weight-chart` styles
+- **Depends on:** Step 1 (similar SVG patterns)
+- **Test:** Step 4
+- **Acceptance:**
+  - typecheck + build clean
+  - Renderuje line + axis labels (min/max kg)
+- **Effort:** ~1.5h
+
+---
+
+### Step 3: buildSeries helper + Dashboard refactor → modyfikuje `Dashboard.tsx` + tworzy `apps/web/src/biometry.ts`
+- **Tworzy** `apps/web/src/biometry.ts`:
+  - `buildSeries(days: BiometryDay[], metric: string): Array<{date, value}>`
+    - Smart per-metric aggregation:
+      - `hrv`: per-day avg z `value_ms`
+      - `hr`: per-day avg z `avg_bpm`
+      - `sleep`: `asleep` (hours)
+      - `steps`: `count`
+      - `weight`: `kg`
+      - `body_fat`: `pct`
+      - `resting_hr`: `bpm`
+      - `kcal_active`/`kcal_basal`/`kcal_in`: `kcal`
+      - `protein`/`fat`/`carbs`: `g`
+    - Filtruje dni bez tego metrica (no synthetic 0)
+  - `latestValue(series): {value, date} | null`
+  - `trendPct(series, windowDays = 7): number | null` — % zmiana avg ostatnie N vs poprzednie N
+- **Modyfikuje** `apps/web/src/components/Dashboard.tsx`:
+  - Drop biometry table render
+  - Switch `getBiometry(7)` → `getBiometry(30)`
+  - Render grid StatCardów: HRV / sen / kroki / kcal aktywne / resting HR / waga
+  - Sekcja waga: WeightChart pełna szerokość + 3 StatCardy (current / delta / avg)
+  - Wszystkie StatCardy używają `buildSeries` + `latestValue` + `trendPct`
+- **Depends on:** Step 1, 2
+- **Test:** Step 4
+- **Acceptance:**
+  - typecheck + build clean
+  - Bundle wzrasta (StatCard/Sparkline/WeightChart importowane)
+  - Owner manual smoke w przeglądarce: tab Biometria pokazuje grid + chart, switch tab nie refetchuje
+- **Effort:** ~2-3h (largest step — refactor + 7 stat cards)
+
+---
+
+### Step 4: Vitest tests dla biometry.ts + Sparkline + StatCard → tworzy `apps/web/src/__tests__/{biometry,dashboard-components}.test.tsx`
+- **Tworzy:**
+  - `apps/web/src/__tests__/biometry.test.ts`:
+    - `test_build_series_hrv` — multi-window day → 1 avg point
+    - `test_build_series_weight` — last value picked
+    - `test_build_series_skips_days_without_metric` — no synthetic 0
+    - `test_latest_value` — last point z series
+    - `test_trend_pct_no_data` — null when insufficient
+    - `test_trend_pct_increase` — +10% computed correctly
+  - `apps/web/src/__tests__/dashboard-components.test.tsx`:
+    - `test_sparkline_renders_polyline` — data 5 points → SVG `<polyline>` w DOM
+    - `test_sparkline_returns_null_below_2_points` — data 1 point → no SVG
+    - `test_stat_card_with_sparkline` — props z sparkData → render value + sparkline
+    - `test_stat_card_empty_value` — value="—" → no sparkline rendered
+    - `test_stat_card_trend_negative` — change=-5 → red ▼ 5%
+- **Depends on:** Step 1, 2, 3
+- **Test:** `cd apps/web && npm run test`
+- **Acceptance:** 11 nowych testów pass, ChatScreen 5 dalej pass (regression)
+- **Effort:** ~1.5h
+
+---
+
+### Decyzja Sprint 8: 4 PRów (split per step)
+1. **PR Step 1** — Sparkline + StatCard (presentational)
+2. **PR Step 2** — WeightChart
+3. **PR Step 3** — buildSeries + Dashboard refactor (biggest, real change visible)
+4. **PR Step 4** — vitest tests
+
+### Ryzyka i mitygacje
+- **R1:** `buildSeries` per-metric branches grow > 9 → trudne do utrzymania. **M:** rejestr `METRIC_AGGREGATORS: Record<string, (entry) => number | null>` jeśli osiągnie 9+.
+- **R2:** Refactor Dashboard.tsx łamie chat tab. **M:** Step 3 zachowuje `activeTab` state + tab nav nietknięte, tylko biometry-section render się zmienia.
+- **R3:** Bundle dochodzi >700KB raw. **M:** Sparkline/StatCard są inline SVG ~ tiny. WeightChart ~tiny. Recharts NIE używamy. Bundle wzrost ~3-5KB.
+- **R4:** Sprint 8 nie wykorzystuje `change`/`trend` jak prototype (% vs okres). **M:** `trendPct` w `biometry.ts` (Step 3) liczy 7d vs 7-14d ago. Akceptowalny KISS scope.
+
