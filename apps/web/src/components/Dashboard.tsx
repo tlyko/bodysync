@@ -112,6 +112,10 @@ function BiometryView({ days, error }: BiometryProps) {
   const kcalActiveSeries = buildSeries(sliced, 'kcal_active');
   const restingHrSeries = buildSeries(sliced, 'resting_hr');
   const bodyFatSeries = buildSeries(sliced, 'body_fat');
+  const kcalInSeries = buildSeries(sliced, 'kcal_in');
+  const proteinSeries = buildSeries(sliced, 'protein');
+  const fatSeries = buildSeries(sliced, 'fat');
+  const carbsSeries = buildSeries(sliced, 'carbs');
   const weightSeries = buildSeries(sliced, 'weight');
 
   return (
@@ -166,6 +170,42 @@ function BiometryView({ days, error }: BiometryProps) {
           unit="%"
           accent="muted"
           fmt={(v) => v.toFixed(1)}
+          trendWindow={trendWindow}
+        />
+      </div>
+
+      <h2 style={{ marginTop: '2rem' }}>Odżywianie</h2>
+      <div className="stat-grid">
+        <MetricStatCard
+          label="Kcal spożyte"
+          series={kcalInSeries}
+          unit="kcal"
+          accent="cyan"
+          fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
+          trendWindow={trendWindow}
+        />
+        <MetricStatCard
+          label="Białko"
+          series={proteinSeries}
+          unit="g"
+          accent="green"
+          fmt={(v) => Math.round(v).toString()}
+          trendWindow={trendWindow}
+        />
+        <MetricStatCard
+          label="Tłuszcz"
+          series={fatSeries}
+          unit="g"
+          accent="orange"
+          fmt={(v) => Math.round(v).toString()}
+          trendWindow={trendWindow}
+        />
+        <MetricStatCard
+          label="Węgle"
+          series={carbsSeries}
+          unit="g"
+          accent="purple"
+          fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
         />
       </div>
