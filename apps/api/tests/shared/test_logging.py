@@ -68,3 +68,56 @@ def test_unknown_extra_fields_are_dropped() -> None:
     assert payload["request_id"] == "req-1"
     assert "message" not in payload
     assert "secret" not in payload
+
+
+def test_chat_turn_complete_observability_fields() -> None:
+    """Regression — handler observability fields (turn idx, history size,
+    token counts) muszą trafiać do CloudWatch JSON line. Bug_016: bez tych
+    pól w allowlist `chat_turn_complete` log był pustą skorupą — handler
+    docstring obiecuje obserwowalność, allowlist musi temu sprostać.
+    """
+    record = _make_record(
+        "chat_turn_complete",
+        request_id="req-1",
+        user_id="user_a",
+        user_turn_idx=4,
+        assistant_turn_idx=5,
+        history_size=4,
+        input_tokens=100,
+        output_tokens=50,
+    )
+    payload = _format(record)
+    assert payload["user_turn_idx"] == 4
+    assert payload["assistant_turn_idx"] == 5
+    assert payload["history_size"] == 4
+    assert payload["input_tokens"] == 100
+    assert payload["output_tokens"] == 50
+
+
+def test_rate_limit_observability_fields() -> None:
+    """Regression — `rate_limit_exceeded` log emituje `limit` i `used`,
+    oba muszą trafić do CloudWatch (alarm/diagnostyka 429)."""
+    record = _make_record(
+        "rate_limit_exceeded",
+        request_id="req-1",
+        user_id="user_a",
+        limit=30,
+        used=30,
+    )
+    payload = _format(record)
+    assert payload["limit"] == 30
+    assert payload["used"] == 30
+
+
+def test_chat_request_received_message_length_field() -> None:
+    """Regression — `chat_request_received` log emituje `message_length`
+    (NIE content) per ADR-007 OPEN-4 (no PII). Pole musi trafić do JSON line.
+    """
+    record = _make_record(
+        "chat_request_received",
+        request_id="req-1",
+        user_id="user_a",
+        message_length=42,
+    )
+    payload = _format(record)
+    assert payload["message_length"] == 42

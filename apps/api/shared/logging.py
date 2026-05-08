@@ -31,6 +31,23 @@ class JsonFormatter(logging.Formatter):
             "cache_read_input_tokens",
             "cache_creation_input_tokens",
             "model",
+            # advisor_chat handler observability (chat_turn_complete /
+            # rate_limit_exceeded / chat_request_received).
+            "user_turn_idx",
+            "assistant_turn_idx",
+            "history_size",
+            "message_length",
+            "limit",
+            "used",
+            # advisor_chat profile-targets fallback diagnostics
+            # (`profile_targets_default` log w `_load_profile_targets`).
+            "has_kcal_target",
+            "has_protein_target",
+            # advisor_chat error diagnostics — fixed-vocabulary code
+            # (NIE Anthropic SDK exception message) + HTTP status_code +
+            # exception class name (catch-all 500 path).
+            "status_code",
+            "exc_type",
         ):
             value = getattr(record, key, None)
             if value is not None:

@@ -5,8 +5,8 @@ Lambda event mock. Handler-level scenariusze są w `test_handler.py`.
 
 Pokrycie:
 - `read_history` — chronological order, empty case
-- `append_message` — monotonic turn_idx, TTL correctness
-- `count_today_turns` — counts user only (NIE assistant)
+- `append_message` — monotonic turn_idx, TTL correctness, race-safe retry,
+  passed-history short-circuit (no duplicate Query)
 - `build_chat_messages` — composed message shape (3 bloki, no retrieved_recipes)
 - `call_chat` — cache_control marker present (PR1 invariant)
 """
@@ -117,21 +117,108 @@ def test_append_message_ttl_correct(dynamodb_table: Any) -> None:
     assert before + 86400 <= ttl <= after + 86400 + 5
 
 
-# ─── count_today_turns ────────────────────────────────────────────────────
+# ─── append_message — race-safety / passed history ───────────────────────
 
 
-def test_count_today_turns_counts_user_only(dynamodb_table: Any) -> None:
-    """5 user + 4 assistant rows → `count_today_turns` == 5 (NIE 9)."""
-    from handlers.advisor_chat.service import append_message, count_today_turns
+def test_append_message_collision_retries(dynamodb_table: Any) -> None:
+    """Pre-write `CHAT#{today}#0000` direct → caller passes empty history,
+    `append_message` myśli `next_idx=0`, conditional PutItem failuje, retry
+    z fresh DDB read → wybiera `next_idx=1`. Returns 1.
+
+    Symuluje TOCTOU race: dwa concurrent requests w oknie ~3-5s Anthropic
+    call wyliczyły ten sam `next_idx`; drugi przegrywa kolizję, retryuje.
+    """
+    from handlers.advisor_chat.service import append_message
 
     today = datetime.now(WARSAW_TZ).date()
-    # 5 user, 4 assistant interleave
-    for i in range(5):
-        append_message("alice", today, "user", f"u{i}")
-        if i < 4:
-            append_message("alice", today, "assistant", f"a{i}")
+    today_iso = today.isoformat()
 
-    assert count_today_turns("alice", today) == 5
+    # Inny "request" zapisał już idx=0 zanim tutaj retryujemy.
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#alice",
+            "SK": f"CHAT#{today_iso}#0000",
+            "role": "user",
+            "content": "first writer wins",
+            "ts": f"{today_iso}T12:00:00+00:00",
+            "ttl": int(time.time()) + 86400,
+        }
+    )
+
+    # Caller pomyłkowo przekazuje pustą historię (snapshot stale) → próba
+    # idx=0 → kolizja → retry z None → re-read DDB → idx=1.
+    assigned = append_message("alice", today, "user", "second writer", history=[])
+    assert assigned == 1
+
+    raw = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :sk)",
+        ExpressionAttributeValues={
+            ":pk": "USER#alice",
+            ":sk": f"CHAT#{today_iso}#",
+        },
+    )
+    sks = sorted(item["SK"] for item in raw["Items"])
+    assert sks == [
+        f"CHAT#{today_iso}#0000",
+        f"CHAT#{today_iso}#0001",
+    ]
+
+
+def test_append_message_exhausted_retries_raises(
+    dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """`put_item_idempotent` zawsze False → po `MAX_APPEND_RETRIES` próbach
+    `AdvisorBackendError("turn_idx_collision_after_retries")`."""
+    from handlers.advisor_chat import service as svc
+
+    today = datetime.now(WARSAW_TZ).date()
+    call_count = {"n": 0}
+
+    def _always_fails(pk: str, sk: str, attrs: dict[str, Any]) -> bool:
+        call_count["n"] += 1
+        return False
+
+    monkeypatch.setattr(svc, "put_item_idempotent", _always_fails)
+
+    with pytest.raises(svc.AdvisorBackendError, match="turn_idx_collision_after_retries"):
+        svc.append_message("alice", today, "user", "x", history=[])
+
+    assert call_count["n"] == svc.MAX_APPEND_RETRIES
+
+
+def test_append_message_uses_passed_history_no_duplicate_query(
+    dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Caller przekazuje `history=[ChatMessage(...)]` → `append_message` NIE
+    woła `read_history` (pierwsza próba używa snapshota; tylko collision-retry
+    re-readuje)."""
+    from handlers.advisor_chat import service as svc
+    from handlers.advisor_chat.schemas import ChatMessage
+
+    today = datetime.now(WARSAW_TZ).date()
+    read_calls = {"n": 0}
+    real_read_history = svc.read_history
+
+    def _spy(user_id: str, today: Any) -> Any:
+        read_calls["n"] += 1
+        return real_read_history(user_id, today)
+
+    monkeypatch.setattr(svc, "read_history", _spy)
+
+    history = [
+        ChatMessage(
+            role="user",
+            content="prev",
+            turn_idx=3,
+            ts=f"{today.isoformat()}T11:00:00+00:00",
+        ),
+    ]
+    assigned = svc.append_message("alice", today, "user", "next", history=history)
+
+    # next_idx = max(3) + 1 = 4
+    assert assigned == 4
+    # Kluczowe: NO duplicate Query.
+    assert read_calls["n"] == 0
 
 
 # ─── build_chat_messages ──────────────────────────────────────────────────

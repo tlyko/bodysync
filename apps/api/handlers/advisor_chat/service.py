@@ -3,8 +3,9 @@
 Cztery odpowiedzialności:
 
 1. `build_today_state` — zbiera kontekst metryczny z DDB (BIOMETRY queries).
-2. `read_history` / `count_today_turns` / `append_message` — DDB chat history
-   (`CHAT#{date}#{turn_idx:04d}`, 24h TTL per ADR-007 D6).
+2. `read_history` / `append_message` — DDB chat history
+   (`CHAT#{date}#{turn_idx:04d}`, 24h TTL per ADR-007 D6). `append_message`
+   jest race-safe (conditional PutItem + retry-on-collision).
 3. `build_chat_messages` — kompozycja user message z `<conversation_history>`
    + `<today_context>` + `<user_message>` (forward-compat dla `<retrieved_recipes>`
    w PR2).
@@ -30,7 +31,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from shared.dynamo import get_item, put_item, query_by_pk, sum_metric_today
+from shared.dynamo import get_item, put_item_idempotent, query_by_pk, sum_metric_today
 from shared.logging import get_logger
 from shared.ssm import SecretMisconfiguredError, load_secure_secret
 
@@ -56,6 +57,11 @@ CHAT_TTL_SECONDS = 86400
 # Recent history hard cap przekazywany do LLM (ADR-007 D7) — chroni token budget.
 RECENT_HISTORY_LIMIT = 20
 
+# Max retry attempts dla `append_message` przy turn_idx collision.
+# Concurrent requests podczas ~3-5s Anthropic call window mogą wyliczyć ten
+# sam `next_idx`; conditional PutItem failuje, retry z bumped idx.
+MAX_APPEND_RETRIES = 5
+
 # Fallback target dla PROFILE row missing — preferred fallback z log warning
 # > 503 z reason=profile_missing. Wartości typowe dla średniego mężczyzny
 # 75-80 kg, deficyt 400 kcal:
@@ -63,16 +69,6 @@ DEFAULT_KCAL_TARGET = 2000
 DEFAULT_PROTEIN_TARGET_G = 130
 DEFAULT_FAT_TARGET_G = 70
 DEFAULT_CARBS_TARGET_G = 200
-
-# Map BIOMETRY metric_short → value attribute (mirror health_webhook.service
-# storage layer). Trzymamy lokalnie żeby advisor nie zależał od api_read.
-_CUMULATIVE_VALUE_ATTRS: dict[str, str] = {
-    "kcal_in": "kcal",
-    "kcal_active": "kcal",
-    "kcal_basal": "kcal",
-    "protein": "g",
-    "steps": "count",
-}
 
 # System prompt — file read na cold start (mały plik, deterministic).
 _SYSTEM_PROMPT_PATH = Path(__file__).parent / "system_prompt.txt"
@@ -96,8 +92,16 @@ class AdvisorBackendError(RuntimeError):
     """Anthropic API rzuciło 5xx / timeout / connection error po retry,
     lub odpowiedź ma nieoczekiwany shape.
 
-    Handler łapie i zwraca 503 z `reason="advisor_unavailable"`.
+    Handler łapie i zwraca 503. `reason` to fixed-vocabulary code (NIE
+    zawiera SDK exception message), żeby nie leakować prompt content do
+    logów (Anthropic 4xx historycznie echo'ują prompt body w `body` polu).
+    Per ADR-007 OPEN-4 "no content logging".
     """
+
+    def __init__(self, reason: str, *, status_code: int | None = None) -> None:
+        super().__init__(reason)
+        self.reason = reason
+        self.status_code = status_code
 
 
 def get_anthropic_client() -> Anthropic:
@@ -348,7 +352,7 @@ def _now_epoch() -> int:
 
 
 def read_history(user_id: str, today: date) -> list[ChatMessage]:
-    """Read all chat turns dla `today` (UTC) z DDB.
+    """Read all chat turns dla `today` (Europe/Warsaw local day) z DDB.
 
     Query: `PK=USER#{user_id} AND begins_with(SK, "CHAT#{today}#")`.
     Items zwracane DDB-default ascending order (po SK), więc rosnąco po
@@ -380,50 +384,56 @@ def read_history(user_id: str, today: date) -> list[ChatMessage]:
     return messages
 
 
-def count_today_turns(user_id: str, today: date) -> int:
-    """Liczba USER turns dziś (assistant turns nie liczą się do rate limitu).
-
-    Implementacja MVP: `len(read_history)` + filter po roli. Optymalizacja
-    (np. dedicated `count_by_pk` w `shared/dynamo.py` lub atomic counter)
-    do reviewer/architect jeśli reviewer kwestionuje koszty RCU. Cap dzienny
-    30 user turns ⇒ max 60 items czytane — pomijalne (~1 RCU per Query).
-    """
-    history = read_history(user_id, today)
-    return sum(1 for m in history if m.role == "user")
-
-
 def append_message(
     user_id: str,
     today: date,
     role: str,
     content: str,
     *,
+    history: list[ChatMessage] | None = None,
     tokens_used: dict[str, int] | None = None,
 ) -> int:
-    """Zapisz turę do DDB z auto-incremented `turn_idx`.
+    """Zapisz turę do DDB z monotonic `turn_idx` + idempotency guard.
 
     `turn_idx = max(existing) + 1`, lub 0 gdy historia pusta. Build SK jako
     `CHAT#{today}#{turn_idx:04d}` (zero-padded 4-cyfry — sortable lexico
     do 9999 tur, sensible upper bound).
+
+    Race-safe: jeśli inny request złapie ten sam `next_idx` w oknie ~3-5s
+    Anthropic call, conditional PutItem (`attribute_not_exists(PK) AND
+    attribute_not_exists(SK)`) zwróci False; retry z fresh `read_history`,
+    bumped idx. Max `MAX_APPEND_RETRIES` prób.
+
+    `today` to Europe/Warsaw local day (matches `handler.py` quota window).
+
+    `history`: optional snapshot z callera — pozwala uniknąć zduplikowanego
+    DDB Query gdy handler już ma świeżą historię. `None` ⇒ re-read z DDB.
 
     `tokens_used` (z Anthropic usage) zapisywane tylko dla assistant turn —
     przydatne dla replay/debug. User turn ma `None`.
 
     Returns assigned `turn_idx`.
     """
-    history = read_history(user_id, today)
-    next_idx = max((m.turn_idx for m in history), default=-1) + 1
-    sk = f"CHAT#{today.isoformat()}#{next_idx:04d}"
-    attrs: dict[str, Any] = {
-        "role": role,
-        "content": content,
-        "ts": _now_iso(),
-        "ttl": _now_epoch() + CHAT_TTL_SECONDS,
-    }
-    if tokens_used is not None:
-        attrs["tokens_used"] = tokens_used
-    put_item(f"USER#{user_id}", sk, attrs)
-    return next_idx
+    pk = f"USER#{user_id}"
+    snapshot = history
+    for _ in range(MAX_APPEND_RETRIES):
+        if snapshot is None:
+            snapshot = read_history(user_id, today)
+        next_idx = max((m.turn_idx for m in snapshot), default=-1) + 1
+        sk = f"CHAT#{today.isoformat()}#{next_idx:04d}"
+        attrs: dict[str, Any] = {
+            "role": role,
+            "content": content,
+            "ts": _now_iso(),
+            "ttl": _now_epoch() + CHAT_TTL_SECONDS,
+        }
+        if tokens_used is not None:
+            attrs["tokens_used"] = tokens_used
+        if put_item_idempotent(pk, sk, attrs):
+            return next_idx
+        # Collision — re-read fresh history na następnej iteracji.
+        snapshot = None
+    raise AdvisorBackendError("turn_idx_collision_after_retries")
 
 
 # ─── Prompt composition ────────────────────────────────────────────────────
@@ -505,21 +515,29 @@ def call_chat(
             ],
             messages=cast("list[MessageParam]", messages),
         )
-    except (APIStatusError, APIConnectionError, APITimeoutError) as exc:
+    except APIStatusError as exc:
         # Anthropic SDK ma built-in retry (max_retries=2 w client init).
         # Po wyczerpaniu rzuca te exceptions — handler zwraca 503.
-        raise AdvisorBackendError(f"anthropic_api_error: {exc}") from exc
+        # `status_code` z exc (int), `reason` to fixed code — NIE leakujemy
+        # `exc.body` ani `str(exc)` które mogą zawierać prompt snippet.
+        raise AdvisorBackendError(
+            "api_status_error", status_code=getattr(exc, "status_code", None)
+        ) from exc
+    except APITimeoutError as exc:
+        raise AdvisorBackendError("api_timeout") from exc
+    except APIConnectionError as exc:
+        raise AdvisorBackendError("api_connection_error") from exc
 
     # Free-form text response — first content block must be type=text.
     content_blocks = response.content
     if not content_blocks:
-        raise AdvisorBackendError("anthropic_empty_content")
+        raise AdvisorBackendError("empty_content")
     first = content_blocks[0]
     if getattr(first, "type", None) != "text":
-        raise AdvisorBackendError(f"anthropic_unexpected_block_type: {getattr(first, 'type', '?')}")
+        raise AdvisorBackendError("unexpected_block_type")
     text = getattr(first, "text", None)
     if not isinstance(text, str):
-        raise AdvisorBackendError("anthropic_text_block_missing_text")
+        raise AdvisorBackendError("text_block_missing_text")
 
     usage = response.usage
     token_usage = TokenUsage(
@@ -549,16 +567,15 @@ __all__ = [
     "AdvisorBackendError",
     "AdvisorUnavailableError",
     "DEFAULT_KCAL_TARGET",
+    "MAX_APPEND_RETRIES",
     "MAX_TOKENS",
     "MODEL",
     "RECENT_HISTORY_LIMIT",
-    "_CUMULATIVE_VALUE_ATTRS",
     "_SYSTEM_PROMPT",
     "append_message",
     "build_chat_messages",
     "build_today_state",
     "call_chat",
-    "count_today_turns",
     "get_anthropic_client",
     "read_history",
 ]

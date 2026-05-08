@@ -142,6 +142,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     # ── 3-5. Read history + rate limit + append user turn ──────────────────
     try:
         history = service.read_history(user_id, today)
+        # NOTE: 30/day cap is best-effort; concurrent requests may briefly
+        # exceed by N. Cost-guard CloudWatch alarm at 1.5M output tokens/day
+        # backstops absolute cost. ADR-007 spec line 867 explicit accept for
+        # 2-user MVP (no atomic counter — over-engineering).
         user_count = sum(1 for m in history if m.role == "user")
         if user_count >= DAILY_USER_TURN_LIMIT:
             logger.warning(
@@ -164,7 +168,15 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         # Append user turn FIRST — UX continuity: gdy Anthropic fail po appendzie,
         # user widzi swoją wiadomość w UI i może retry (per ADR-007 + spec line 1036).
-        user_turn_idx = service.append_message(user_id, today, "user", request.message)
+        # Pass `history` snapshot — pierwsza próba w `append_message` używa go
+        # bez zduplikowanego DDB Query; collision-retry re-readuje fresh.
+        user_turn_idx = service.append_message(
+            user_id,
+            today,
+            "user",
+            request.message,
+            history=history,
+        )
 
         # ── 6. Build context + messages ────────────────────────────────────
         today_state = service.build_today_state(user_id, today)
@@ -183,14 +195,27 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 extra={"request_id": request_id, "user_id": user_id},
             )
             return _response(503, {"error": "advisor_unavailable"})
-        except AdvisorBackendError:
-            logger.exception(
+        except AdvisorBackendError as exc:
+            # logger.error (NIE .exception) — `exc_info` byłby formatException'em
+            # przez JsonFormatter i mógłby echo'ować Anthropic SDK body
+            # (np. 4xx z `prompt too long: <snippet>`). Logujemy tylko
+            # category code + status — per ADR-007 OPEN-4.
+            logger.error(
                 "advisor_backend_error",
-                extra={"request_id": request_id, "user_id": user_id},
+                extra={
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "reason": exc.reason,
+                    "status_code": exc.status_code,
+                },
             )
             return _response(503, {"error": "advisor_backend_error"})
 
         # ── 8. Append assistant turn ───────────────────────────────────────
+        # Pragmatic: nie budujemy `history_after_user` snapshotu — re-Query
+        # raz po Anthropic call (~kilkaset ms) jest tańsze niż utrzymanie
+        # spójnego mutowanego snapshota. Race window: minimal (drugi turn
+        # idx liczony świeżo z DDB).
         assistant_turn_idx = service.append_message(
             user_id,
             today,
@@ -217,17 +242,26 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "user_turn_idx": user_turn_idx,
                 "assistant_turn_idx": assistant_turn_idx,
                 "history_size": len(history),
-                "tokens_input": tokens.input_tokens,
-                "tokens_output": tokens.output_tokens,
+                # Match `anthropic_call` log shape (allowlist + cost-guard
+                # CloudWatch metric filter convention).
+                "input_tokens": tokens.input_tokens,
+                "output_tokens": tokens.output_tokens,
             },
         )
 
         return _response(200, response.model_dump())
 
-    except Exception:
-        # Catch-all — log full traceback, return generic 500 (no internal leak).
-        logger.exception(
+    except Exception as exc:
+        # Catch-all — logujemy `exc_type` (klasa) zamiast traceback/`str(exc)`.
+        # Powód: nieznane wyjątki mogą mieć `__str__` zawierający payload
+        # (np. third-party SDK echo'ujący request). Per ADR-007 OPEN-4
+        # "no content logging" — debug przez X-Ray / lokalne replay.
+        logger.error(
             "chat_internal_error",
-            extra={"request_id": request_id, "user_id": user_id},
+            extra={
+                "request_id": request_id,
+                "user_id": user_id,
+                "exc_type": type(exc).__name__,
+            },
         )
         return _response(500, {"error": "internal_error"})
