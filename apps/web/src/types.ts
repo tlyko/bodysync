@@ -59,3 +59,20 @@ export type ChatRequest = {
 export type ChatMessage =
   | { role: 'user'; content: string; pending: boolean }
   | { role: 'assistant'; content: string; used_recipes: UsedRecipe[]; turn_idx: number };
+
+// ─── Profile targets (Sprint 9, mirror schemas.py) ───
+
+export type ProfileTargets = {
+  kcal_target: number;
+  protein_target_g: number;
+  fat_target_g: number;
+  carbs_target_g: number;
+  is_default: boolean;
+};
+
+export type ProfileTargetsUpdate = {
+  kcal_target: number;
+  protein_target_g: number;
+  fat_target_g: number;
+  carbs_target_g: number;
+};

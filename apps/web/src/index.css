@@ -343,6 +343,111 @@ td.date {
   margin-left: auto;
 }
 
+/* ─── Profile targets form (Sprint 9) ─── */
+
+.profile-form {
+  max-width: 720px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.profile-form-banner {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--orange);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.profile-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 1.25rem;
+}
+.profile-form-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.profile-form-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.profile-form-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.profile-form-field input[type='number'] {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.1rem;
+  font-weight: 600;
+  width: 100%;
+  -moz-appearance: textfield;
+}
+.profile-form-field input[type='number']:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.profile-form-field input[type='number']:disabled {
+  opacity: 0.5;
+}
+.profile-form-field input[aria-invalid='true'] {
+  border-color: var(--red);
+}
+.profile-form-unit {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.profile-form-hint {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  line-height: 1.4;
+  min-height: 1em;
+}
+.profile-form-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.profile-form-success {
+  color: var(--green);
+  font-size: 0.85rem;
+}
+.profile-form-submit {
+  background: var(--cyan);
+  color: #0a0e17;
+  border-color: var(--cyan);
+  font-weight: 600;
+  padding: 0.55rem 1.4rem;
+}
+.profile-form-submit:hover:not(:disabled) {
+  background: #67e8f9;
+  border-color: #67e8f9;
+}
+.profile-form-submit:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
 /* ─── Weight chart (Sprint 8) ─── */
 
 .weight-chart {
