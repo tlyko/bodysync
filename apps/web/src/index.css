@@ -1,14 +1,25 @@
 :root {
   --bg: #0a0e17;
+  --surface: #111827;
   --card: #1a2332;
+  --card-hover: #1e2a3d;
   --border: #2a3548;
+  --border-light: #374357;
   --text: #e2e8f0;
   --text-muted: #94a3b8;
+  --text-dim: #5a6f8e;
   --cyan: #22d3ee;
+  --cyan-dim: rgba(34, 211, 238, 0.12);
   --green: #10b981;
+  --green-dim: rgba(16, 185, 129, 0.12);
   --orange: #f59e0b;
+  --orange-dim: rgba(245, 158, 11, 0.12);
   --red: #ef4444;
+  --red-dim: rgba(239, 68, 68, 0.12);
   --purple: #a78bfa;
+  --purple-dim: rgba(167, 139, 250, 0.12);
+  --pink: #f472b6;
+  --pink-dim: rgba(244, 114, 182, 0.12);
 
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
   line-height: 1.5;
