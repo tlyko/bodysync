@@ -138,3 +138,32 @@ def test_rag_observability_fields() -> None:
     payload = _format(record)
     assert payload["retrieved_slugs"] == ["pierogi-ruskie", "kotlet-schabowy"]
     assert payload["retrieved_count"] == 2
+
+
+def test_rag_retrieve_complete_log_fields() -> None:
+    """Sprint 6.2 PR2 follow-up — `rag.retrieve()` emituje
+    `rag_retrieve_complete` log z `query_length`, `top_score`,
+    `results_count`, `slugs`. Bez tego allowlist'a tylko `limit` było
+    widoczne — detailed RAG observability silently dropped (analogiczny
+    bug do bug_016 z Sprint 6.1).
+    """
+    record = _make_record(
+        "rag_retrieve_complete",
+        query_length=42,
+        limit=5,
+        results_count=5,
+        top_score=0.601,
+        slugs=[
+            "ciabatta-z-wedzonym-kurczakiem-mezczyzni",
+            "bajgiel-z-jajkiem-mezczyzni",
+        ],
+    )
+    payload = _format(record)
+    assert payload["query_length"] == 42
+    assert payload["limit"] == 5
+    assert payload["results_count"] == 5
+    assert payload["top_score"] == 0.601
+    assert payload["slugs"] == [
+        "ciabatta-z-wedzonym-kurczakiem-mezczyzni",
+        "bajgiel-z-jajkiem-mezczyzni",
+    ]
