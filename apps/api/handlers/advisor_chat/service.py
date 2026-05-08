@@ -24,6 +24,7 @@ Decyzje implementacyjne:
 
 from __future__ import annotations
 
+import json
 import time
 from collections.abc import Iterable
 from datetime import UTC, date, datetime, timedelta
@@ -35,7 +36,7 @@ from shared.dynamo import get_item, put_item_idempotent, query_by_pk, sum_metric
 from shared.logging import get_logger
 from shared.ssm import SecretMisconfiguredError, load_secure_secret
 
-from .schemas import ChatMessage, TodayState, TokenUsage
+from .schemas import ChatMessage, TodayState, TokenUsage, UsedRecipe
 
 if TYPE_CHECKING:
     from anthropic import Anthropic
@@ -443,13 +444,25 @@ def build_chat_messages(
     history: list[ChatMessage],
     today_state: TodayState,
     user_message: str,
+    *,
+    retrieved_recipes: list[UsedRecipe] | None = None,
 ) -> list[dict[str, Any]]:
-    """Buduje pojedynczy user message z 3 (PR2: 4) blokami XML-ish:
-    `<conversation_history>`, `<today_context>`, `<user_message>`.
+    """Buduje pojedynczy user message z 3-4 blokami XML-ish:
+    `<conversation_history>`, `<today_context>`,
+    (opcjonalnie) `<retrieved_recipes>`, `<user_message>`.
 
     Per ADR-007 D7: pojedynczy user message do Anthropic (NIE native
     multi-turn `messages=[{role:user},{role:assistant},...]`) — daje
     stabilny prompt cache (system prompt cached osobno via `cache_control`).
+
+    Per ADR-007 D6 "User message structure": `<retrieved_recipes>` block
+    dostaje **osobny** content block z dedykowanym `cache_control: ephemeral`
+    markerem — top-K dla podobnych queries jest stable enough żeby cache
+    hit ratio (~30-50% w wielo-turnowej rozmowie) opłacił się; history +
+    today_context są dynamic per turn (nie cached).
+
+    `retrieved_recipes` keyword-only (backward-compat z PR1 callers); `None`
+    lub `[]` ⇒ block pominięty (graceful degradation gdy RAG fail).
 
     Hard cap 20 ostatnich tur historii (drop oldest) — chroni token budget.
     """
@@ -457,22 +470,39 @@ def build_chat_messages(
     history_text = "\n".join(f"turn {m.turn_idx} [{m.role}]: {m.content}" for m in recent)
     today_state_json = today_state.model_dump_json(indent=2)
 
-    # TODO(PR2): wstaw <retrieved_recipes>...</retrieved_recipes> block z RAG retrieval
-
-    composed = (
+    # Block 1 — history + today_context (dynamic, NIE cached).
+    base_text = (
         "<conversation_history>\n"
         f"{history_text}\n"
         "</conversation_history>\n"
         "\n"
         "<today_context>\n"
         f"{today_state_json}\n"
-        "</today_context>\n"
-        "\n"
-        "<user_message>\n"
-        f"{user_message}\n"
-        "</user_message>"
+        "</today_context>"
     )
-    return [{"role": "user", "content": composed}]
+    content_blocks: list[dict[str, Any]] = [{"type": "text", "text": base_text}]
+
+    # Block 2 — retrieved_recipes (cached gdy truthy; per ADR-007 D6 cache hierarchy).
+    if retrieved_recipes:
+        retrieved_json = json.dumps(
+            [r.model_dump() for r in retrieved_recipes],
+            indent=2,
+            ensure_ascii=False,
+        )
+        retrieved_block = f"<retrieved_recipes>\n{retrieved_json}\n</retrieved_recipes>"
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": retrieved_block,
+                "cache_control": {"type": "ephemeral"},
+            }
+        )
+
+    # Block 3 — user_message (dynamic, NIE cached).
+    user_block = f"<user_message>\n{user_message}\n</user_message>"
+    content_blocks.append({"type": "text", "text": user_block})
+
+    return [{"role": "user", "content": content_blocks}]
 
 
 # ─── Anthropic call ────────────────────────────────────────────────────────

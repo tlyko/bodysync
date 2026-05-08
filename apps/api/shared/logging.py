@@ -48,6 +48,10 @@ class JsonFormatter(logging.Formatter):
             # exception class name (catch-all 500 path).
             "status_code",
             "exc_type",
+            # advisor_chat RAG observability (Sprint 6.2 PR2 per ADR-007
+            # OPEN-4) — slugi (NIE content) + count w `chat_turn_complete`.
+            "retrieved_slugs",
+            "retrieved_count",
         ):
             value = getattr(record, key, None)
             if value is not None:

@@ -33,8 +33,8 @@ from zoneinfo import ZoneInfo
 
 from pydantic import ValidationError
 
-from handlers.advisor_chat import service
-from handlers.advisor_chat.schemas import ChatRequest, ChatResponse
+from handlers.advisor_chat import rag, service
+from handlers.advisor_chat.schemas import ChatRequest, ChatResponse, UsedRecipe
 from handlers.advisor_chat.service import (
     AdvisorBackendError,
     AdvisorUnavailableError,
@@ -180,11 +180,46 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
         # ── 6. Build context + messages ────────────────────────────────────
         today_state = service.build_today_state(user_id, today)
+
+        # ── 6.5 RAG retrieval (per ADR-007 D6 — top-K=5 cosine recipes) ────
+        # Graceful degradation: każda RAG porażka (S3 missing, OpenAI down,
+        # FAISS broken) → `retrieved=None`, chat kontynuuje bez recipes.
+        # NIE leakujemy SDK exception body do logów (per ADR-007 OPEN-4).
+        retrieved: list[UsedRecipe] | None = None
+        try:
+            retrieved = rag.retrieve(request.message, k=5)
+        except rag.RAGUnavailableError as exc:
+            logger.warning(
+                "rag_unavailable",
+                extra={
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "reason": exc.reason,
+                    "status_code": exc.status_code,
+                },
+            )
+        except Exception as exc:  # noqa: BLE001 — RAG nie może crashować chatu
+            # Catch-all jako defense-in-depth. `exc_type` only (klasa), bez
+            # `str(exc)` — third-party SDK może echo'ować prompt w `__str__`.
+            logger.error(
+                "rag_unexpected_error",
+                extra={
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+
         # `history` to snapshot SPRZED appendu user turn — `build_chat_messages`
         # samo wrapuje `request.message` w `<user_message>` block, więc nie
         # duplikujemy (gdybyśmy wzięli post-append history, mielibyśmy bieżącą
         # wiadomość zarówno w `<conversation_history>` jak i `<user_message>`).
-        messages = service.build_chat_messages(history, today_state, request.message)
+        messages = service.build_chat_messages(
+            history,
+            today_state,
+            request.message,
+            retrieved_recipes=retrieved,
+        )
 
         # ── 7. Anthropic call ──────────────────────────────────────────────
         try:
@@ -228,12 +263,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         response = ChatResponse(
             role="assistant",
             content=content,
-            used_recipes=[],  # PR1 placeholder; PR2 fills via RAG.
+            used_recipes=retrieved or [],
             turn_idx=assistant_turn_idx,
             tokens_used=tokens,
             generated_at=datetime.now(UTC).isoformat(),
         )
 
+        retrieved_slugs = [r.slug for r in retrieved] if retrieved else []
         logger.info(
             "chat_turn_complete",
             extra={
@@ -246,6 +282,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 # CloudWatch metric filter convention).
                 "input_tokens": tokens.input_tokens,
                 "output_tokens": tokens.output_tokens,
+                # Sprint 6.2 RAG observability (per ADR-007 OPEN-4):
+                # slugi (NIE content) + count, dla CloudWatch debug.
+                "retrieved_slugs": retrieved_slugs,
+                "retrieved_count": len(retrieved_slugs),
             },
         )
 

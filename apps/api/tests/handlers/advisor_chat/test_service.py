@@ -7,7 +7,7 @@ Pokrycie:
 - `read_history` — chronological order, empty case
 - `append_message` — monotonic turn_idx, TTL correctness, race-safe retry,
   passed-history short-circuit (no duplicate Query)
-- `build_chat_messages` — composed message shape (3 bloki, no retrieved_recipes)
+- `build_chat_messages` — composed message shape (3-4 bloki, retrieved cache marker)
 - `call_chat` — cache_control marker present (PR1 invariant)
 """
 
@@ -242,23 +242,40 @@ def _make_today_state() -> Any:
     )
 
 
-def test_build_chat_messages_no_retrieved_recipes() -> None:
-    """PR1 invariant — composed message NIE zawiera `<retrieved_recipes>`.
+def _flatten_blocks(content: Any) -> str:
+    """Helper — concat wszystkich text blocks w composed user message.
 
-    PR2 doda RAG retrieval block; w PR1 pilnujemy nieobecności.
+    Po Sprint 6.2 PR2 Step 4 `build_chat_messages` zwraca multi-block
+    content array (dla per-block `cache_control` markera na retrieved).
+    Tests które patrzą na "czy literal jest w composed" robią flatten.
+    """
+    if isinstance(content, str):
+        return content
+    return "".join(b["text"] for b in content if b.get("type") == "text")
+
+
+def test_build_chat_messages_no_retrieved_recipes() -> None:
+    """Brak `retrieved_recipes` (default None) ⇒ composed message NIE
+    zawiera `<retrieved_recipes>` block. Graceful degradation gdy RAG fail.
     """
     from handlers.advisor_chat.service import build_chat_messages
 
     state = _make_today_state()
     messages = build_chat_messages([], state, "Cześć!")
-    composed = messages[0]["content"]
+    composed = _flatten_blocks(messages[0]["content"])
     assert "<retrieved_recipes>" not in composed
     assert "</retrieved_recipes>" not in composed
+    # Default None lub [] ⇒ 2 bloki (base + user_message), żaden nie ma
+    # cache_control marker (cache markowany jest tylko retrieved block).
+    blocks = messages[0]["content"]
+    assert isinstance(blocks, list)
+    assert len(blocks) == 2
+    assert all("cache_control" not in b for b in blocks)
 
 
 def test_build_chat_messages_includes_three_blocks() -> None:
     """Composed message ZAWIERA `<conversation_history>`, `<today_context>`,
-    `<user_message>` — 3 wymagane bloki PR1."""
+    `<user_message>` — 3 wymagane bloki w content array."""
     from handlers.advisor_chat.schemas import ChatMessage
     from handlers.advisor_chat.service import build_chat_messages
 
@@ -275,7 +292,7 @@ def test_build_chat_messages_includes_three_blocks() -> None:
     messages = build_chat_messages(history, state, "kolejne pytanie")
     assert len(messages) == 1
     assert messages[0]["role"] == "user"
-    composed = messages[0]["content"]
+    composed = _flatten_blocks(messages[0]["content"])
     assert "<conversation_history>" in composed
     assert "</conversation_history>" in composed
     assert "<today_context>" in composed
@@ -289,6 +306,54 @@ def test_build_chat_messages_includes_three_blocks() -> None:
     assert "kcal_target" in composed
     # User message wstawiony
     assert "kolejne pytanie" in composed
+
+
+def test_build_chat_messages_with_retrieved_recipes() -> None:
+    """Sprint 6.2 PR2 — `retrieved_recipes` truthy ⇒ dodatkowy content block
+    z `<retrieved_recipes>` JSON + `cache_control: ephemeral` marker.
+
+    Per ADR-007 D6 cache hierarchy — drugi cache marker (osobny od system
+    prompt) opłaca się dla top-K stable across podobnych queries.
+    """
+    from handlers.advisor_chat.schemas import UsedRecipe
+    from handlers.advisor_chat.service import build_chat_messages
+
+    state = _make_today_state()
+    recipes = [
+        UsedRecipe(slug="kurczak-z-ryżem", name="Kurczak z ryżem", kcal=540, similarity_score=0.82),
+        UsedRecipe(slug="łosoś-pieczony", name="Łosoś pieczony", kcal=620, similarity_score=0.79),
+    ]
+    messages = build_chat_messages([], state, "co zjeść", retrieved_recipes=recipes)
+
+    blocks = messages[0]["content"]
+    assert isinstance(blocks, list)
+    assert len(blocks) == 3  # base + retrieved + user_message
+
+    composed = _flatten_blocks(blocks)
+    assert "<retrieved_recipes>" in composed
+    assert "</retrieved_recipes>" in composed
+    # Slug + name + kcal trafiają do JSON
+    assert "kurczak-z-ryżem" in composed
+    assert "Łosoś pieczony" in composed
+    assert "540" in composed
+
+    # Cache marker — TYLKO na retrieved block (block index 1).
+    cache_blocks = [b for b in blocks if b.get("cache_control") == {"type": "ephemeral"}]
+    assert len(cache_blocks) == 1
+    assert "<retrieved_recipes>" in cache_blocks[0]["text"]
+
+
+def test_build_chat_messages_empty_retrieved_skipped() -> None:
+    """`retrieved_recipes=[]` traktowane jak None — block pominięty
+    (graceful degradation gdy retrieve zwrócił 0 wyników)."""
+    from handlers.advisor_chat.service import build_chat_messages
+
+    state = _make_today_state()
+    messages = build_chat_messages([], state, "halo", retrieved_recipes=[])
+    composed = _flatten_blocks(messages[0]["content"])
+    assert "<retrieved_recipes>" not in composed
+    blocks = messages[0]["content"]
+    assert len(blocks) == 2  # base + user_message; brak retrieved block
 
 
 # ─── call_chat (Anthropic) ────────────────────────────────────────────────

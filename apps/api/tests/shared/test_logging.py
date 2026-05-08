@@ -121,3 +121,20 @@ def test_chat_request_received_message_length_field() -> None:
     )
     payload = _format(record)
     assert payload["message_length"] == 42
+
+
+def test_rag_observability_fields() -> None:
+    """Sprint 6.2 PR2 regression — `retrieved_slugs` + `retrieved_count`
+    muszą trafiać do JSON line w `chat_turn_complete` log (per ADR-007
+    OPEN-4: slugi/count, NIE content recipes).
+    """
+    record = _make_record(
+        "chat_turn_complete",
+        request_id="req-1",
+        user_id="user_a",
+        retrieved_slugs=["pierogi-ruskie", "kotlet-schabowy"],
+        retrieved_count=2,
+    )
+    payload = _format(record)
+    assert payload["retrieved_slugs"] == ["pierogi-ruskie", "kotlet-schabowy"]
+    assert payload["retrieved_count"] == 2
