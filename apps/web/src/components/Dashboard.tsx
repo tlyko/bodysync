@@ -1,11 +1,14 @@
 import { useEffect, useState } from 'react';
 import { getBiometry } from '../api';
 import type { BiometryDay, BiometryValue, Me } from '../types';
+import { ChatScreen } from './chat/ChatScreen';
 
 type Props = {
   me: Me;
   onLogout: () => void;
 };
+
+type Tab = 'biometry' | 'chat';
 
 const METRIC_LABELS: Record<string, string> = {
   weight: 'Waga',
@@ -64,14 +67,17 @@ function formatValue(metric: string, value: BiometryValue | BiometryValue[]): st
 }
 
 export function Dashboard({ me, onLogout }: Props) {
+  const [activeTab, setActiveTab] = useState<Tab>('biometry');
   const [days, setDays] = useState<BiometryDay[] | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    if (activeTab !== 'biometry') return;
+    if (days !== null) return; // już załadowane
     getBiometry(7)
       .then((res) => setDays(res.days))
-      .catch((e) => setError(e.message ?? 'fetch failed'));
-  }, []);
+      .catch((e) => setError(e instanceof Error ? e.message : 'fetch failed'));
+  }, [activeTab, days]);
 
   // Wszystkie metric_names obecne w response — kolumny tabeli
   const allMetrics = days
@@ -82,10 +88,24 @@ export function Dashboard({ me, onLogout }: Props) {
     <div className="dashboard">
       <header>
         <h1>bodysync</h1>
+        <nav className="dashboard-tabs" aria-label="Sekcje">
+          <button
+            type="button"
+            className={`dashboard-tab ${activeTab === 'biometry' ? 'active' : ''}`}
+            onClick={() => setActiveTab('biometry')}
+          >
+            Biometria
+          </button>
+          <button
+            type="button"
+            className={`dashboard-tab ${activeTab === 'chat' ? 'active' : ''}`}
+            onClick={() => setActiveTab('chat')}
+          >
+            Chat
+          </button>
+        </nav>
         <div className="user-info">
-          <span>
-            {me.name ?? me.email} <small>({me.user_id})</small>
-          </span>
+          <span>{me.name ?? me.email}</span>
           <button onClick={onLogout} type="button">
             Wyloguj
           </button>
@@ -93,41 +113,49 @@ export function Dashboard({ me, onLogout }: Props) {
       </header>
 
       <main>
-        <h2>Ostatnie 7 dni</h2>
-        {error && <p className="error">Błąd: {error}</p>}
-        {!days && !error && <p>Wczytywanie…</p>}
-        {days && days.length === 0 && (
-          <div className="empty">
-            <p>
-              Brak danych w bazie. Skonfiguruj <strong>Health Auto Export</strong>
-              {' '}na telefonie i wyślij pierwszy webhook.
-            </p>
-          </div>
-        )}
-        {days && days.length > 0 && (
-          <div className="table-wrapper">
-            <table>
-              <thead>
-                <tr>
-                  <th>Data</th>
-                  {allMetrics.map((m) => (
-                    <th key={m}>{METRIC_LABELS[m] ?? m}</th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {days.map((day) => (
-                  <tr key={day.date}>
-                    <td className="date">{day.date}</td>
-                    {allMetrics.map((m) => (
-                      <td key={m}>{day.metrics[m] ? formatValue(m, day.metrics[m]) : '—'}</td>
+        {activeTab === 'biometry' && (
+          <>
+            <h2>Ostatnie 7 dni</h2>
+            {error && <p className="error">Błąd: {error}</p>}
+            {!days && !error && <p>Wczytywanie…</p>}
+            {days && days.length === 0 && (
+              <div className="empty">
+                <p>
+                  Brak danych w bazie. Skonfiguruj <strong>Health Auto Export</strong> na
+                  telefonie i wyślij pierwszy webhook.
+                </p>
+              </div>
+            )}
+            {days && days.length > 0 && (
+              <div className="table-wrapper">
+                <table>
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      {allMetrics.map((m) => (
+                        <th key={m}>{METRIC_LABELS[m] ?? m}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {days.map((day) => (
+                      <tr key={day.date}>
+                        <td className="date">{day.date}</td>
+                        {allMetrics.map((m) => (
+                          <td key={m}>
+                            {day.metrics[m] ? formatValue(m, day.metrics[m]) : '—'}
+                          </td>
+                        ))}
+                      </tr>
                     ))}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </>
         )}
+
+        {activeTab === 'chat' && <ChatScreen />}
       </main>
     </div>
   );
