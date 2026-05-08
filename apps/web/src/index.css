@@ -538,6 +538,152 @@ code {
   margin-left: auto;
 }
 
+/* ─── Activities (Sprint 4) ─── */
+
+.activities-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  margin: 0 0 1rem;
+}
+.activities-header h2 {
+  margin: 0;
+}
+.activities-reconnect {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-decoration: none;
+}
+.activities-reconnect:hover {
+  color: var(--cyan);
+  text-decoration: underline;
+}
+
+.activity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.activity-row {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.85rem 1rem;
+  transition: border-color 0.15s;
+}
+.activity-row:hover {
+  border-color: var(--border-light);
+}
+.activity-row-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+  width: 2.5rem;
+  height: 2.5rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border-radius: 10px;
+  flex-shrink: 0;
+}
+.activity-row-main {
+  flex: 1;
+  min-width: 0;
+}
+.activity-row-name {
+  font-weight: 600;
+  color: var(--text);
+  font-size: 0.95rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.activity-row-meta {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  margin-top: 0.15rem;
+}
+.activity-row-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem 0.85rem;
+  justify-content: flex-end;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8rem;
+}
+.activity-row-distance {
+  color: var(--cyan);
+  font-weight: 700;
+}
+.activity-row-duration {
+  color: var(--text);
+  font-weight: 600;
+}
+.activity-row-pace {
+  color: var(--purple);
+}
+.activity-row-hr {
+  color: var(--red);
+}
+.activity-row-kcal {
+  color: var(--orange);
+}
+
+/* Strava connect CTA — empty state w Aktywnościach */
+.strava-connect {
+  background: linear-gradient(135deg, rgba(252, 76, 2, 0.08), var(--card) 60%);
+  border: 1px solid rgba(252, 76, 2, 0.3);
+  border-radius: 16px;
+  padding: 2.5rem 2rem;
+  text-align: center;
+  max-width: 540px;
+  margin: 0 auto;
+}
+.strava-connect-icon {
+  font-size: 3rem;
+  display: block;
+  margin-bottom: 0.5rem;
+}
+.strava-connect-title {
+  margin: 0 0 0.5rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.3rem;
+  color: var(--text);
+}
+.strava-connect-desc {
+  margin: 0 0 1.5rem;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+  line-height: 1.5;
+}
+.strava-connect-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  background: #fc4c02;
+  color: white;
+  padding: 0.75rem 1.5rem;
+  border-radius: 10px;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 0.95rem;
+  transition: background 0.15s;
+}
+.strava-connect-btn:hover {
+  background: #e54400;
+}
+.strava-connect-note {
+  margin: 1rem 0 0;
+  color: var(--text-dim);
+  font-size: 0.75rem;
+}
+
 /* ─── Profile targets form (Sprint 9) ─── */
 
 .profile-form {
