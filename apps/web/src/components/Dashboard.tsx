@@ -1,9 +1,10 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { getBiometry } from '../api';
+import { getActivities, getBiometry } from '../api';
 import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
-import type { BiometryDay, Me } from '../types';
+import type { Activity, BiometryDay, Me } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
 import { ActivitiesView } from './dashboard/ActivitiesView';
+import { ActivityRow } from './dashboard/ActivityRow';
 import {
   DropletIcon,
   EggIcon,
@@ -90,6 +91,7 @@ export function Dashboard({ me, onLogout }: Props) {
               days={days}
               error={error}
               userLabel={userLabel}
+              onSelectTab={setActiveTab}
             />
           )}
           {activeTab === 'activities' && <ActivitiesView />}
@@ -117,9 +119,10 @@ type BiometrySectionProps = {
   days: BiometryDay[] | null;
   error: string | null;
   userLabel: string;
+  onSelectTab: (tab: AppTab) => void;
 };
 
-function BiometrySection({ tab, days, error }: BiometrySectionProps) {
+function BiometrySection({ tab, days, error, onSelectTab }: BiometrySectionProps) {
   const [range, setRange] = useState<Range>('30d');
 
   const sliced = useMemo<BiometryDay[]>(() => {
@@ -150,6 +153,7 @@ function BiometrySection({ tab, days, error }: BiometrySectionProps) {
         range={range}
         onRangeChange={setRange}
         trendWindow={trendWindow}
+        onSelectTab={onSelectTab}
       />
     );
   }
@@ -177,7 +181,15 @@ type ViewProps = {
   trendWindow: number | null;
 };
 
-function DashboardOverview({ days, range, onRangeChange, trendWindow }: ViewProps) {
+type OverviewProps = ViewProps & { onSelectTab: (tab: AppTab) => void };
+
+function DashboardOverview({
+  days,
+  range,
+  onRangeChange,
+  trendWindow,
+  onSelectTab,
+}: OverviewProps) {
   const kcalActive = buildSeries(days, 'kcal_active');
   const kcalIn = buildSeries(days, 'kcal_in');
   const stepsSeries = buildSeries(days, 'steps');
@@ -269,13 +281,62 @@ function DashboardOverview({ days, range, onRangeChange, trendWindow }: ViewProp
           </div>
         </SectionPanel>
 
-        <SectionPanel title="Ostatnie aktywności">
-          <p className="placeholder-text">
-            Strava jeszcze nie zintegrowana — pojawi się tu lista treningów.
-          </p>
-        </SectionPanel>
+        <RecentActivitiesPanel onSeeAll={() => onSelectTab('activities')} />
       </div>
     </>
+  );
+}
+
+function RecentActivitiesPanel({ onSeeAll }: { onSeeAll: () => void }) {
+  const [activities, setActivities] = useState<Activity[] | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getActivities(3)
+      .then((res) => {
+        if (cancelled) return;
+        setActivities(res.items);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setActivities([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <section className="section-panel">
+      <div className="section-panel-head">
+        <h3 className="section-panel-title">Ostatnie aktywności</h3>
+        {activities && activities.length > 0 && (
+          <button type="button" className="section-panel-link" onClick={onSeeAll}>
+            Wszystkie →
+          </button>
+        )}
+      </div>
+      <div>
+        {activities === null && <p className="placeholder-text">Wczytywanie…</p>}
+        {activities && activities.length === 0 && (
+          <div className="recent-activities-empty">
+            <p className="placeholder-text">
+              Brak aktywności. Połącz konto Strava w zakładce <strong>Aktywności</strong>.
+            </p>
+            <button type="button" className="section-panel-link" onClick={onSeeAll}>
+              Idź do Aktywności →
+            </button>
+          </div>
+        )}
+        {activities && activities.length > 0 && (
+          <div className="activity-list">
+            {activities.map((a) => (
+              <ActivityRow key={a.strava_id} activity={a} />
+            ))}
+          </div>
+        )}
+      </div>
+    </section>
   );
 }
 
