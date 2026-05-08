@@ -213,8 +213,8 @@ function WeightSummaryCards({ series, rangeLabel }: WeightSummaryProps) {
     return (
       <>
         <StatCard label="Aktualna waga" value={null} unit="kg" accent="green" />
-        <StatCard label={deltaLabel} value={null} unit="kg" accent="cyan" />
-        <StatCard label="Średnia" value={null} unit="kg" accent="purple" />
+        <StatCard label={deltaLabel} value={null} unit="kg" accent="muted" />
+        <StatCard label="Średnia" value={null} unit="kg" accent="muted" />
       </>
     );
   }
@@ -224,19 +224,14 @@ function WeightSummaryCards({ series, rangeLabel }: WeightSummaryProps) {
   const avg = series.reduce((a, p) => a + p.value, 0) / series.length;
   return (
     <>
-      <StatCard
-        label="Aktualna waga"
-        value={last.toFixed(1)}
-        unit="kg"
-        accent="green"
-      />
+      <StatCard label="Aktualna waga" value={last.toFixed(1)} unit="kg" accent="green" />
       <StatCard
         label={deltaLabel}
         value={`${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`}
         unit="kg"
-        accent="cyan"
+        accent="muted"
       />
-      <StatCard label="Średnia" value={avg.toFixed(1)} unit="kg" accent="purple" />
+      <StatCard label="Średnia" value={avg.toFixed(1)} unit="kg" accent="muted" />
     </>
   );
 }
