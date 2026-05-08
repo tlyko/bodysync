@@ -79,6 +79,9 @@ resource "aws_iam_role_policy" "github_actions_iam" {
           "iam:DeleteRolePolicy",
           "iam:GetRolePolicy",
           "iam:ListRolePolicies",
+          # AWS provider 5.x+ wymaga przy aws_iam_role delete (Lambda exec
+          # role lifecycle: PR #59 destroy advisor_dinner-exec faila bez tego).
+          "iam:ListInstanceProfilesForRole",
           "iam:TagRole",
           "iam:UntagRole",
           "iam:TagPolicy",
