@@ -16,8 +16,11 @@ variable "cors_allow_origins" {
 }
 
 variable "cors_allow_methods" {
-  type    = list(string)
-  default = ["GET", "POST", "OPTIONS"]
+  type = list(string)
+  # PUT dodane Sprint 9 dla `/api/profile/targets` (write user-managed
+  # kcal/macro targets). Bez PUT browser blokuje preflight zanim request
+  # dotrze do Lambdy — owner debugowal "nie udaje sie zapisac" 2026-05-08.
+  default = ["GET", "POST", "PUT", "OPTIONS"]
 }
 
 variable "cors_allow_headers" {
