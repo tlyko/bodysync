@@ -237,8 +237,9 @@ module "advisor_chat" {
   timeout       = 30
 
   environment = {
-    TABLE_NAME = aws_dynamodb_table.data.name
-    ENV        = "prod"
+    TABLE_NAME     = aws_dynamodb_table.data.name
+    ENV            = "prod"
+    RECIPES_BUCKET = aws_s3_bucket.data.id
   }
 
   extra_iam_statements = [
@@ -266,6 +267,34 @@ module "advisor_chat" {
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/anthropic/api_key",
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
       ]
+    },
+    {
+      # Sprint 6.2 RAG — recipes/{slug}/{embeddings.faiss,index.json,recipes.json}.
+      # Prefix-scoped do `recipes/*` żeby Lambda nie czytała raw HAE payloads
+      # (raw/health-auto-export/*) ani innych obszarów bucketa.
+      Sid      = "S3ReadRecipesIndex"
+      Effect   = "Allow"
+      Action   = ["s3:GetObject"]
+      Resource = "${aws_s3_bucket.data.arn}/recipes/*"
+    },
+    {
+      Sid      = "ReadOpenAISecret"
+      Effect   = "Allow"
+      Action   = ["ssm:GetParameter"]
+      Resource = "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/openai/api_key"
+    },
+    {
+      # Sprint 6.2 RAG — pierwszy non-USER# pattern w bodysync (RECIPES PK).
+      # IAM NIE może warunkować na non-LeadingKeys (Condition LeadingKeys=USER#*
+      # zablokowałoby Query po PK=RECIPES). Defense-in-depth = handler kod
+      # (rag.py retrieve()) explicit `KeyConditionExpression=PK = :pk` z
+      # `:pk = "RECIPES"` literal — bez user-supplied PK input. Plus test
+      # `test_retrieve_only_queries_recipes_pk` (Step 7) bronia regression.
+      # Security note per ADR-007 negative consequences.
+      Sid      = "DDBReadRecipes"
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:Query"]
+      Resource = aws_dynamodb_table.data.arn
     },
   ]
 }
