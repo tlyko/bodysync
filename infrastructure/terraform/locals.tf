@@ -36,6 +36,7 @@ locals {
   # ignore_changes pilnuje by Terraform nie unieważnił).
   ssm_securestrings = [
     "/bodysync/anthropic/api_key",
+    "/bodysync/openai/api_key", # Sprint 6.2 RAG — embedding queries (text-embedding-3-small)
     "/bodysync/strava/client_secret",
     "/bodysync/strava/verify_token",
     "/bodysync/google/oauth_client_secret",

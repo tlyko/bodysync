@@ -29,6 +29,25 @@ dev = [
     "boto3>=1.35",
     "boto3-stubs[dynamodb,ssm]>=1.35",
     "anthropic>=0.40",
+    # Sprint 6.2 PR2 — `tests/handlers/advisor_chat/test_rag.py` requires
+    # numpy + openai + faiss-cpu (np.zeros / np.linalg.norm / FAISS mocks).
+    # Lambda runtime versions w handlers/advisor_chat/requirements.txt;
+    # duplikat tu jest test-time only (loose pin).
+    "numpy>=2.0",
+    "openai>=1.50",
+    "faiss-cpu>=1.9",
+]
+
+# Sprint 6.2 PR2 Step 2 — `scripts/seed_recipes.py` deps. Local-only,
+# never bundled into Lambda zips (ADR-007 D5: FAISS index loaded from S3
+# at cold start, embeddings live in DDB. Seed pipeline is one-shot).
+# Install with: `pip install -e .[seed]`
+seed = [
+    "pdfplumber>=0.11",
+    "openai>=1.50",
+    "faiss-cpu>=1.9",
+    "numpy>=2.0",
+    "Unidecode>=1.3",
 ]
 
 [build-system]
@@ -71,6 +90,11 @@ exclude = ["dist", ".venv", "tests"]
 
 [[tool.mypy.overrides]]
 module = ["google.*", "moto.*", "responses.*"]
+ignore_missing_imports = true
+
+# seed_recipes.py-only deps (local script, not on Lambda runtime).
+[[tool.mypy.overrides]]
+module = ["pdfplumber.*", "faiss.*", "unidecode.*"]
 ignore_missing_imports = true
 
 [tool.pytest.ini_options]

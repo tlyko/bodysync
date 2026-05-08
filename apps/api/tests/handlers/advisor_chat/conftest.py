@@ -1,4 +1,4 @@
-"""Test fixtures dla advisor_chat (Sprint 6.1 PR1).
+"""Test fixtures dla advisor_chat (Sprint 6.1 PR1 + 6.2 PR2).
 
 `anthropic_mock_factory` / `patched_anthropic_client` — patchujemy
 `service._anthropic_client` na fake `MagicMock` z `messages.create` zwracającym
@@ -14,6 +14,12 @@ prostszy i deterministic.
 
 `dynamodb_table_with_chat_history` — pre-seed 5 turn dla `user_a` (PK isolation
 regression: user_b ma 0 turn).
+
+`_disable_rag_by_default` (autouse) — Sprint 6.2 PR2: monkeypatch'uje
+`rag.retrieve` żeby rzucał `RAGUnavailableError("test_default")`. Bez tego
+każdy handler test dotknąłby S3 (faiss-index.bin missing) + OpenAI (key
+PLACEHOLDER) i failowałby cold-start init. Test który chce realne
+retrieved recipes nadpisuje przez własny `monkeypatch.setattr("...rag.retrieve", ...)`.
 """
 
 from __future__ import annotations
@@ -29,6 +35,22 @@ import boto3
 import pytest
 
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
+
+
+@pytest.fixture(autouse=True)
+def _disable_rag_by_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Default — `rag.retrieve` rzuca `RAGUnavailableError` => handler
+    kontynuuje bez recipes (graceful degradation path).
+
+    Test który chce realne retrieve override'uje przez własny
+    `monkeypatch.setattr("handlers.advisor_chat.rag.retrieve", lambda q, k=5: [...])`.
+    """
+    from handlers.advisor_chat import rag
+
+    def _fake_retrieve(query: str, k: int = 5) -> list[Any]:
+        raise rag.RAGUnavailableError("test_default")
+
+    monkeypatch.setattr(rag, "retrieve", _fake_retrieve)
 
 
 @pytest.fixture

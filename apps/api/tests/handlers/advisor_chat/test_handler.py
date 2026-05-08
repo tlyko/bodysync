@@ -1,9 +1,10 @@
-"""Tests dla `handlers.advisor_chat.handler` — POST /api/advisor/chat (PR1).
+"""Tests dla `handlers.advisor_chat.handler` — POST /api/advisor/chat (PR1 + 6.2 PR2).
 
 Scenariusze:
 - Happy first turn (empty DDB) + multi-turn (pre-seeded history)
 - History + today_context + user_message bloki w request body do Anthropic
-- PR1 invariants: no <retrieved_recipes> w request, used_recipes=[] w response
+- RAG graceful degradation default (conftest patch) → no <retrieved_recipes>,
+  used_recipes=[] w response (Sprint 6.2 PR2 default path)
 - Rate limit 429 (30 user turn / dzień), below threshold → 200 → 429
 - Auth: 401 brak/invalid JWT
 - Validation: 400 message empty / too long
@@ -25,6 +26,17 @@ from zoneinfo import ZoneInfo
 import pytest
 
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
+
+
+def _flatten_user_content(content: Any) -> str:
+    """Helper — concat text z multi-block content array (Sprint 6.2 PR2).
+
+    `build_chat_messages` zwraca content jako `list[dict]` (cache markery na
+    blockach); dla string-search assertion w testach robimy flatten.
+    """
+    if isinstance(content, str):
+        return content
+    return "".join(b["text"] for b in content if b.get("type") == "text")
 
 
 def _event(
@@ -223,7 +235,7 @@ def test_history_in_anthropic_request(
     h.handler(_event({"message": "trzecia"}, cookie=_cookie("user_a")), _FakeContext())
 
     create_call = patched_anthropic_client.messages.create.call_args
-    user_msg_content = create_call.kwargs["messages"][0]["content"]
+    user_msg_content = _flatten_user_content(create_call.kwargs["messages"][0]["content"])
     assert "<conversation_history>" in user_msg_content
     assert "turn 0 [user]: pierwsza wiadomość" in user_msg_content
     assert "turn 1 [assistant]: pierwsza odpowiedź" in user_msg_content
@@ -241,7 +253,7 @@ def test_today_context_in_request(dynamodb_table: Any, patched_anthropic_client:
     h.handler(_event({"message": "co zjeść?"}, cookie=_cookie("user_a")), _FakeContext())
 
     create_call = patched_anthropic_client.messages.create.call_args
-    user_msg_content = create_call.kwargs["messages"][0]["content"]
+    user_msg_content = _flatten_user_content(create_call.kwargs["messages"][0]["content"])
     assert "<today_context>" in user_msg_content
     assert "</today_context>" in user_msg_content
     # JSON content of TodayState — pola powinny się zmaterializować.
@@ -253,31 +265,92 @@ def test_today_context_in_request(dynamodb_table: Any, patched_anthropic_client:
 
 
 @pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
-def test_no_retrieved_recipes_in_request(dynamodb_table: Any) -> None:
-    """PR1 invariant — `<retrieved_recipes>` literal NIE występuje nigdzie
-    w request do Anthropic (ani w user message, ani w system prompt).
-    PR2 doda block z RAG retrieval — wtedy ten test się zmieni.
+def test_no_retrieved_recipes_when_rag_unavailable(dynamodb_table: Any) -> None:
+    """Sprint 6.2 PR2 graceful degradation — `rag.retrieve` raise
+    `RAGUnavailableError` (default conftest patch) ⇒ `<retrieved_recipes>`
+    block NIE występuje w runtime composition (user message), response
+    `used_recipes=[]`.
+
+    Note: po Step 6 system prompt zawiera literal `<retrieved_recipes>`
+    w sekcji ANTI-INJECTION (opis 4-tego bloku danych dla modelu) — to
+    intentional. Test pilnuje że RUNTIME composition (user message
+    generowany przez `build_chat_messages`) nie wstawia block gdy
+    retrieval był empty/missing.
     """
     from handlers.advisor_chat import handler as h
     from handlers.advisor_chat import service as svc
 
-    h.handler(_event({"message": "pytanie"}, cookie=_cookie("user_a")), _FakeContext())
+    result = h.handler(_event({"message": "pytanie"}, cookie=_cookie("user_a")), _FakeContext())
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["used_recipes"] == []
 
     create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
-    user_msg_content = create_call.kwargs["messages"][0]["content"]
-    system_blocks = create_call.kwargs["system"]
-    system_text = "".join(block["text"] for block in system_blocks)
+    user_msg_content = _flatten_user_content(create_call.kwargs["messages"][0]["content"])
 
+    # Runtime composition (user message) clean — no <retrieved_recipes> block
+    # gdy retrieval był empty.
     assert "<retrieved_recipes>" not in user_msg_content
     assert "</retrieved_recipes>" not in user_msg_content
-    assert "<retrieved_recipes>" not in system_text
-    assert "</retrieved_recipes>" not in system_text
 
 
 @pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
-def test_used_recipes_empty(dynamodb_table: Any) -> None:
-    """PR1 invariant — response.used_recipes ZAWSZE `[]` (placeholder dla PR2)."""
+def test_retrieved_recipes_in_request_when_rag_returns_results(
+    dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sprint 6.2 PR2 happy path — `rag.retrieve` zwraca 2 recipes ⇒
+    `<retrieved_recipes>` block w request + cache_control marker +
+    `used_recipes` w response."""
     from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import rag as rag_mod
+    from handlers.advisor_chat import service as svc
+    from handlers.advisor_chat.schemas import UsedRecipe
+
+    fake_recipes = [
+        UsedRecipe(slug="kurczak-z-ryżem", name="Kurczak z ryżem", kcal=540, similarity_score=0.82),
+        UsedRecipe(slug="łosoś-pieczony", name="Łosoś pieczony", kcal=620, similarity_score=0.79),
+    ]
+
+    def _fake_retrieve(query: str, k: int = 5) -> list[UsedRecipe]:
+        return fake_recipes
+
+    monkeypatch.setattr(rag_mod, "retrieve", _fake_retrieve)
+
+    result = h.handler(_event({"message": "co zjeść?"}, cookie=_cookie("user_a")), _FakeContext())
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    # used_recipes populated z slug/name/kcal/similarity_score
+    assert len(body["used_recipes"]) == 2
+    slugs = {r["slug"] for r in body["used_recipes"]}
+    assert slugs == {"kurczak-z-ryżem", "łosoś-pieczony"}
+
+    create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
+    blocks = create_call.kwargs["messages"][0]["content"]
+    assert isinstance(blocks, list)
+    composed = _flatten_user_content(blocks)
+    assert "<retrieved_recipes>" in composed
+    assert "kurczak-z-ryżem" in composed
+    assert "Kurczak z ryżem" in composed
+    # Cache marker — TYLKO na retrieved block (osobno od system prompt cache).
+    cache_blocks = [b for b in blocks if b.get("cache_control") == {"type": "ephemeral"}]
+    assert len(cache_blocks) == 1
+    assert "<retrieved_recipes>" in cache_blocks[0]["text"]
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_rag_unexpected_error_graceful_degradation(
+    dynamodb_table: Any, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Sprint 6.2 PR2 — `rag.retrieve` rzuca `RuntimeError` (NIE
+    `RAGUnavailableError`) ⇒ catch-all łapie, log error, chat kontynuuje
+    bez recipes. Defense-in-depth: RAG bug nie crashuje chatu."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import rag as rag_mod
+
+    def _exploding_retrieve(query: str, k: int = 5) -> list[Any]:
+        raise RuntimeError("unexpected boom")
+
+    monkeypatch.setattr(rag_mod, "retrieve", _exploding_retrieve)
 
     result = h.handler(_event({"message": "halo"}, cookie=_cookie("user_a")), _FakeContext())
     assert result["statusCode"] == 200
@@ -677,7 +750,7 @@ def test_pk_isolation(dynamodb_table: Any, patched_anthropic_client: MagicMock) 
     assert result["statusCode"] == 200
 
     create_call = patched_anthropic_client.messages.create.call_args
-    user_msg_content = create_call.kwargs["messages"][0]["content"]
+    user_msg_content = _flatten_user_content(create_call.kwargs["messages"][0]["content"])
     # NO user_a content leaks
     assert "USER_A_SECRET_0" not in user_msg_content
     assert "USER_A_SECRET_1" not in user_msg_content
@@ -717,7 +790,7 @@ def test_history_hard_cap_20(dynamodb_table: Any, patched_anthropic_client: Magi
     h.handler(_event({"message": "newest"}, cookie=_cookie("user_a")), _FakeContext())
 
     create_call = patched_anthropic_client.messages.create.call_args
-    user_msg_content = create_call.kwargs["messages"][0]["content"]
+    user_msg_content = _flatten_user_content(create_call.kwargs["messages"][0]["content"])
 
     # Last 20 turn (idx 5..24) PRESENT
     for idx in range(5, 25):
