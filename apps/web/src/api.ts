@@ -8,6 +8,8 @@ import type {
   ChatRequest,
   LoginResponse,
   Me,
+  ProfileTargets,
+  ProfileTargetsUpdate,
 } from './types';
 
 class ApiError extends Error {
@@ -87,6 +89,17 @@ export async function postAdvisorChat(
 
 export async function postLogout(): Promise<void> {
   await request<{ ok: true }>('/api/auth/logout', { method: 'POST' });
+}
+
+export async function getProfileTargets(): Promise<ProfileTargets> {
+  return request<ProfileTargets>('/api/profile/targets');
+}
+
+export async function putProfileTargets(t: ProfileTargetsUpdate): Promise<ProfileTargets> {
+  return request<ProfileTargets>('/api/profile/targets', {
+    method: 'PUT',
+    body: JSON.stringify(t),
+  });
 }
 
 // PL message dla UI banner — mapuje status code na czytelny komunikat.

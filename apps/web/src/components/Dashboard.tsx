@@ -3,6 +3,7 @@ import { getBiometry } from '../api';
 import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
 import type { BiometryDay, Me } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
+import { ProfileTargetsForm } from './dashboard/ProfileTargetsForm';
 import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { StatCard } from './dashboard/StatCard';
 import { WeightChart } from './dashboard/WeightChart';
@@ -12,7 +13,7 @@ type Props = {
   onLogout: () => void;
 };
 
-type Tab = 'biometry' | 'chat';
+type Tab = 'biometry' | 'chat' | 'profile';
 
 const FETCH_DAYS = 30;
 
@@ -57,6 +58,13 @@ export function Dashboard({ me, onLogout }: Props) {
           >
             Chat
           </button>
+          <button
+            type="button"
+            className={`dashboard-tab ${activeTab === 'profile' ? 'active' : ''}`}
+            onClick={() => setActiveTab('profile')}
+          >
+            Profil
+          </button>
         </nav>
         <div className="user-info">
           <span>{me.name ?? me.email}</span>
@@ -69,6 +77,7 @@ export function Dashboard({ me, onLogout }: Props) {
       <main>
         {activeTab === 'biometry' && <BiometryView days={days} error={error} />}
         {activeTab === 'chat' && <ChatScreen />}
+        {activeTab === 'profile' && <ProfileTargetsForm />}
       </main>
     </div>
   );
