@@ -1,1 +1,2 @@
 pydantic==2.10.*
+PyJWT==2.9.*
