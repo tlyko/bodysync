@@ -44,15 +44,42 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Google Sheets read | ❌ |
 | Anthropic advisor (prompt cache, prompt injection guard) | ✅ Sprint 6.1 + 6.2 live (PRy #59/#62/#63/#65/#66/#67) — `POST /api/advisor/chat` multi-turn z RAG retrieval (139 przepisów Lidla/Biedronki, k=5 cosine), used_recipes populated, system prompt + retrieved_recipes oba cached (~13956 tokens razem) |
 | Recipe pipeline (PDF → DDB + FAISS) | ✅ Sprint 6.2 PR2 live (PR #65 + #67) — `seed_recipes.py` parsed 139 recipes z 5 PDFów; DDB `PK=RECIPES`; S3 `recipes/faiss-index.bin` (834KB) + `recipes-metadata.json` (21KB); embed cost ~$0.0003 |
-| Frontend dashboard + chat UI | ✅ Sprint 7 shipped 2026-05-08 (PRy #70/#71/#72/#73/#74/#75/#76) — login → tab Biometria/Chat → multi-turn chat z RecipeCard+RecipeModal, logout endpoint, vitest 5/5. Smoke verified live w przeglądarce |
+| Frontend dashboard + chat UI | ✅ Sprint 7+8+9 shipped 2026-05-08 — sidebar 240px z 6 tabami (Dashboard/Aktywności/Ciało/Odżywianie/Przepisy AI/Ustawienia), tinted StatCardy z 11 SVG icons (HRV/sen/kroki/kcal/RHR/body fat/makro/waga), Sparkline + WeightChart, range toggle 1d/7d/30d, ProfileTargetsForm z PUT /api/profile/targets, multi-turn chat z RecipeCard+RecipeModal. 34 vitest. Live verified |
 
 ## Open PRs
 
 `gh pr list` — żadnych otwartych w danej chwili.
 
-## Aktywny sprint — żaden (Sprint 6 + 7 zamknięte 2026-05-08)
+## Aktywny sprint — żaden (Sprint 6 + 7 + 8 + 9 zamknięte 2026-05-08)
 
-Sprint 6 (chat advisor + RAG) + Sprint 7 (frontend chat UI) **fully shipped i live verified end-to-end** w ciągu jednego dnia (2026-05-08). Następny ruch wybierany z backlogu — Sprint 4 Strava (zaległy), Sprint 4.5 Garmin Connect, Sprint 8 dashboard polish (StatCard/Sparkline port z prototype), lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, frontend bundle code-split, PDF hosting).
+Cztery sprinty shipped end-to-end w ciągu jednego dnia (2026-05-08): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets endpoint + 1:1 prototype port (Sprint 9). Następny ruch z backlogu — Sprint 4 Strava (zaległy), Sprint 4.5 Garmin Connect, lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, #19 frontend bundle code-split, #20 PDF hosting, #21 chat history GET endpoint).
+
+**Sprint 8 — Biometry dashboard polish — DONE (PRy #78 + #79 + #80 + #81 + #82 + #83 + #84):**
+- ✅ Sparkline (inline SVG, no deps) + StatCard z accent system per CLAUDE.md design tokens
+- ✅ WeightChart line chart 30d z gradient fill area + Y/X axis labels + a11y
+- ✅ `biometry.ts` — `buildSeries` per-metric extractors registry + `latestValue` + `trendPct` 7d-vs-7-14d
+- ✅ Range selector segmented (Dziś / 7 dni / 30 dni). KISS: backend zwraca 30d, slice in-memory
+- ✅ Visual polish anti-rainbow: drop kolorowych value styles (wartości białe), sizing tweaks
+- ✅ Vitest 24 nowych testów (13 biometry.ts + 11 dashboard components)
+- ✅ Sekcja Odżywianie (kcal_in + protein/fat/carbs makro)
+
+**Sprint 9 — Profile targets + 1:1 prototype port — DONE (PRy #85 + #86 + #87 + #88 + #89):**
+- ✅ Backend `GET + PUT /api/profile/targets` (PR #85) — JWT auth + Pydantic walidacja + DDB merge. 10 testów. Defaults zsynchronizowane z `advisor_chat/service.py` (kcal 2000, protein 130, fat 70, carbs 200) — chat i UI widzą ten sam fallback gdy owner jeszcze nie wpisał.
+- ✅ Frontend Profil tab (PR #86) — `ProfileTargetsForm` z 4 inputami + banner is_default + PL hints dietetyczne. 5 testów.
+- ✅ CORS PUT method fix (PR #87) — owner zgłosił "nie udaje się zapisać". `aws apigatewayv2 get-api ... CorsConfiguration.AllowMethods` miał `[POST, OPTIONS, GET]` — brak PUT, browser blokował preflight. Fix: `cors_allow_methods` default w api-gateway module.
+- ✅ Inline SVG icons (PR #88) — 11 ikonek per metryk (flame/footprints/heart-pulse/moon/scale/utensils/egg/droplet/wheat/percent), zero deps, +2.7 KB raw.
+- ✅ **1:1 prototype port (PR #89)** — owner: "tandetnie, oczekiwałem dokładnie jak mookup". Sidebar 240px z 6 tabami zamiast top-tabs. Tinted full-card StatCardy (drop circle ornament). Icon inline obok label. Gradient header h1. 6 tabów: Dashboard (overview 4 stats + Recovery 2×2 + Aktywności placeholder) / Aktywności (Strava placeholder) / Ciało (biometria + waga) / Odżywianie / Przepisy AI (chat) / Ustawienia (profile form). 34/34 testów.
+
+**Sprint 9 metryki:**
+- Backend: 1 nowy Lambda (profile_targets), 10 testów
+- Frontend bundle: JS 598 → 611 KB raw / 144.51 → 148.30 KB gz, CSS 11.47 → 16.97 KB / 2.61 → 3.49 KB gz
+- 5 PR-ów (#85/#86/#87/#88/#89), 1 dzień implementacji
+
+**Sprint 9 process notes:**
+- frontend-designer agent użyty 2 razy: pierwszy raz po "tandetnie" feedbacku rekomendował SKIP odważnych zmian z prototype (KISS-adaptive), drugi raz po "1:1 mookup" feedbacku zmienił rekomendację na pełen port (sidebar + tinted cards + reorganizacja tabów). Kontekst owner-acceptance koszt jest kluczowy.
+- Owner zgłosił 4 issues w trakcie (kcal_in brak na dashboard, "skąd 2000 kcal", "nie udaje się zapisać" CORS, "tandetnie") — każdy fix < 30min od diagnozy do PR.
+
+
 
 **Sprint 7 — Frontend chat UI — DONE (PRy #70 + #71 + #72 + #73 + #74 + #75 + #76, 7 stepów w jednej sesji):**
 - ✅ Step 1 (PR #70) — `react-markdown` + `remark-gfm` + vitest infra + `--purple` token + chat types
@@ -108,13 +135,14 @@ Sprint 6 (chat advisor + RAG) + Sprint 7 (frontend chat UI) **fully shipped i li
 
 **Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2.
 
-**Backlog post-Sprint 6+7 (do TaskList):**
+**Backlog post-Sprint 6+7+8+9 (do TaskList):**
 - **#17 Telegram bot subscriber** — replacement Gmail email który auto-unsub'uje SNS notifications (cost-guard alarm musi dzwonić)
-- **#18 Restore test_rag.py** — investigate faiss-cpu + pytest assertion rewrite segfault na macOS aarch64 + Linux GHA. Granular RAG unit tests skipped (`pytest.mark.skip`); coverage w `test_handler.py` integration tests
-- **#19 Frontend bundle code-split** — `React.lazy(ChatScreen)` + dynamic `recipes.json` import. Aktualnie 592KB raw / 142.56KB gzip; w MVP OK, ale jak first paint zacznie boleć
-- **#20 PDF hosting decision** — Sprint 7.5 mini-sprint jeśli owner chce link do source PDF z RecipeCard. Opcje: R2 bucket / S3 public / Cloudflare Pages assets. PDFy 16-29MB × 5 = 127MB
-- **#21 Conversation history GET endpoint** — chat history fetch z backend (24h TTL DDB już ma). UI refresh-page lose-state UX po Sprint 7
-- **API GW per-second throttle** — burst attack z valid JWT może przebić 30/dzień quotę zanim się przeliczy. CloudWatch alarm jako absolute backstop działa
+- **#18 Restore test_rag.py** — investigate faiss-cpu + pytest segfault na macOS aarch64 + Linux GHA. Granular RAG unit tests skipped
+- **#19 Frontend bundle code-split** — `React.lazy(ChatScreen)` + dynamic `recipes.json` import. Aktualnie 611KB raw / 148.30KB gzip
+- **#20 PDF hosting decision** — Sprint 7.5 mini-sprint jeśli owner chce link do source PDF z RecipeCard (R2/S3 public/CF Pages assets, 127MB)
+- **#21 Conversation history GET endpoint** — chat history fetch z backend (24h TTL DDB już ma). Refresh page lose-state UX
+- **#22 Aktywności tab — Strava integration** — Sprint 4 zaległy, frontend sidebar już ma placeholder z CTA
+- **API GW per-second throttle** — burst attack z valid JWT może przebić 30/dzień quotę. CloudWatch alarm jako backstop działa
 - **`requirements.txt` bez `--require-hashes`** — `pip-compile --generate-hashes` przed kolejnym sprintem z native deps
 
 **5 OPEN questions z ADR-007 (post-MVP):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
