@@ -430,3 +430,217 @@ resource "aws_lambda_permission" "advisor_chat_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# ─── Sprint 4 — Strava integration (3 lambdas + 4 routes) ───────────────────
+
+# OAuth start: GET /api/strava/oauth/start
+# JWT auth → mint state row w DDB (PK=STRAVA_OAUTH_STATE#{state}) → 302 do
+# strava.com/oauth/authorize. Lekki handler: 256 MB / 5 s, no SSM secrets.
+module "strava_oauth_start" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "strava-oauth-start"
+  source_zip    = "${path.module}/../../apps/api/dist/strava_oauth_start.zip"
+  handler       = "handlers.strava_oauth_start.handler.handler"
+  memory_size   = 256
+  timeout       = 5
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Pisze tylko CSRF state row pod PK=STRAVA_OAUTH_STATE#*. NIE potrzebuje
+      # USER#* ani EVENT#strava — dedykowany prefix.
+      Sid      = "DDBWriteOAuthState"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["STRAVA_OAUTH_STATE#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTAndStravaPubKey"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/client_id",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "strava_oauth_start" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.strava_oauth_start.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "strava_oauth_start" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/strava/oauth/start"
+  target    = "integrations/${aws_apigatewayv2_integration.strava_oauth_start.id}"
+}
+
+resource "aws_lambda_permission" "strava_oauth_start_apigw" {
+  statement_id  = "AllowAPIGWInvokeStravaOAuthStart"
+  action        = "lambda:InvokeFunction"
+  function_name = module.strava_oauth_start.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
+# OAuth callback: GET /api/strava/oauth/callback
+# Strava redirektuje user'a po authorize. Atomic state delete + token exchange
+# z httpx + persist tokens do per-user SSM SecureString. 512 MB bo httpx +
+# pydantic + boto3 vendored (~2.85 MB zip).
+module "strava_oauth_callback" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "strava-oauth-callback"
+  source_zip    = "${path.module}/../../apps/api/dist/strava_oauth_callback.zip"
+  handler       = "handlers.strava_oauth_callback.handler.handler"
+  memory_size   = 512
+  timeout       = 10
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Atomic delete state nonce (single-use guard).
+      Sid      = "DDBDeleteOAuthState"
+      Effect   = "Allow"
+      Action   = ["dynamodb:DeleteItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["STRAVA_OAUTH_STATE#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadStravaConfig"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/client_id",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/client_secret",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/athlete-to-user",
+      ]
+    },
+    {
+      # Per-user tokens write — wildcard `bodysync/strava/*/tokens` pozwala
+      # na nowych userów bez Terraform changes. Athlete-to-user write też.
+      Sid    = "WriteStravaTokensAndAthleteMap"
+      Effect = "Allow"
+      Action = ["ssm:PutParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/*/tokens",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/athlete-to-user",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "strava_oauth_callback" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.strava_oauth_callback.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "strava_oauth_callback" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/strava/oauth/callback"
+  target    = "integrations/${aws_apigatewayv2_integration.strava_oauth_callback.id}"
+}
+
+resource "aws_lambda_permission" "strava_oauth_callback_apigw" {
+  statement_id  = "AllowAPIGWInvokeStravaOAuthCallback"
+  action        = "lambda:InvokeFunction"
+  function_name = module.strava_oauth_callback.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
+# Webhook: GET (handshake) + POST (event). 5 s timeout — Strava budget < 2 s
+# więc 5 s to spory headroom. 512 MB bo pydantic vendored.
+module "strava_webhook" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "strava-webhook"
+  source_zip    = "${path.module}/../../apps/api/dist/strava_webhook.zip"
+  handler       = "handlers.strava_webhook.handler.handler"
+  memory_size   = 512
+  timeout       = 5
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Idempotent write event row (PK=EVENT#strava).
+      Sid      = "DDBWriteStravaEvent"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["EVENT#strava"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadStravaWebhookConfig"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/verify_token",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/subscription_id",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/athlete-to-user",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "strava_webhook" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.strava_webhook.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "strava_webhook_get" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/strava/webhook"
+  target    = "integrations/${aws_apigatewayv2_integration.strava_webhook.id}"
+}
+
+resource "aws_apigatewayv2_route" "strava_webhook_post" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/strava/webhook"
+  target    = "integrations/${aws_apigatewayv2_integration.strava_webhook.id}"
+}
+
+resource "aws_lambda_permission" "strava_webhook_apigw" {
+  statement_id  = "AllowAPIGWInvokeStravaWebhook"
+  action        = "lambda:InvokeFunction"
+  function_name = module.strava_webhook.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
