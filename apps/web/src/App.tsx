@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { ApiError, getMe } from './api';
+import { ApiError, getMe, postLogout } from './api';
 import { LoginScreen } from './components/LoginScreen';
 import { Dashboard } from './components/Dashboard';
 import type { Me } from './types';
@@ -30,12 +30,15 @@ export function App() {
     checkSession();
   }, [checkSession]);
 
-  const handleLogout = useCallback(() => {
-    // HttpOnly cookie nie da się usunąć z JS — `Set-Cookie` z Max-Age=0
-    // przez backend (TODO: POST /api/auth/logout). Na razie naive: po
-    // przeładowaniu strony cookie nadal działa. UX ostrzeżenie w komencie.
+  const handleLogout = useCallback(async () => {
+    try {
+      await postLogout();
+    } catch {
+      // Nawet gdy backend zwróci 5xx — UI traktuje user jako wylogowanego.
+      // Cookie HttpOnly nie da się wyczyścić z JS, ale przy następnym getMe()
+      // dostaniemy 401 i tak. Tu nie blokujemy UX na backend errorze.
+    }
     setAuth({ status: 'logged_out' });
-    // TODO: fetch POST /api/auth/logout który zwraca Set-Cookie z Max-Age=0
   }, []);
 
   if (auth.status === 'loading') {
