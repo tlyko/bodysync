@@ -1484,3 +1484,387 @@ Pre-req: Sprint 6.1 deployed i działa (`POST /api/advisor/chat` zwraca 200 z `u
 - PR2 Step 3: jeśli FAISS cold start >800ms → ADR o Provisioned Concurrency lub managed RAG (Pinecone — but blokuje ADR-001)
 
 **Nie potrzebne** jeśli implementer trzyma się ADR-007 sekcji "Decyzja D1-D9" + "Implementation hints" + "Open questions" (te ostatnie są post-MVP, NIE w scope tych 2 PRów).
+
+---
+
+## Sprint 7 — Frontend chat UI (post-Sprint 6 closure)
+Phase: 3 (frontend slice — pierwsza faktyczna interakcja UX z chatem)
+Estimated effort: ~7-9h (7 stepów)
+Branch base: `main` po merge PR #68 (Sprint 6 fully closed)
+Pre-req: Sprint 6.2 deployed + `POST /api/advisor/chat` zwraca 200 z `used_recipes` populated (verified 2026-05-08).
+
+**Driving use case:**
+> Owner loguje się przez Google OAuth → widzi Dashboard (biometry table) → przełącza tab na "Chat" → pisze "co lekkiego na kolację z białkiem" → response markdown z biblioteki Lidla/Biedronki + 5 klikalnych RecipeCards z makro + ingredients + instructions (modal). Disable Send podczas pending request, spinner 2-12s, error UX dla 429/401/400/502.
+
+**Source-of-truth:** Audit `apps/web/` 2026-05-08 + decyzje ownera (KISS defaults). Brak ADR-008 — tylko jeśli pojawi się non-trivial trade-off (np. streaming SSE wymóg).
+
+**Decyzje scope (KISS defaults zatwierdzone 2026-05-08):**
+- **D1 Routing** — tab toggle w state (`activeTab: 'biometry' | 'chat'`), no `react-router-dom`. URL nie zmienia się — refresh = default tab.
+- **D2 Markdown** — `react-markdown` + `remark-gfm` (~30KB gz, sanitized XSS-safe out-of-box). Nie własny mini-parser — RAG response może mieć złożone listy + bold + code blocks z makro.
+- **D3 Recipe metadata** — lokalny plik `apps/web/src/recipes.ts` z mapą `slug → {name, kcal, protein_g, fat_g, carbs_g, ingredients[], instructions[], source_pdf, source_page}`. Generowany skryptem `apps/api/scripts/export_recipes_frontend.py` z DDB. Sync raz przy seed re-run.
+- **D4 PDF link** — **NIE w scope Sprint 7**. PDFy 16-29MB każdy (127MB total) — wymagają osobnej decyzji o hostingu (R2 bucket / S3 public / CDN). RecipeCard pokazuje pełne dane z DDB (ingredients + instructions już seeded). Źródło PDF widoczne tylko jako tekst (`Najszybsze kolacje z Lidla i Biedronki, str. 42`).
+- **D5 Response shape** — single JSON + spinner. Backend już live, nie modyfikujemy. Streaming SSE odłożone (post-MVP).
+- **D6 Logout** — w scope Sprint 7. `POST /api/auth/logout` w backendzie zwraca `Set-Cookie: bodysync_session=; Max-Age=0; Path=/; Domain=.bodysync.pl; HttpOnly; Secure; SameSite=Lax`. Frontend `App.tsx:34-39` TODO usunąć.
+- **D7 Vitest** — minimal setup w Sprint 7. Smoke testy: ChatScreen happy path (mock fetch), 429 quota, 401 reauth. Bez Storybook, bez E2E.
+- **D8 StatCard/Sparkline port z prototype** — NIE w scope, odłożone do Sprint 8 (dashboard polish).
+
+**Pre-req owner actions:** brak. Wszystko self-contained.
+
+**TODO(architect)** w plikach jeśli implementer trafi na decision:
+- Step 5 jeśli `react-markdown` v9+ ma breaking change w `components` prop API → switch na v8 lub remark plugin
+- Step 6 jeśli vitest + jsdom zaczyna mieć Cloudflare Pages build conflict → osobny test config
+
+**Eskalacja do `architect` triggers:**
+- Step 4 jeśli `recipes.ts` rozmiar >500KB (139 recipes z full ingredients/instructions może być sporo) → ADR o lazy-load JSON via fetch zamiast bundle
+- Step 5 jeśli scrolling/keyboard Enter handling wymaga refactor na useReducer dla multi-message state → ADR (raczej overkill)
+- Step 7 (post-impl) jeśli owner chce PDF hosting → osobny mini-sprint Sprint 7.5 (R2 vs S3 vs Cloudflare Pages assets)
+
+---
+
+### Step 1: Frontend deps + design tokens + chat types → modyfikuje `apps/web/{package.json, src/index.css, src/types.ts}`
+- **Modyfikuje:**
+  - `apps/web/package.json` — DODAJ:
+    - `dependencies`: `react-markdown@^9.0.0`, `remark-gfm@^4.0.0`
+    - `devDependencies`: `vitest@^2.1.0`, `@testing-library/react@^16.0.0`, `@testing-library/jest-dom@^6.5.0`, `jsdom@^25.0.0`
+    - `scripts`: dodaj `"test": "vitest run"`, `"test:watch": "vitest"`
+  - `apps/web/src/index.css` — DODAJ token `--purple: #a78bfa;` (CLAUDE.md design system, brakuje)
+  - `apps/web/src/types.ts` — DODAJ:
+    ```ts
+    export type UsedRecipe = {
+      slug: string;
+      name: string;
+      kcal: number;
+      similarity_score: number;
+    };
+    export type TokenUsage = {
+      input_tokens: number;
+      output_tokens: number;
+      cache_read_input_tokens: number;
+      cache_creation_input_tokens: number;
+    };
+    export type ChatMessageDTO = {
+      role: 'user' | 'assistant';
+      content: string;
+      used_recipes: UsedRecipe[];
+      turn_idx: number;
+      tokens_used: TokenUsage;
+      generated_at: string;
+    };
+    export type ChatRequest = {
+      message: string;
+      conversation_date?: string;  // YYYY-MM-DD, default = today UTC
+    };
+    // Local UI state — extends DTO z user message stub przed response
+    export type ChatMessage =
+      | { role: 'user'; content: string; pending: boolean }
+      | { role: 'assistant'; content: string; used_recipes: UsedRecipe[]; turn_idx: number };
+    ```
+  - **Sanity:** `cd apps/web && npm install` → lock file updated
+- **Depends on:** nic
+- **Test:**
+  - `cd apps/web && npm install` → no errors, `package-lock.json` updated
+  - `npm run typecheck` → 0 errors
+  - `npm run build` → bundle build OK (size sanity: react-markdown + remark-gfm ~30KB gz, total bundle <200KB target)
+  - `grep -c "purple\|a78bfa" apps/web/src/index.css` ≥ 1
+- **Acceptance:**
+  - 4 nowe deps w `package.json`, lock file deterministic
+  - `--purple` token dostępny w CSS
+  - 5 nowych types eksportowanych z `types.ts`, type-check clean
+- **Effort:** ~30min
+
+---
+
+### Step 2: API client extensions + AbortController → modyfikuje `apps/web/src/api.ts`
+- **Modyfikuje** `apps/web/src/api.ts`:
+  - **Refactor** `request<T>(path, init?)` → `request<T>(path, init?, signal?: AbortSignal)`:
+    - Pass `signal` do `fetch(..., { signal, ...init })`
+    - Catch `e instanceof DOMException && e.name === 'AbortError'` → re-throw jako `ApiError` z status `0` + message `"aborted"` (UI ignoruje)
+  - **Lepsze error parsing**: zamiast `body.text()` raw → try `JSON.parse(body)` → pull `body.error.reason` lub `body.detail`, fallback do raw
+  - **DODAJ** `postAdvisorChat(req: ChatRequest, signal?: AbortSignal): Promise<ChatMessageDTO>`:
+    ```ts
+    export async function postAdvisorChat(req: ChatRequest, signal?: AbortSignal): Promise<ChatMessageDTO> {
+      return request<ChatMessageDTO>('/api/advisor/chat', {
+        method: 'POST',
+        body: JSON.stringify(req),
+      }, signal);
+    }
+    ```
+  - **DODAJ** `postLogout(): Promise<void>`:
+    ```ts
+    export async function postLogout(): Promise<void> {
+      await request<{ ok: true }>('/api/auth/logout', { method: 'POST' });
+    }
+    ```
+  - **Error reason mapping** dla chat (helper dla UI):
+    ```ts
+    export function chatErrorMessage(e: unknown): string {
+      if (!(e instanceof ApiError)) return 'Nieoczekiwany błąd';
+      if (e.status === 429) return 'Wykorzystałeś dzienny limit (30 wiadomości). Wróć jutro.';
+      if (e.status === 401) return 'Sesja wygasła. Zaloguj się ponownie.';
+      if (e.status === 400) return 'Wiadomość zawiera niedozwolone elementy lub jest pusta.';
+      if (e.status === 502) return 'Problem z asystentem — spróbuj ponownie za chwilę.';
+      return e.message || 'Błąd serwera';
+    }
+    ```
+- **Depends on:** Step 1 (types)
+- **Test:**
+  - `npm run typecheck` clean
+  - `npm run build` clean
+- **Acceptance:**
+  - 2 nowe export functions (`postAdvisorChat`, `postLogout`, `chatErrorMessage`)
+  - `request<T>` przyjmuje `signal` arg, abort path testowany w Step 6
+- **Effort:** ~45min
+
+---
+
+### Step 3: Backend logout endpoint → tworzy `apps/api/handlers/auth_logout/` + Terraform route
+- **Tworzy:**
+  - `apps/api/handlers/auth_logout/handler.py`:
+    - `def handler(event, context)`:
+      - Brak walidacji input (POST z empty body OK)
+      - Return `{statusCode: 200, headers: {Set-Cookie: 'bodysync_session=; Max-Age=0; Path=/; Domain=.bodysync.pl; HttpOnly; Secure; SameSite=Lax'}, body: '{"ok": true}'}`
+      - Logger.info `auth_logout` (no user_id — cookie clear nawet bez valid JWT, idempotent)
+  - `apps/api/handlers/auth_logout/__init__.py` (empty)
+  - `apps/api/handlers/auth_logout/requirements.txt` (puste lub `# brak external deps`)
+  - `apps/api/tests/handlers/auth_logout/test_handler.py`:
+    - `test_logout_clears_cookie` — assert response 200, header `Set-Cookie` zawiera `Max-Age=0`
+    - `test_logout_idempotent_without_jwt` — call bez Cookie → still 200
+- **Modyfikuje:**
+  - `infrastructure/terraform/main.tf` — DODAJ `module "auth_logout"` (mirror `module "auth_google"` ale lighter — 256MB / 5s, no SSM/DDB IAM):
+    ```hcl
+    module "auth_logout" {
+      source        = "./modules/lambda"
+      function_name = "${local.project}-auth-logout"
+      source_zip    = "${path.module}/../../apps/api/dist/auth_logout.zip"
+      handler       = "handlers.auth_logout.handler.handler"
+      memory_size   = 256
+      timeout       = 5
+      # no extra_iam_statements — handler zwraca tylko Set-Cookie, no SSM/DDB
+    }
+
+    resource "aws_apigatewayv2_integration" "auth_logout" {
+      api_id                 = aws_apigatewayv2_api.bodysync.id
+      integration_type       = "AWS_PROXY"
+      integration_uri        = module.auth_logout.invoke_arn
+      payload_format_version = "2.0"
+    }
+
+    resource "aws_apigatewayv2_route" "auth_logout" {
+      api_id    = aws_apigatewayv2_api.bodysync.id
+      route_key = "POST /api/auth/logout"
+      target    = "integrations/${aws_apigatewayv2_integration.auth_logout.id}"
+    }
+
+    resource "aws_lambda_permission" "auth_logout_apigw" {
+      statement_id  = "AllowAPIGWInvokeAuthLogout"
+      action        = "lambda:InvokeFunction"
+      function_name = module.auth_logout.function_name
+      principal     = "apigateway.amazonaws.com"
+      source_arn    = "${aws_apigatewayv2_api.bodysync.execution_arn}/*/*"
+    }
+    ```
+- **Depends on:** nic (osobny backend handler)
+- **Test:**
+  - `cd apps/api && pytest tests/handlers/auth_logout/ -v` → 2/2 pass
+  - `cd apps/api && python scripts/build.py auth_logout` → zip created (autodiscovery)
+  - `cd infrastructure/terraform && terraform fmt -check && terraform validate`
+  - PR → terraform-plan → 1 lambda + 1 route + 1 integration + 1 permission
+  - Po merge → smoke: `curl -X POST -i https://api.bodysync.pl/api/auth/logout` → `Set-Cookie: bodysync_session=; Max-Age=0...` + `{"ok": true}`
+- **Acceptance:**
+  - Lambda zip <2MB (no deps)
+  - Curl smoke: cookie clear header obecny, status 200
+  - Frontend logout button po Step 5 wyzwala backend → cookie znika z DevTools Application tab
+- **Effort:** ~1h (głównie boilerplate Terraform mirror)
+
+---
+
+### Step 4: Recipe metadata export script + frontend data file → tworzy `apps/api/scripts/export_recipes_frontend.py` + `apps/web/src/recipes.ts`
+- **Tworzy:**
+  - `apps/api/scripts/export_recipes_frontend.py`:
+    - Argparse: `--output-path` (default `apps/web/src/recipes.json`), `--table` (default `bodysync-data`)
+    - Query DDB `PK = "RECIPES"` (wszystkie recipe items)
+    - Map każdy item → `{slug, name, kcal, protein_g, fat_g, carbs_g, fiber_g, ingredients, instructions, source_pdf, source_page, prep_minutes, servings, meal_type}`
+    - Write JSON file (sorted by slug for deterministic diff), pretty-printed (`indent=2, ensure_ascii=False`)
+    - Logger summary: `N recipes exported, output_size=X KB`
+  - `apps/web/src/recipes.ts`:
+    ```ts
+    import recipesData from './recipes.json';
+    export type RecipeFull = {
+      slug: string;
+      name: string;
+      meal_type: string;
+      kcal: number;
+      protein_g: number;
+      fat_g: number;
+      carbs_g: number;
+      fiber_g?: number;
+      ingredients: string[];
+      instructions: string[];
+      source_pdf: string;
+      source_page: number;
+      prep_minutes?: number;
+      servings?: number;
+    };
+    const recipesMap: Record<string, RecipeFull> = Object.fromEntries(
+      (recipesData as RecipeFull[]).map((r) => [r.slug, r]),
+    );
+    export function getRecipeBySlug(slug: string): RecipeFull | undefined {
+      return recipesMap[slug];
+    }
+    ```
+  - `apps/web/src/recipes.json` — generowany, ALE commit-uj (139 entries deterministic, ~200KB est.)
+- **Modyfikuje:**
+  - `apps/web/vite.config.ts` — jeśli potrzebne, ustaw `assetsInlineLimit: 0` lub pozostaw default (recipes.json importowany jako module → bundler treats as JS)
+  - `.gitignore` — NIE dodawaj `recipes.json` (chcemy commit)
+- **Depends on:** Sprint 6.2 deploy (DDB RECIPES seeded — ✅ done)
+- **Test:**
+  - `cd apps/api && python scripts/export_recipes_frontend.py --output-path /tmp/recipes-test.json` → log "139 recipes exported", file size ~150-300KB
+  - Re-run → file deterministic (sorted by slug)
+  - `cd apps/web && npm run build` → bundle includes recipes data, total bundle <300KB target (recipes raw JSON ~200KB + react-markdown 30KB + react 50KB = ~280KB)
+  - `npm run typecheck` clean
+  - Manual: `python -c "import json; d=json.load(open('apps/web/src/recipes.json')); print(len(d), d[0]['slug'])"` → ≥130 entries
+- **Acceptance:**
+  - `recipes.json` ~200KB committed
+  - `getRecipeBySlug('ryz-na-mleku-ze-sliwkami-mezczyzni')` zwraca pełny obiekt
+  - Re-run skryptu deterministic (CI-friendly — diff = 0 jeśli DDB unchanged)
+- **Effort:** ~45min
+
+---
+
+### Step 5a: Chat components — `ChatMessage`, `ChatInput`, `RecipeCard` → tworzy `apps/web/src/components/chat/`
+- **Tworzy:**
+  - `apps/web/src/components/chat/ChatMessage.tsx`:
+    - Props: `{ role: 'user'|'assistant', content: string, used_recipes?: UsedRecipe[], onRecipeClick: (slug) => void }`
+    - User: prosty bubble po prawej, plain text
+    - Assistant: bubble po lewej z `<ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>` + below: grid recipe cards (jeśli `used_recipes` length > 0)
+    - Sanitization: `react-markdown` defaultem escapuje HTML (no `rehype-raw`)
+  - `apps/web/src/components/chat/ChatInput.tsx`:
+    - Props: `{ onSend: (msg: string) => void, disabled: boolean }`
+    - `<textarea>` z auto-resize (1-5 rows)
+    - Enter = send (jeśli not disabled + content trim non-empty)
+    - Shift+Enter = newline
+    - Below: button "Wyślij" + character counter (jeśli >800 chars warning, max 2000 server-side)
+  - `apps/web/src/components/chat/RecipeCard.tsx`:
+    - Props: `{ recipe: UsedRecipe, onClick: () => void }`
+    - Card layout: `name` (cyan), `kcal kcal` (orange), `match: {(similarity*100).toFixed(0)}%` (text-muted), hover effect
+    - On click → `onClick()` (parent renderuje modal z full RecipeFull)
+  - `apps/web/src/components/chat/RecipeModal.tsx`:
+    - Props: `{ recipe: RecipeFull | null, onClose: () => void }`
+    - Modal overlay, full RecipeFull rendered: makro grid (kcal/protein/fat/carbs), ingredients list, instructions ordered list, source attribution `(Najszybsze kolacje z Lidla i Biedronki, str. 42)`
+    - Close: ESC key, click overlay, X button
+- **Modyfikuje:**
+  - `apps/web/src/index.css` — DODAJ chat styles (`.chat-screen`, `.chat-thread`, `.message-bubble.user`, `.message-bubble.assistant`, `.recipe-cards-grid`, `.recipe-card`, `.recipe-modal-overlay`, `.recipe-modal`, `.chat-input` etc. ~150 linii CSS, design tokens consistent z Dashboard)
+- **Depends on:** Step 1 (deps), Step 4 (recipes.ts dla modal)
+- **Test:**
+  - `npm run typecheck` clean
+  - `npm run build` clean, bundle size <300KB target
+- **Acceptance:**
+  - 4 nowe komponenty type-safe, props minimalne
+  - CSS styles consistent (cyan accent, dark cards, JetBrains Mono dla nazwy/kcal)
+  - RecipeCard click → RecipeModal otwarty z full data
+- **Effort:** ~2h
+
+---
+
+### Step 5b: ChatScreen orchestration + Tab nav + integration → tworzy `apps/web/src/components/chat/ChatScreen.tsx` + modyfikuje `Dashboard.tsx`/`App.tsx`
+- **Tworzy:**
+  - `apps/web/src/components/chat/ChatScreen.tsx`:
+    - State: `messages: ChatMessage[]` (empty start), `pending: boolean`, `error: string | null`, `selectedRecipe: RecipeFull | null`
+    - `useRef<AbortController | null>(null)` dla in-flight chat request
+    - `handleSend(msg)`:
+      - Optimistic append `{role:'user', content: msg, pending: true}`
+      - Set `pending=true`, `error=null`
+      - New `AbortController`, ref.current = it
+      - `postAdvisorChat({message: msg}, controller.signal)` →
+        - On success: append `{role:'assistant', content, used_recipes, turn_idx}`, set `pending=false`
+        - On error: `chatErrorMessage(e)` → set error, remove user pending stub, set `pending=false`
+        - On abort: skip (component unmount path)
+    - `useEffect` cleanup: `controllerRef.current?.abort()` na unmount
+    - Scroll-to-bottom: `useRef<HTMLDivElement>(threadEnd)` + `scrollIntoView({behavior:'smooth'})` po messages change
+    - Render: `.chat-screen` z `.chat-thread` (lista ChatMessage) + `<div ref={threadEnd}/>` + `.chat-error` (jeśli error) + ChatInput (disabled = pending) + RecipeModal (jeśli selectedRecipe)
+- **Modyfikuje:**
+  - `apps/web/src/components/Dashboard.tsx`:
+    - Refactor: extract biometry table do `BiometryTab.tsx` (lub inline z `activeTab` guard)
+    - DODAJ tab toggle w header: `<button>Biometria</button> <button>Chat</button>` z visual active state
+    - State: `activeTab: 'biometry' | 'chat'` (default `'biometry'`)
+    - Conditional render: jeśli `activeTab==='biometry'` → table, jeśli `'chat'` → `<ChatScreen />`
+  - `apps/web/src/App.tsx`:
+    - `handleLogout` — call `postLogout()` → on success/error: `setAuth({status:'logged_out'})`. Drop TODO komentarz.
+- **Depends on:** Step 2 (api.ts), Step 5a (chat components)
+- **Test:**
+  - `npm run typecheck` clean
+  - `npm run build` clean
+  - Manual local: `npm run dev` → login → tab "Chat" → wyślij wiadomość → response wyświetlony → klik na recipe card → modal → close → chat continues
+- **Acceptance:**
+  - Tab toggle działa (biometria default, chat = explicit click)
+  - Wiadomość pending state: input disabled, spinner widoczny
+  - 429/401/400/502 errors wyświetlone jako readable PL message
+  - Logout faktycznie czyści cookie (verify w DevTools)
+  - Refresh strony = stan reset (acceptable per D1)
+- **Effort:** ~2h
+
+---
+
+### Step 6: Vitest setup + smoke tests → tworzy `apps/web/vitest.config.ts` + `apps/web/src/__tests__/`
+- **Tworzy:**
+  - `apps/web/vitest.config.ts`:
+    ```ts
+    import { defineConfig } from 'vitest/config';
+    import react from '@vitejs/plugin-react';
+    export default defineConfig({
+      plugins: [react()],
+      test: {
+        environment: 'jsdom',
+        setupFiles: ['./src/__tests__/setup.ts'],
+        globals: true,
+      },
+    });
+    ```
+  - `apps/web/src/__tests__/setup.ts`:
+    ```ts
+    import '@testing-library/jest-dom/vitest';
+    ```
+  - `apps/web/src/__tests__/ChatScreen.test.tsx`:
+    - `test_chat_happy_path` — mock `postAdvisorChat` returns sample response → render → type → submit → assert assistant bubble + recipe cards
+    - `test_chat_429_quota` — mock throws ApiError(429) → assert error message "Wykorzystałeś dzienny limit"
+    - `test_chat_401_reauth` — mock throws ApiError(401) → assert error message "Sesja wygasła"
+    - `test_chat_pending_disables_input` — mock pending promise → assert input/button disabled while pending
+    - `test_recipe_card_opens_modal` — render assistant message z used_recipes → click card → assert modal visible z RecipeFull data (mock `getRecipeBySlug`)
+- **Modyfikuje:**
+  - `apps/web/package.json` — `"test"` script już dodany w Step 1
+- **Depends on:** Step 5b (ChatScreen exists)
+- **Test:**
+  - `cd apps/web && npm run test` → 5/5 pass
+  - `npm run test -- --coverage` (opcjonalnie) → coverage `ChatScreen.tsx` >70%
+- **Acceptance:**
+  - Vitest configured, 5 smoke tests pass
+  - Test runtime <5s (jsdom + react testing-library lekkie)
+  - CI-ready (po dodaniu `npm run test` do GHA workflow w follow-up)
+- **Effort:** ~1.5h
+
+---
+
+### Decyzja Sprint 7: 6 PRów (split per step)
+- **PR1 Step 1** — frontend deps + types + token (~30min review)
+- **PR2 Step 2** — api.ts extensions (~30min review)
+- **PR3 Step 3** — backend logout (~45min review, infra change)
+- **PR4 Step 4** — recipe export script + recipes.json (~30min review, large diff dla recipes.json ale generated)
+- **PR5 Step 5a + 5b** — chat UI + nav + logout integration (~1h review, biggest)
+- **PR6 Step 6** — vitest + tests (~30min review)
+
+Razem ~6 PR-ów, większość małych (Step 5 mega) — split żeby każdy był reviewable. Sequencing odp. dependencies (Step 4 może iść parallel z Step 1/2/3).
+
+### Ryzyka i mitygacje (Sprint 7)
+- **R1:** `recipes.json` >500KB w bundle — slow first paint. **M:** verify w Step 4 build (sanity log size). Jeśli >500KB → lazy-load via `await import('./recipes.json')` w RecipeModal.
+- **R2:** `react-markdown` v9 może wymagać `import { Components } from 'react-markdown'` API change. **M:** Step 5a implementer sprawdza changelog, fallback na v8 jeśli mismatch.
+- **R3:** AbortController nie cancel'uje API GW connection (TCP keep-alive) — tylko frontend ignoruje response. Anthropic call dalej leci → cost. **M:** akceptowalne, owner solo dev (rzadko abortuje), backend timeout 30s górny limit.
+- **R4:** Cookie domain `.bodysync.pl` w logout cookie nie zadziała w preview deployment (`*.pages.dev` domain). **M:** logout endpoint deployed pod `api.bodysync.pl` zawsze — preview frontend rozmawia z prod backend i tak.
+- **R5:** Vitest 2.x wymaga node ≥18 — verify w `package.json:engines`. **M:** dodaj `"engines": {"node": ">=20"}` w Step 1 jeśli brak.
+- **R6:** Markdown response z Haiku może mieć rzadko `<script>` lub `<iframe>` (prompt injection w retrieved recipe content). **M:** `react-markdown` defaultem strip-uje HTML. Test w Step 6: `test_chat_strips_html_injection` (mock response z `<script>alert(1)</script>` → assert NIE renderuje).
+
+### Eskalacja do `architect` post-Sprint 7
+- Jeśli owner używa chat regularnie i refresh-page lose-state UX boli → ADR o conversation history fetch z backend (już mamy 24h TTL, brak endpointu list)
+- Jeśli owner chce PDF link w RecipeCard → Sprint 7.5 ADR (R2 vs S3 vs CF Pages assets, 127MB total)
+- Jeśli vitest CI integration potrzebny → mini ADR o GHA workflow `web-tests.yml`
+
+---
