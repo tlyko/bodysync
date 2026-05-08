@@ -3,12 +3,19 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import UTC, date, datetime, timedelta
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
+from zoneinfo import ZoneInfo
 
 from handlers.api_read.schemas import BiometryDay, MeResponse
 from shared.dynamo import get_item, query_by_pk
+
+# HAE webhook (`health_webhook/service.py:48`) zapisuje BIOMETRY rows pod
+# SK z datą w Europe/Warsaw — żeby kroki sprzed 2:00 UTC nie wylądowały
+# w "wczorajszym" buckecie. Read-side (tu) musi używać tej samej strefy
+# żeby `today` w sobotę 00:30 lokalnie nie zwrócił piątkowych danych.
+LOCAL_TZ = ZoneInfo("Europe/Warsaw")
 
 # Po PR #46 cumulative metrics są multi-point z timestamp w SK; agregacja
 # (sum) per dzień idzie tutaj — frontend dostaje single value jak pre-PR-#46.
@@ -75,7 +82,7 @@ def get_biometry(user_id: str, *, days: int = 7) -> list[BiometryDay]:
       - HRV/HR multi-point: lista point'ów (frontend agreguje per-window)
       - snapshot: single dict z atrybutami row'u
     """
-    today = datetime.now(UTC).date()
+    today = datetime.now(LOCAL_TZ).date()
     cutoff_iso = (today - timedelta(days=days - 1)).isoformat()
 
     items = query_by_pk(f"USER#{user_id}", sk_prefix="BIOMETRY#")
@@ -138,5 +145,9 @@ def get_biometry(user_id: str, *, days: int = 7) -> list[BiometryDay]:
 
 
 def _today_iso() -> str:
-    """Test seam — pozwala mockować bieżącą datę w testach."""
-    return date.today().isoformat()
+    """Test seam — pozwala mockować bieżącą datę w testach.
+
+    LOCAL_TZ (Europe/Warsaw) — `date.today()` używa server local time
+    która w Lambdzie jest UTC, daje wczorajsze date dla CET nocy.
+    """
+    return datetime.now(LOCAL_TZ).date().isoformat()
