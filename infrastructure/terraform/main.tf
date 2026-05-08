@@ -122,6 +122,77 @@ resource "aws_lambda_permission" "auth_logout_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
+# Sprint 9 — GET + PUT /api/profile/targets. JWT auth, czyta + merguje
+# kcal_target/protein_target_g/fat_target_g/carbs_target_g do PROFILE row.
+# Pojedyncza Lambda handluje obie metody (dispatch po HTTP method).
+module "profile_targets" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "profile-targets"
+  source_zip    = "${path.module}/../../apps/api/dist/profile_targets.zip"
+  handler       = "handlers.profile_targets.handler.handler"
+  memory_size   = 512
+  timeout       = 5
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Read + Write PROFILE row — LeadingKeys USER#* defense in depth (handler
+      # i tak zawsze pisze pod {user_id z JWT}, ale gdyby kiedy się wjebała
+      # PK injection w kodzie, IAM zatrzyma write na non-USER prefix).
+      Sid      = "DDBProfileRW"
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTSecret"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "profile_targets" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.profile_targets.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "profile_targets_get" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/profile/targets"
+  target    = "integrations/${aws_apigatewayv2_integration.profile_targets.id}"
+}
+
+resource "aws_apigatewayv2_route" "profile_targets_put" {
+  api_id    = module.api_gateway.api_id
+  route_key = "PUT /api/profile/targets"
+  target    = "integrations/${aws_apigatewayv2_integration.profile_targets.id}"
+}
+
+resource "aws_lambda_permission" "profile_targets_apigw" {
+  statement_id  = "AllowAPIGWInvokeProfileTargets"
+  action        = "lambda:InvokeFunction"
+  function_name = module.profile_targets.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
 # Sprint 3 — Apple Health webhook. POST /api/health/webhook,
 # Bearer auth (per-user secret w SSM, server resolves user_id po hmac match).
 module "health_webhook" {
