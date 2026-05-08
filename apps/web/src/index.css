@@ -201,6 +201,12 @@ td.date {
 
 /* ─── Stat cards (Sprint 8) ─── */
 
+.stat-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
+  gap: 0.85rem;
+}
+
 .stat-card {
   background: var(--card);
   border: 1px solid var(--border);
