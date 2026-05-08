@@ -3,5 +3,5 @@ PyJWT==2.9.*
 boto3==1.35.*
 anthropic==0.100.*
 faiss-cpu==1.8.*
-openai==1.50.*
+openai>=1.55,<2.0
 numpy==1.26.*
