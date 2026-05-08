@@ -268,7 +268,14 @@ def test_today_context_in_request(dynamodb_table: Any, patched_anthropic_client:
 def test_no_retrieved_recipes_when_rag_unavailable(dynamodb_table: Any) -> None:
     """Sprint 6.2 PR2 graceful degradation — `rag.retrieve` raise
     `RAGUnavailableError` (default conftest patch) ⇒ `<retrieved_recipes>`
-    NIE występuje w request do Anthropic, response.used_recipes=[].
+    block NIE występuje w runtime composition (user message), response
+    `used_recipes=[]`.
+
+    Note: po Step 6 system prompt zawiera literal `<retrieved_recipes>`
+    w sekcji ANTI-INJECTION (opis 4-tego bloku danych dla modelu) — to
+    intentional. Test pilnuje że RUNTIME composition (user message
+    generowany przez `build_chat_messages`) nie wstawia block gdy
+    retrieval był empty/missing.
     """
     from handlers.advisor_chat import handler as h
     from handlers.advisor_chat import service as svc
@@ -280,13 +287,11 @@ def test_no_retrieved_recipes_when_rag_unavailable(dynamodb_table: Any) -> None:
 
     create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
     user_msg_content = _flatten_user_content(create_call.kwargs["messages"][0]["content"])
-    system_blocks = create_call.kwargs["system"]
-    system_text = "".join(block["text"] for block in system_blocks)
 
+    # Runtime composition (user message) clean — no <retrieved_recipes> block
+    # gdy retrieval był empty.
     assert "<retrieved_recipes>" not in user_msg_content
     assert "</retrieved_recipes>" not in user_msg_content
-    assert "<retrieved_recipes>" not in system_text
-    assert "</retrieved_recipes>" not in system_text
 
 
 @pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
