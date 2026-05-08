@@ -644,3 +644,173 @@ resource "aws_lambda_permission" "strava_webhook_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# ─── Sprint 4 — Strava fetcher (DDB Streams trigger) + activities API ─────
+
+# Fetcher Lambda — triggered z DDB Streams INSERT events na EVENT#strava
+# partition. 1024 MB / 60 s — Strava API call (~500 ms) + S3 PutObject + DDB
+# write. 60 s timeout daje headroom dla token refresh + activity + streams +
+# persist (typowo ~3 s, headroom dla cold start).
+module "strava_fetcher" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "strava-fetcher"
+  source_zip    = "${path.module}/../../apps/api/dist/strava_fetcher.zip"
+  handler       = "handlers.strava_fetcher.handler.handler"
+  memory_size   = 1024
+  timeout       = 60
+
+  environment = {
+    TABLE_NAME      = aws_dynamodb_table.data.name
+    RAW_BUCKET_NAME = aws_s3_bucket.data.id
+    ENV             = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      Sid    = "DDBStreamRead"
+      Effect = "Allow"
+      Action = [
+        "dynamodb:DescribeStream",
+        "dynamodb:GetRecords",
+        "dynamodb:GetShardIterator",
+        "dynamodb:ListStreams",
+      ]
+      Resource = "${aws_dynamodb_table.data.arn}/stream/*"
+    },
+    {
+      # Pisze ACTIVITY rows pod USER#* — defense in depth (kod używa
+      # user_id z webhook event row, ale IAM zatrzyma jeśli kiedy bug
+      # spróbuje pisać pod nie-USER prefix).
+      Sid      = "DDBWriteActivity"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadStravaTokensAndConfig"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/client_id",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/client_secret",
+        # Per-user tokens — wildcard.
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/*/tokens",
+      ]
+    },
+    {
+      # Token refresh rotuje refresh_token — fetcher nadpisuje SSM po
+      # successful refresh. Wildcard `*/tokens` pozwala na nowych userów
+      # bez Terraform changes.
+      Sid    = "WriteRotatedStravaTokens"
+      Effect = "Allow"
+      Action = ["ssm:PutParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/*/tokens",
+      ]
+    },
+    {
+      # Streams JSON do S3 raw bucket, prefix `strava/streams/{user_id}/`.
+      Sid      = "S3WriteStravaStreams"
+      Effect   = "Allow"
+      Action   = ["s3:PutObject"]
+      Resource = "${aws_s3_bucket.data.arn}/strava/streams/*"
+    },
+  ]
+}
+
+# Event source mapping z filter_criteria — fetcher invoked TYLKO dla INSERT
+# eventów na PK=EVENT#strava (cost + correctness disaster bez tego —
+# wszystkie biometry/activity writes invokowałyby fetcher).
+resource "aws_lambda_event_source_mapping" "strava_fetcher_stream" {
+  event_source_arn  = aws_dynamodb_table.data.stream_arn
+  function_name     = module.strava_fetcher.function_name
+  starting_position = "LATEST"
+  batch_size        = 10
+  # Maximum 5 minut żeby fetcher nie wisiał na slow batch (Strava API rare
+  # 5xx/timeout) — zwykle batch <1s.
+  maximum_batching_window_in_seconds = 5
+
+  filter_criteria {
+    filter {
+      pattern = jsonencode({
+        eventName = ["INSERT"]
+        dynamodb = {
+          NewImage = {
+            PK = {
+              S = ["EVENT#strava"]
+            }
+          }
+        }
+      })
+    }
+  }
+}
+
+# Activities list — GET /api/activities. JWT auth, query po PK=USER#{user_id}
+# z SK begins_with ACTIVITY#. Lekki: 256 MB / 5 s, brak external deps poza
+# pyjwt + boto3 (vendored).
+module "activities_list" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "activities-list"
+  source_zip    = "${path.module}/../../apps/api/dist/activities_list.zip"
+  handler       = "handlers.activities_list.handler.handler"
+  memory_size   = 256
+  timeout       = 5
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      Sid      = "DDBReadActivities"
+      Effect   = "Allow"
+      Action   = ["dynamodb:Query"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTSecret"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "activities_list" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.activities_list.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "activities_list" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/activities"
+  target    = "integrations/${aws_apigatewayv2_integration.activities_list.id}"
+}
+
+resource "aws_lambda_permission" "activities_list_apigw" {
+  statement_id  = "AllowAPIGWInvokeActivitiesList"
+  action        = "lambda:InvokeFunction"
+  function_name = module.activities_list.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
