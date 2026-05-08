@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { getBiometry } from '../api';
-import type { BiometryDay, BiometryValue, Me } from '../types';
+import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
+import type { BiometryDay, Me } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
+import { StatCard } from './dashboard/StatCard';
+import { WeightChart } from './dashboard/WeightChart';
 
 type Props = {
   me: Me;
@@ -10,61 +13,7 @@ type Props = {
 
 type Tab = 'biometry' | 'chat';
 
-const METRIC_LABELS: Record<string, string> = {
-  weight: 'Waga',
-  body_fat: 'Tkanka tłuszcz.',
-  steps: 'Kroki',
-  hr: 'Tętno (min/avg/max)',
-  resting_hr: 'Tętno spoczynkowe',
-  hrv: 'HRV (ms)',
-  kcal_active: 'Kcal aktywne',
-  kcal_basal: 'Kcal bazowe',
-  kcal_in: 'Kcal spożyte',
-  protein: 'Białko (g)',
-  fat: 'Tłuszcz (g)',
-  carbs: 'Węgle (g)',
-  sleep: 'Sen',
-};
-
-function formatValue(metric: string, value: BiometryValue | BiometryValue[]): string {
-  if (Array.isArray(value)) {
-    if (metric === 'hrv') {
-      const values = value
-        .map((p) => p.value_ms)
-        .filter((v): v is number => typeof v === 'number');
-      if (values.length === 0) return '—';
-      const avg = values.reduce((a, b) => a + b, 0) / values.length;
-      return `${avg.toFixed(1)} ms (${values.length} pomiarów)`;
-    }
-    if (metric === 'hr') {
-      // Avg z avg_bpm wszystkich okien
-      const avgs = value
-        .map((p) => p.avg_bpm)
-        .filter((v): v is number => typeof v === 'number');
-      if (avgs.length === 0) return '—';
-      const avg = avgs.reduce((a, b) => a + b, 0) / avgs.length;
-      return `~${Math.round(avg)} bpm`;
-    }
-    return `${value.length} pomiarów`;
-  }
-  // Single value
-  const v = value as BiometryValue;
-  if (metric === 'weight') return `${v.kg} kg`;
-  if (metric === 'body_fat') return `${v.pct}%`;
-  if (metric === 'steps') return `${v.count}`;
-  if (metric === 'resting_hr') return `${v.bpm} bpm`;
-  if (metric === 'kcal_active' || metric === 'kcal_basal' || metric === 'kcal_in') return `${v.kcal} kcal`;
-  if (metric === 'protein' || metric === 'fat' || metric === 'carbs') return `${v.g} g`;
-  if (metric === 'sleep') {
-    const asleep = typeof v.asleep === 'number' ? `${v.asleep.toFixed(1)} h` : '—';
-    return `${asleep} (asleep)`;
-  }
-  // Fallback — pierwsza numeryczna wartość
-  for (const [, val] of Object.entries(v)) {
-    if (typeof val === 'number') return String(val);
-  }
-  return '—';
-}
+const BIOMETRY_DAYS = 30;
 
 export function Dashboard({ me, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<Tab>('biometry');
@@ -73,16 +22,11 @@ export function Dashboard({ me, onLogout }: Props) {
 
   useEffect(() => {
     if (activeTab !== 'biometry') return;
-    if (days !== null) return; // już załadowane
-    getBiometry(7)
+    if (days !== null) return;
+    getBiometry(BIOMETRY_DAYS)
       .then((res) => setDays(res.days))
       .catch((e) => setError(e instanceof Error ? e.message : 'fetch failed'));
   }, [activeTab, days]);
-
-  // Wszystkie metric_names obecne w response — kolumny tabeli
-  const allMetrics = days
-    ? Array.from(new Set(days.flatMap((d) => Object.keys(d.metrics))))
-    : [];
 
   return (
     <div className="dashboard">
@@ -113,50 +57,148 @@ export function Dashboard({ me, onLogout }: Props) {
       </header>
 
       <main>
-        {activeTab === 'biometry' && (
-          <>
-            <h2>Ostatnie 7 dni</h2>
-            {error && <p className="error">Błąd: {error}</p>}
-            {!days && !error && <p>Wczytywanie…</p>}
-            {days && days.length === 0 && (
-              <div className="empty">
-                <p>
-                  Brak danych w bazie. Skonfiguruj <strong>Health Auto Export</strong> na
-                  telefonie i wyślij pierwszy webhook.
-                </p>
-              </div>
-            )}
-            {days && days.length > 0 && (
-              <div className="table-wrapper">
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Data</th>
-                      {allMetrics.map((m) => (
-                        <th key={m}>{METRIC_LABELS[m] ?? m}</th>
-                      ))}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {days.map((day) => (
-                      <tr key={day.date}>
-                        <td className="date">{day.date}</td>
-                        {allMetrics.map((m) => (
-                          <td key={m}>
-                            {day.metrics[m] ? formatValue(m, day.metrics[m]) : '—'}
-                          </td>
-                        ))}
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
-          </>
-        )}
-
+        {activeTab === 'biometry' && <BiometryView days={days} error={error} />}
         {activeTab === 'chat' && <ChatScreen />}
       </main>
     </div>
+  );
+}
+
+type BiometryProps = {
+  days: BiometryDay[] | null;
+  error: string | null;
+};
+
+function BiometryView({ days, error }: BiometryProps) {
+  if (error) return <p className="error">Błąd: {error}</p>;
+  if (!days) return <p>Wczytywanie…</p>;
+  if (days.length === 0) {
+    return (
+      <div className="empty">
+        <p>
+          Brak danych w bazie. Skonfiguruj <strong>Health Auto Export</strong> na telefonie i
+          wyślij pierwszy webhook.
+        </p>
+      </div>
+    );
+  }
+
+  const hrvSeries = buildSeries(days, 'hrv');
+  const sleepSeries = buildSeries(days, 'sleep');
+  const stepsSeries = buildSeries(days, 'steps');
+  const kcalActiveSeries = buildSeries(days, 'kcal_active');
+  const restingHrSeries = buildSeries(days, 'resting_hr');
+  const bodyFatSeries = buildSeries(days, 'body_fat');
+  const weightSeries = buildSeries(days, 'weight');
+
+  return (
+    <>
+      <h2>Ostatnie {BIOMETRY_DAYS} dni</h2>
+      <div className="stat-grid">
+        <MetricStatCard
+          label="HRV (avg ms)"
+          series={hrvSeries}
+          unit="ms"
+          accent="cyan"
+          fmt={(v) => v.toFixed(1)}
+        />
+        <MetricStatCard
+          label="Sen"
+          series={sleepSeries}
+          unit="h"
+          accent="purple"
+          fmt={(v) => v.toFixed(1)}
+        />
+        <MetricStatCard
+          label="Kroki"
+          series={stepsSeries}
+          accent="green"
+          fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
+        />
+        <MetricStatCard
+          label="Kcal aktywne"
+          series={kcalActiveSeries}
+          unit="kcal"
+          accent="orange"
+          fmt={(v) => Math.round(v).toString()}
+        />
+        <MetricStatCard
+          label="Resting HR"
+          series={restingHrSeries}
+          unit="bpm"
+          accent="red"
+          fmt={(v) => Math.round(v).toString()}
+        />
+        <MetricStatCard
+          label="Body fat"
+          series={bodyFatSeries}
+          unit="%"
+          accent="muted"
+          fmt={(v) => v.toFixed(1)}
+        />
+      </div>
+
+      <h2 style={{ marginTop: '2rem' }}>Waga</h2>
+      <WeightChart data={weightSeries.map((p) => ({ date: p.date, weight: p.value }))} />
+      <div className="stat-grid" style={{ marginTop: '1rem' }}>
+        <WeightSummaryCards series={weightSeries} />
+      </div>
+    </>
+  );
+}
+
+type MetricStatCardProps = {
+  label: string;
+  series: SeriesPoint[];
+  unit?: string;
+  accent: 'cyan' | 'green' | 'orange' | 'purple' | 'red' | 'muted';
+  fmt: (v: number) => string;
+};
+
+function MetricStatCard({ label, series, unit, accent, fmt }: MetricStatCardProps) {
+  const last = latestValue(series);
+  const trend = trendPct(series);
+  return (
+    <StatCard
+      label={label}
+      value={last ? fmt(last.value) : null}
+      unit={unit}
+      accent={accent}
+      sparkData={series.map((p) => p.value)}
+      change={trend}
+    />
+  );
+}
+
+function WeightSummaryCards({ series }: { series: SeriesPoint[] }) {
+  if (series.length === 0) {
+    return (
+      <>
+        <StatCard label="Aktualna waga" value={null} unit="kg" accent="green" />
+        <StatCard label={`Zmiana ${BIOMETRY_DAYS}d`} value={null} unit="kg" accent="cyan" />
+        <StatCard label="Średnia" value={null} unit="kg" accent="purple" />
+      </>
+    );
+  }
+  const first = series[0].value;
+  const last = series[series.length - 1].value;
+  const delta = last - first;
+  const avg = series.reduce((a, p) => a + p.value, 0) / series.length;
+  return (
+    <>
+      <StatCard
+        label="Aktualna waga"
+        value={last.toFixed(1)}
+        unit="kg"
+        accent="green"
+      />
+      <StatCard
+        label={`Zmiana ${BIOMETRY_DAYS}d`}
+        value={`${delta >= 0 ? '+' : ''}${delta.toFixed(1)}`}
+        unit="kg"
+        accent="cyan"
+      />
+      <StatCard label="Średnia" value={avg.toFixed(1)} unit="kg" accent="purple" />
+    </>
   );
 }
