@@ -1,8 +1,9 @@
-# CloudWatch cost guard dla Anthropic spend (Sprint 6 Step 7 per ADR-006).
+# CloudWatch cost guard dla Anthropic spend (Sprint 6 Step 7 per ADR-006,
+# rename advisor-dinner → advisor-chat per ADR-007 Sprint 6.1 PR1).
 #
 # Strategy:
-# - advisor_dinner handler emituje structured log line `anthropic_call`
-#   z `input_tokens`/`output_tokens` per call (patrz handlers/advisor_dinner/handler.py).
+# - advisor_chat handler emituje structured log line `anthropic_call`
+#   z `input_tokens`/`output_tokens` per call (patrz handlers/advisor_chat/handler.py).
 # - Metric filter capturuje obie wartości jako CloudWatch custom metrics
 #   w namespace Bodysync/Advisor.
 # - Alarm na sumę output tokens / dzień > 1.5M (~ $6 cost przy $4/Mtok output).
@@ -14,7 +15,7 @@
 
 resource "aws_cloudwatch_log_metric_filter" "anthropic_input_tokens" {
   name           = "${local.project}-anthropic-input-tokens"
-  log_group_name = "/aws/lambda/${local.project}-advisor-dinner"
+  log_group_name = "/aws/lambda/${local.project}-advisor-chat"
   # JSON pattern — handler emituje JsonFormatter z msg=anthropic_call.
   # `$.msg = "anthropic_call"` filtruje tylko te eventy (cache_hit logi
   # mają inny msg, są ignorowane).
@@ -27,14 +28,14 @@ resource "aws_cloudwatch_log_metric_filter" "anthropic_input_tokens" {
     default_value = "0"
   }
 
-  # Lambda log group jest tworzona przez `module.advisor_dinner` — depends_on
+  # Lambda log group jest tworzona przez `module.advisor_chat` — depends_on
   # zapewnia kolejność (filter wymaga istniejącego log group).
-  depends_on = [module.advisor_dinner]
+  depends_on = [module.advisor_chat]
 }
 
 resource "aws_cloudwatch_log_metric_filter" "anthropic_output_tokens" {
   name           = "${local.project}-anthropic-output-tokens"
-  log_group_name = "/aws/lambda/${local.project}-advisor-dinner"
+  log_group_name = "/aws/lambda/${local.project}-advisor-chat"
   pattern        = "{ $.msg = \"anthropic_call\" }"
 
   metric_transformation {
@@ -44,7 +45,7 @@ resource "aws_cloudwatch_log_metric_filter" "anthropic_output_tokens" {
     default_value = "0"
   }
 
-  depends_on = [module.advisor_dinner]
+  depends_on = [module.advisor_chat]
 }
 
 # Cost guard alarm — Anthropic Haiku 4.5 output ~$4/Mtok. Próg 1.5M tokens/day

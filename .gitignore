@@ -57,3 +57,9 @@ dist/
 *.pem
 *.key
 service-account*.json
+
+# Playwright MCP test artifacts (browser session logs/screenshots)
+.playwright-mcp/
+
+# Sample materiały do RAG seedu (Sprint 6.2) — lokalnie, copyright wydawców
+samples/
