@@ -8,10 +8,11 @@
 #   w namespace Bodysync/Advisor.
 # - Alarm na sumę output tokens / dzień > 1.5M (~ $6 cost przy $4/Mtok output).
 #   Defaultowy use case Owner ~5K tokens/dzień; 1.5M = 300x baseline = anomaly.
+# - SNS topic + email subscription do owner — alarm dzwoni gdy threshold
+#   przekroczony. Bez tego alarm tylko siedzi w CloudWatch (security review L item).
 #
-# MVP decision (per TODO.md): brak SNS topic + email subscription. Alarm w
-# CloudWatch Console widoczny manualnie. Post-MVP backlog: SNS + email
-# subscribe gdy realna integracja.
+# Post-deploy manual: owner musi kliknąć confirmation link w mailu (AWS SNS
+# wymaga subscriber opt-in po pierwszym CreateSubscription).
 
 resource "aws_cloudwatch_log_metric_filter" "anthropic_input_tokens" {
   name           = "${local.project}-anthropic-input-tokens"
@@ -62,10 +63,24 @@ resource "aws_cloudwatch_metric_alarm" "anthropic_daily_cost_high" {
   threshold           = 1500000
   alarm_description   = "Anthropic Haiku output tokens > 1.5M/day (~$6 cost). Daily baseline ~5k. Alarm = anomaly indicator (auth bypass, runaway loop, accidental ?force=true on every call)."
   treat_missing_data  = "notBreaching"
-  # MVP: brak SNS — alarm widoczny w CloudWatch Console. Post-MVP backlog:
-  # SNS topic + email subscribe owner gdy realna integracja.
-  alarm_actions = []
-  ok_actions    = []
+  alarm_actions       = [aws_sns_topic.cost_guard.arn]
+  ok_actions          = [aws_sns_topic.cost_guard.arn]
 
   tags = local.tags
+}
+
+# SNS topic dla cost guard alarms — output token threshold breach + recovery.
+# Subscriber: owner email (z locals.tf). AWS SNS wymaga manual confirmation —
+# po pierwszym apply owner dostaje mail z linkiem "Confirm subscription"; bez
+# kliknięcia subscription stays w stanie `PendingConfirmation` i nie dostaje
+# notyfikacji.
+resource "aws_sns_topic" "cost_guard" {
+  name = "${local.project}-cost-guard"
+  tags = local.tags
+}
+
+resource "aws_sns_topic_subscription" "cost_guard_owner_email" {
+  topic_arn = aws_sns_topic.cost_guard.arn
+  protocol  = "email"
+  endpoint  = local.owner_email
 }

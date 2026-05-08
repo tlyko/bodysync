@@ -10,6 +10,11 @@ locals {
 
   account_id = data.aws_caller_identity.current.account_id
 
+  # Owner email — SNS subscriber dla CloudWatch alarms (cost guard).
+  # AWS SNS wymaga manual confirmation linkiem w mailu po pierwszym
+  # subscribe (PendingConfirmation state until confirmed).
+  owner_email = "tlyko94@gmail.com"
+
   # Custom domain dla API GW — frontend na bodysync.pl używa same-parent
   # cookie domain (.bodysync.pl) by sesyjny JWT cookie był dostępny
   # cross-subdomain.
