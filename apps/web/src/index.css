@@ -310,6 +310,43 @@ td.date {
   margin-left: auto;
 }
 
+/* ─── Weight chart (Sprint 8) ─── */
+
+.weight-chart {
+  display: block;
+  width: 100%;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem;
+  box-sizing: border-box;
+}
+.weight-chart-empty {
+  background: var(--card);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  padding: 2rem;
+  text-align: center;
+  color: var(--text-muted);
+  font-size: 0.9rem;
+}
+.weight-chart-axis-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 10px;
+  fill: var(--text-muted);
+  text-anchor: start;
+}
+.weight-chart-axis-label.end,
+.weight-chart-axis-label.y-label {
+  text-anchor: end;
+}
+.weight-chart-grid {
+  stroke: var(--border);
+  stroke-width: 1;
+  stroke-dasharray: 3 3;
+  opacity: 0.5;
+}
+
 /* ─── Chat (Sprint 7) ─── */
 
 .chat-screen {
