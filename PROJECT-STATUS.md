@@ -42,17 +42,31 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Apple Health webhook (Bearer auth + 13 mapperów + idempotency) | ✅ shipped (PR #33/#34/#35; pending: SSM secrets + HAE iOS config) |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
-| Anthropic advisor (prompt cache, prompt injection guard) | 🟡 Sprint 6.1 PR1 shipped (PR #59, commits f113b30 + 26972f1 — `POST /api/advisor/chat` multi-turn, no RAG yet; rate limit 30/dzień; prompt injection guard via Pydantic validator; cost-guard CloudWatch alarm functional). Sprint 6.2 RAG (FAISS+S3+OpenAI embed) jako follow-up PR — planowany w `docs/TODO.md` Sprint 6.2 |
-| Recipe pipeline (PDF → DDB + FAISS) | 🟡 merged into Sprint 6 per ADR-007 (Sprint 8 nie istnieje osobno) — Sprint 6.2 PR2 |
+| Anthropic advisor (prompt cache, prompt injection guard) | ✅ shipped — Sprint 6.1 PR1 (PR #59) + Sprint 6.2 PR2 RAG (PR #65 + #66 + #67) deployed + smoke test verified 2026-05-08 |
+| Recipe pipeline (PDF → DDB + FAISS) | ✅ shipped via Sprint 6.2 PR2 — 139 recipes seeded w DDB `RECIPES`, FAISS index w S3 `recipes/`, end-to-end retrieval verified |
 | Frontend dashboard | ❌ |
 
 ## Open PRs
 
 `gh pr list` — żadnych otwartych w danej chwili.
 
-## Aktywny sprint — Sprint 6.2 (per ADR-007) — RAG seed + retrieval
+## Aktywny sprint — Sprint 6.2 ZAMKNIĘTY 2026-05-08, następny: Sprint 7 (Frontend dashboard)
 
-Sprint 6.1 PR1 zmergowany (PR #59, 2026-05-08). Następny krok: PR2 — RAG retrieval przez FAISS+S3+OpenAI embeddings, persona "asystent dietetyczny z biblioteki Lidla/Biedronki" (~150-200 przepisów z 5 PDFów w `samples/recipes/`).
+Sprint 6.2 PR2 RAG fully closed po smoke test 2026-05-08:
+- 139 recipes w DDB `RECIPES`, FAISS index 854KB + metadata 21KB w S3 `recipes/`
+- `POST /api/advisor/chat` z RAG: happy path call 1 — `used_recipes=5` (Ryż na mleku, Bajgiel z camembertem; similarity 0.53-0.57), `cache_creation_input_tokens=14420` (cache miss first call)
+- Cache hit verified call 2 (inny query "śniadanie wysokobialkowe"): `cache_read_input_tokens=11447`, retrieval przełączyło się na owsianka/budyń jaglany/bajgiel z jajkiem, latency 4.3s vs 11.8s
+- 1 known follow-up: `test_rag.py` skipped na CI (faiss+pytest segfault, commit 6cf6d08) — backlog item
+
+**Sprint 6.2 PR2 RAG — FULLY CLOSED (PRy #65 + #66 + #67, deployed + verified 2026-05-08):**
+- ✅ 7 stepów: SSM `/bodysync/openai/api_key`, `seed_recipes.py`, `rag.py`, chat integration, IAM (S3 `recipes/*` + DDB `RECIPES` + SSM openai), system prompt update, tests
+- ✅ 139 recipes seeded (target 150-200; akceptowalne, niektóre sub-skin niepasujące do regex pominięte)
+- ✅ FAISS `IndexFlatIP` + `text-embedding-3-small` (1536 dim), `recipes/faiss-index.bin` 854KB w S3
+- ✅ Smoke test 2/2 zielone: happy path RAG (kolacja query → 5 recipes z biblioteki), cache hit drugim callem (śniadanie query → 5 inne recipes)
+- ✅ Graceful degradation paths: `RAGUnavailableError` → handler 200 + `used_recipes=[]` (`apps/api/handlers/advisor_chat/rag.py:RAGUnavailableError`)
+- ✅ Anthropic `cache_control: ephemeral` aplikowane na `<retrieved_recipes>` block (multi-content array)
+- ✅ Follow-upy: PR #66 (CI faiss/numpy dev deps), PR #67 (openai SDK >=1.55 — fix httpx `proxies` kwarg incompat z 1.50)
+- 🟡 Known issue: `test_rag.py` skipped wszędzie (faiss+pytest segfault, commit 6cf6d08) — testy granularne istnieją (commit ef0a6ec), do rozwiązania w follow-up
 
 **Sprint 6.1 PR1 — FULLY CLOSED (PRy #59 + #61 + #62 + #63, deployed + verified 2026-05-08):**
 - ✅ `POST /api/advisor/chat` multi-turn z 24h DDB TTL (`CHAT#{date}#{turn_idx:04d}`)
@@ -67,23 +81,13 @@ Sprint 6.1 PR1 zmergowany (PR #59, 2026-05-08). Następny krok: PR2 — RAG retr
 - ✅ **SNS topic + email subscription dla cost-guard alarm** (PR #63) — alarm 1.5M tokens/dzień ~$6 dzwoni teraz na `tlyko94@gmail.com`. **Manual: owner klika "Confirm subscription" link w mailu** (jednorazowo, status `PendingConfirmation` do potwierdzenia)
 - ✅ **Smoke test 5/5 ZIELONE 2026-05-08:** happy path, multi-turn `<conversation_history>`, rate limit 429, prompt injection 400, CloudWatch token fields obecne
 
-**Sprint 6.2 PR2 — TODO (~9-10h, 7 stepów per `docs/TODO.md` Sprint 6.2):**
-- SSM `/bodysync/openai/api_key` (już wpisany 2026-05-07) + IAM
-- Seed script (`apps/api/scripts/seed_recipes.py`) — pdfplumber + Anthropic Vision fallback + OpenAI embed + FAISS build + S3 upload + DDB BatchWrite
-- RAG retrieval module (`apps/api/handlers/advisor_chat/rag.py`)
-- Integrate retrieval into chat flow (handler + service)
-- IAM `s3:GetObject` na recipes bucket + Lambda env + requirements (faiss-cpu, openai)
-- System prompt update — `<retrieved_recipes>` block (drop `# TODO(PR2)` markers)
-- Tests — RAG mock + full chat flow + FAISS failure handling + retrieval slugs in log
+**5 OPEN questions z ADR-007 (do rozwiązania post-PR2):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope (część rozwiązuje się przy Sprint 7).
 
-**Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.2 (PR #57).
-
-**5 OPEN questions z ADR-007 (do rozwiązania w PR2 lub wcześniej):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
-
-**Residualny risk dokumentowany (do follow-up post-PR2):**
+**Residualny risk dokumentowany (do follow-up):**
 - API GW per-second throttle nie skonfigurowany — burst attack z valid JWT może przebić 30/dzień quotę zanim quota się przeliczy. CloudWatch alarm 1.5M tokens/dzień + teraz SNS email pinguje przy breach.
 - ~~CloudWatch alarm bez SNS~~ — DONE w PR #63.
-- `requirements.txt` bez `--require-hashes` — backlog dla PR2 (FAISS native deps, większy attack surface).
+- `requirements.txt` bez `--require-hashes` — backlog (FAISS native deps, większy attack surface). Eskalowane post-Sprint 6.2 (Sprint 7 deps może uderzyć w build size / kolejne native libs).
+- `test_rag.py` skipped na CI (faiss+pytest segfault, commit 6cf6d08) — granular unit tests istnieją (ef0a6ec) ale full integration pominięty. Backlog: separate process per test lub pytest-forked.
 - `iam:ListInstanceProfilesForRole` w bootstrap policy — DONE w PR #61. Inne similar AWS provider 5.x perms mogą wystrzelić w przyszłości; dodawać reactively jeśli terraform apply zafailuje.
 
 ## Active backlog

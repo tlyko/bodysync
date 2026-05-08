@@ -1121,7 +1121,12 @@ Branch base: `main` (po merge debug PRs / refactor jako feat branch)
 
 ---
 
-## Sprint 6.2 — RAG seed + retrieval (advisor_chat enhancement, per ADR-007)
+## Sprint 6.2 — RAG seed + retrieval (advisor_chat enhancement, per ADR-007) — ✅ CLOSED 2026-05-08
+
+**Status:** Wszystkie 7 stepów zmergowane (PR #65 + follow-up #66 + #67). Smoke test verified end-to-end: `POST /api/advisor/chat` zwraca 200 z `used_recipes` populated z 5 real entries z biblioteki Lidla/Biedronki + Anthropic prompt cache hit potwierdzony drugim callem (`cache_read_input_tokens=11447`). Patrz `PROJECT-STATUS.md` Sprint 6.2 sekcja.
+
+Steps poniżej zachowane jako historyczna spec/source-of-truth dla follow-upów (test_rag.py CI repair, embedding refresh strategy z ADR-007 OPEN questions).
+
 Phase: 2 (advisor MVP slice — incremental strategy B, PR2/2)
 Estimated effort: ~9-10h (7 stepów: SSM, seed script, RAG runtime module, integration, IAM, system prompt update, tests)
 Branch base: `main` po merge Sprint 6.1 PR1
