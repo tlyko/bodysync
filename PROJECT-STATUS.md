@@ -42,32 +42,46 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Apple Health webhook (Bearer auth + 13 mapperów + idempotency) | ✅ shipped (PR #33/#34/#35; pending: SSM secrets + HAE iOS config) |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
-| Anthropic advisor (prompt cache, prompt injection guard) | 🟡 in progress (Sprint 6 MVP — `POST /api/advisor/chat` z RAG per ADR-007, supersedes ADR-006; planned w `docs/TODO.md` Sprint 6) |
-| Recipe pipeline (PDF → DDB + FAISS) | 🟡 merged into Sprint 6 per ADR-007 (Sprint 8 nie istnieje osobno) |
+| Anthropic advisor (prompt cache, prompt injection guard) | 🟡 Sprint 6.1 PR1 shipped (PR #59, commits f113b30 + 26972f1 — `POST /api/advisor/chat` multi-turn, no RAG yet; rate limit 30/dzień; prompt injection guard via Pydantic validator; cost-guard CloudWatch alarm functional). Sprint 6.2 RAG (FAISS+S3+OpenAI embed) jako follow-up PR — planowany w `docs/TODO.md` Sprint 6.2 |
+| Recipe pipeline (PDF → DDB + FAISS) | 🟡 merged into Sprint 6 per ADR-007 (Sprint 8 nie istnieje osobno) — Sprint 6.2 PR2 |
 | Frontend dashboard | ❌ |
 
 ## Open PRs
 
 `gh pr list` — żadnych otwartych w danej chwili.
 
-## Aktywny sprint — Sprint 6 (per ADR-007)
+## Aktywny sprint — Sprint 6.2 (per ADR-007) — RAG seed + retrieval
 
-Chat assistant + RAG. Refactor `advisor_dinner` → `advisor_chat`, multi-turn z 24h DDB TTL, plain POST + prompt caching, RAG przez FAISS+S3+OpenAI embeddings, persona "asystent dietetyczny z biblioteki Lidla/Biedronki" (~150-200 przepisów z 5 PDFów w `samples/recipes/`).
+Sprint 6.1 PR1 zmergowany (PR #59, 2026-05-08). Następny krok: PR2 — RAG retrieval przez FAISS+S3+OpenAI embeddings, persona "asystent dietetyczny z biblioteki Lidla/Biedronki" (~150-200 przepisów z 5 PDFów w `samples/recipes/`).
 
-**Strategia delivery — 2 PRy incremental (owner zaakceptował 2026-05-07):**
-- **PR1 — Sprint 6.1 — Chat refactor (~5h)** — chat działa bez RAG, generic Haiku knowledge
-- **PR2 — Sprint 6.2 — RAG (seed + retrieval, ~9-10h)** — dodaje konkretne przepisy do prompt context
+**Sprint 6.1 PR1 — DONE (commits f113b30 + 26972f1, PR #59):**
+- ✅ `POST /api/advisor/chat` multi-turn z 24h DDB TTL (`CHAT#{date}#{turn_idx:04d}`)
+- ✅ Rate limit 30 user turn/user/dzień → 429 `daily_quota`
+- ✅ System prompt 5 sekcji PL z anti-prompt-injection block
+- ✅ PR1 invariant: `used_recipes=[]` (placeholder dla PR2 RAG fill)
+- ✅ Prompt injection guard (closing-tag breakout + history-line spoofing) via Pydantic validator
+- ✅ TOCTOU silent overwrite guard (`put_item_idempotent` z retry)
+- ✅ Cost-guard CloudWatch alarm functional (logging allowlist token fields fix)
+- ✅ `AdvisorBackendError(reason, status_code)` z fixed vocabulary — Anthropic SDK body NIE leakuje do logów (ADR-007 OPEN-4)
+- 🟡 Manual smoke test post-deploy: `POST https://api.bodysync.pl/api/advisor/chat` → oczekiwane 200 + `ChatResponse`. **Pending owner action.**
 
-**Pre-req DONE:**
-- ✅ Anthropic key w SSM `/bodysync/anthropic/api_key` (109 chars, `sk-ant-api03-...`)
-- ✅ OpenAI key w SSM `/bodysync/openai/api_key` (do PR2)
-- ✅ ADR-006 superseded by ADR-007 (PR #55)
-- ✅ Sprint 8 (recipe pipeline) merged into Sprint 6
-- ✅ Smoke test PR #50 endpoint live 2026-05-07: `POST https://api.bodysync.pl/api/advisor/dinner` → 200 z real Anthropic Haiku response (po hot fix #58 build.py kopiującym `system_prompt.txt`)
+**Sprint 6.2 PR2 — TODO (~9-10h, 7 stepów per `docs/TODO.md` Sprint 6.2):**
+- SSM `/bodysync/openai/api_key` (już wpisany 2026-05-07) + IAM
+- Seed script (`apps/api/scripts/seed_recipes.py`) — pdfplumber + Anthropic Vision fallback + OpenAI embed + FAISS build + S3 upload + DDB BatchWrite
+- RAG retrieval module (`apps/api/handlers/advisor_chat/rag.py`)
+- Integrate retrieval into chat flow (handler + service)
+- IAM `s3:GetObject` na recipes bucket + Lambda env + requirements (faiss-cpu, openai)
+- System prompt update — `<retrieved_recipes>` block (drop `# TODO(PR2)` markers)
+- Tests — RAG mock + full chat flow + FAISS failure handling + retrieval slugs in log
 
-**Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2 (PR #57).
+**Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.2 (PR #57).
 
-**5 OPEN questions z ADR-007:** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
+**5 OPEN questions z ADR-007 (do rozwiązania w PR2 lub wcześniej):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
+
+**Residualny risk dokumentowany w PR1 (do follow-up):**
+- API GW per-second throttle nie skonfigurowany — burst attack z valid JWT może przebić 30/dzień quotę zanim quota się przeliczy. CloudWatch alarm 1.5M tokens/dzień jako absolute backstop.
+- CloudWatch alarm bez SNS — nie dzwoni. Backlog: dodać SNS topic dla pagingu.
+- `requirements.txt` bez `--require-hashes` — backlog dla PR2 (FAISS native deps, większy attack surface).
 
 ## Active backlog
 
