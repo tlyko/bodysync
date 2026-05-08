@@ -47,7 +47,7 @@ export function StatCard({ label, value, unit, accent = 'cyan', sparkData, chang
           )}
           {sparkData && sparkData.length >= 2 && !isEmpty && (
             <span className="stat-card-sparkline-wrap">
-              <Sparkline data={sparkData} color={sparkColor} width={100} height={32} />
+              <Sparkline data={sparkData} color={sparkColor} width={120} height={36} />
             </span>
           )}
         </div>
