@@ -40,7 +40,7 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | `/api/auth/google` endpoint | ✅ shipped (401 invalid / 400 Pydantic / 500 placeholders w SSM dopóki user nie wpisze) |
 | Security hardening (audit 2026-05-07: 2 Critical + 6 High) | ✅ shipped (PR #25-32) |
 | Apple Health webhook (Bearer auth + 13 mapperów + idempotency) | ✅ shipped (PR #33/#34/#35; pending: SSM secrets + HAE iOS config) |
-| Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
+| Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ✅ Sprint 4 shipped 2026-05-08/09 (PRy #91-#102) — OAuth start+callback z athlete-to-user mapping w SSM, webhook handler (handshake + idempotent events), DDB Streams `filter_criteria PK=EVENT#strava` → fetcher Lambda (token refresh, activity+streams, S3 raw), GET /api/activities, frontend Aktywności tab z Strava connect CTA + 10 ostatnich z `strava_backfill.py` |
 | Google Sheets read | ❌ |
 | Anthropic advisor (prompt cache, prompt injection guard) | ✅ Sprint 6.1 + 6.2 live (PRy #59/#62/#63/#65/#66/#67) — `POST /api/advisor/chat` multi-turn z RAG retrieval (139 przepisów Lidla/Biedronki, k=5 cosine), used_recipes populated, system prompt + retrieved_recipes oba cached (~13956 tokens razem) |
 | Recipe pipeline (PDF → DDB + FAISS) | ✅ Sprint 6.2 PR2 live (PR #65 + #67) — `seed_recipes.py` parsed 139 recipes z 5 PDFów; DDB `PK=RECIPES`; S3 `recipes/faiss-index.bin` (834KB) + `recipes-metadata.json` (21KB); embed cost ~$0.0003 |
@@ -50,9 +50,39 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 
 `gh pr list` — żadnych otwartych w danej chwili.
 
-## Aktywny sprint — żaden (Sprint 6 + 7 + 8 + 9 zamknięte 2026-05-08)
+## Aktywny sprint — żaden (Sprint 4 + 6 + 7 + 8 + 9 zamknięte 2026-05-08/09)
 
-Cztery sprinty shipped end-to-end w ciągu jednego dnia (2026-05-08): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets endpoint + 1:1 prototype port (Sprint 9). Następny ruch z backlogu — Sprint 4 Strava (zaległy), Sprint 4.5 Garmin Connect, lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, #19 frontend bundle code-split, #20 PDF hosting, #21 chat history GET endpoint).
+Pięć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets + 1:1 prototype port (Sprint 9) + **Strava integration** (Sprint 4 zaległy, finalnie shipped). Następny ruch z backlogu — Sprint 4.5 Garmin Connect, Google Sheets training plan, lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, #19 frontend bundle code-split, #20 PDF hosting, #21 chat history GET endpoint).
+
+**Sprint 4 — Strava integration — DONE (12 PRy #91-#102, ~1.5 dnia):**
+- ✅ Step 1 (PR #91) — `shared/strava.py` Pydantic schemas (StravaTokens, StravaWebhookEvent, StravaActivity z `extra='ignore'` ~80 fieldów Strava); SSM placeholders (athlete-to-user, subscription_id)
+- ✅ Step 2 (PR #92) — `strava_oauth_start` handler: JWT cookie auth → DDB CSRF state PK=`STRAVA_OAUTH_STATE#{state}` z TTL 10 min → 302 do strava.com/oauth/authorize z scope `read,activity:read_all`
+- ✅ Step 3 (PR #93) — `strava_oauth_callback`: atomic state delete (single-use nonce) + httpx token exchange + tokens persist do per-user SSM SecureString + athlete→user map update; **fixed-vocabulary error reasons**, audit log `does_not_log_token_or_code`
+- ✅ Step 4 (PR #94) — `strava_webhook` handler (GET handshake `hmac.compare_digest`, POST event idempotent PutItem `EVENT#strava`); Terraform 3 Lambda modules + 4 routes + IAM least-privilege
+- ✅ Step 5 (PR #95) — `strava_fetcher` Lambda (DDB Streams trigger z `filter_criteria PK=EVENT#strava` — CRITICAL bo single-table) + token refresh + `fetch_activity` (404 deletion race) + `fetch_streams` best-effort + S3 raw + DDB ACTIVITY. Plus `activities_list` GET endpoint
+- ✅ Step 6 (PR #96) — Frontend "Aktywności" tab: Strava connect CTA (orange brand gradient) → empty state, lub list 20 ostatnich z sport icons (33 emojis), distance/duration/pace/HR/kcal monospace, Polish relative dates ("Dziś"/"Wczoraj"/"5 dni temu"/"12 kwietnia")
+- ✅ Step 7 (PR #99) — `strava_subscribe.py` CLI: `subscribe`/`unsubscribe`/`list` subcommands; jednorazowo po deploy zarejestrowuje webhook URL w Strava + verify_token + subscription_id w SSM
+- ✅ Step 7.5 (PR #100) — `strava_backfill.py` CLI: po Authorize ingest 10 ostatnich activities (synthetic events `subscription_id=999999` → DDB Stream → fetcher) — UX bonus, owner widzi historię natychmiast
+- ✅ Bonus #101 — RecentActivitiesPanel w DashboardOverview (top 3 + link "Wszystkie →" do tab Aktywności)
+- ✅ Bonus #102 — timezone fix `api_read/service.py` UTC → `Europe/Warsaw` + frontend dynamic 1d label ("Dziś" / "Wczoraj (8 maja)" / "Najnowsze: X maja")
+
+**Sprint 4 hot-fixes (po deploy):**
+- PR #97 — `strava_oauth_start` requirements.txt missing pydantic (skeleton z Step 1 nie zaktualizowany w Step 2 → Runtime.ImportModuleError)
+- PR #98 — strava_oauth_start missing PyJWT (verify_jwt path, defensive audit innych handlerów)
+
+**Owner ręczne kroki podczas deploy:**
+1. Skasował stary Strava app sprawdzamszlak, stworzył nowy "bodysync" z callback domain `api.bodysync.pl`
+2. Wpisał `client_id` + `client_secret` do SSM (post Step 1 deploy)
+3. Po Step 7 ship: `python scripts/strava_subscribe.py subscribe --force` (force bo stary sprawdzamszlak subscription nadal w Strava — `unsubscribe` automatycznie)
+4. Po Step 7.5 ship: `python scripts/strava_backfill.py --user-id tomek --count 10` → 10 activities w DDB w ~5-30s
+
+**Sprint 4 metryki:**
+- Backend: 5 nowych Lambdas (oauth_start, oauth_callback, webhook, fetcher, activities_list) + 2 CLIs (subscribe, backfill)
+- Frontend: tab Aktywności + RecentActivitiesPanel w DashboardOverview
+- Tests: ~50 nowych (228 total, 6 skipped)
+- DDB Streams enabled na main table (NEW_IMAGE) z `filter_criteria PK=EVENT#strava`
+
+
 
 **Sprint 8 — Biometry dashboard polish — DONE (PRy #78 + #79 + #80 + #81 + #82 + #83 + #84):**
 - ✅ Sparkline (inline SVG, no deps) + StatCard z accent system per CLAUDE.md design tokens
