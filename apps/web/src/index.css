@@ -199,6 +199,117 @@ td.date {
   white-space: nowrap;
 }
 
+/* ─── Stat cards (Sprint 8) ─── */
+
+.stat-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 1rem 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  min-height: 110px;
+  position: relative;
+  overflow: hidden;
+}
+.stat-card::before {
+  content: '';
+  position: absolute;
+  top: -25px;
+  right: -25px;
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  opacity: 0.18;
+  pointer-events: none;
+}
+.stat-card-accent-cyan::before {
+  background: var(--cyan);
+}
+.stat-card-accent-green::before {
+  background: var(--green);
+}
+.stat-card-accent-orange::before {
+  background: var(--orange);
+}
+.stat-card-accent-purple::before {
+  background: var(--purple);
+}
+.stat-card-accent-red::before {
+  background: var(--red);
+}
+.stat-card-accent-muted::before {
+  background: var(--text-muted);
+  opacity: 0.08;
+}
+
+.stat-card-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 500;
+  position: relative;
+}
+.stat-card-value-row {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  position: relative;
+}
+.stat-card-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.8rem;
+  font-weight: 700;
+  line-height: 1;
+  color: var(--text);
+}
+.stat-card-accent-cyan .stat-card-value {
+  color: var(--cyan);
+}
+.stat-card-accent-green .stat-card-value {
+  color: var(--green);
+}
+.stat-card-accent-orange .stat-card-value {
+  color: var(--orange);
+}
+.stat-card-accent-purple .stat-card-value {
+  color: var(--purple);
+}
+.stat-card-accent-red .stat-card-value {
+  color: var(--red);
+}
+.stat-card-unit {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+
+.stat-card-bottom {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  position: relative;
+  margin-top: auto;
+}
+.stat-card-trend {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+.stat-card-trend.up {
+  color: var(--green);
+}
+.stat-card-trend.down {
+  color: var(--red);
+}
+.stat-card-sparkline-wrap {
+  display: inline-flex;
+  margin-left: auto;
+}
+
 /* ─── Chat (Sprint 7) ─── */
 
 .chat-screen {
