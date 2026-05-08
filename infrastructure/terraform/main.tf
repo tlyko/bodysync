@@ -82,6 +82,46 @@ resource "aws_lambda_permission" "google_auth_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
+# Sprint 7 — POST /api/auth/logout. Czyści Set-Cookie sesji.
+# Idempotent — nie wymaga JWT, nie czyta DDB/SSM. Najlżejszy handler:
+# 256MB / 5s, brak `extra_iam_statements` (tylko basic CloudWatch logs
+# z modułu Lambda).
+module "auth_logout" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "auth-logout"
+  source_zip    = "${path.module}/../../apps/api/dist/auth_logout.zip"
+  handler       = "handlers.auth_logout.handler.handler"
+  memory_size   = 256
+  timeout       = 5
+
+  environment = {
+    ENV = "prod"
+  }
+}
+
+resource "aws_apigatewayv2_integration" "auth_logout" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.auth_logout.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "auth_logout" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/auth/logout"
+  target    = "integrations/${aws_apigatewayv2_integration.auth_logout.id}"
+}
+
+resource "aws_lambda_permission" "auth_logout_apigw" {
+  statement_id  = "AllowAPIGWInvokeAuthLogout"
+  action        = "lambda:InvokeFunction"
+  function_name = module.auth_logout.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
 # Sprint 3 — Apple Health webhook. POST /api/health/webhook,
 # Bearer auth (per-user secret w SSM, server resolves user_id po hmac match).
 module "health_webhook" {
