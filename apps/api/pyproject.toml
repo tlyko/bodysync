@@ -29,6 +29,13 @@ dev = [
     "boto3>=1.35",
     "boto3-stubs[dynamodb,ssm]>=1.35",
     "anthropic>=0.40",
+    # Sprint 6.2 PR2 — `tests/handlers/advisor_chat/test_rag.py` requires
+    # numpy + openai + faiss-cpu (np.zeros / np.linalg.norm / FAISS mocks).
+    # Lambda runtime versions w handlers/advisor_chat/requirements.txt;
+    # duplikat tu jest test-time only (loose pin).
+    "numpy>=2.0",
+    "openai>=1.50",
+    "faiss-cpu>=1.9",
 ]
 
 # Sprint 6.2 PR2 Step 2 — `scripts/seed_recipes.py` deps. Local-only,
