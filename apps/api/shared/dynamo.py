@@ -67,6 +67,24 @@ def put_item_idempotent(pk: str, sk: str, attrs: dict[str, Any]) -> bool:
     return True
 
 
+def delete_item_if_exists(pk: str, sk: str) -> dict[str, Any] | None:
+    """Atomic single-use delete — returns old image lub None gdy brak.
+
+    Używane dla CSRF state nonces (Sprint 4 Strava OAuth callback):
+    sukces = state użyty raz; subsequent delete = None = invalid_state.
+    `attribute_exists` ConditionalCheckFailedException → None (item nie istniał).
+    """
+    try:
+        resp = _table.delete_item(
+            Key={"PK": pk, "SK": sk},
+            ConditionExpression="attribute_exists(PK)",
+            ReturnValues="ALL_OLD",
+        )
+    except _resource.meta.client.exceptions.ConditionalCheckFailedException:
+        return None
+    return dict(resp.get("Attributes") or {}) or None
+
+
 def query_by_pk(pk: str, sk_prefix: str | None = None) -> list[dict[str, Any]]:
     """Query items for a given PK, optionally filtered by SK begins_with."""
     kwargs: dict[str, Any] = {"KeyConditionExpression": "PK = :pk"}

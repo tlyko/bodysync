@@ -40,6 +40,22 @@ class SecretMisconfiguredError(RuntimeError):
     """
 
 
+def put_param(name: str, value: str, *, secure: bool = True, overwrite: bool = True) -> None:
+    """Pisze SSM parameter + uniewazniamy cache lokalnie.
+
+    Sprint 4: OAuth callback persists tokens per-user pod
+    `/bodysync/strava/{user_id}/tokens` (SecureString). `overwrite=True`
+    bo refresh token rotacja oczekuje update'u tego samego klucza.
+    """
+    _client.put_parameter(
+        Name=name,
+        Value=value,
+        Type="SecureString" if secure else "String",
+        Overwrite=overwrite,
+    )
+    _cache.pop(name, None)
+
+
 def load_secure_secret(name: str, *, min_length: int = 32) -> str:
     """Pobierz SecureString z SSM, fail-fast jeśli PLACEHOLDER lub za krótki.
 
