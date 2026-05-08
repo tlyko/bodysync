@@ -54,16 +54,18 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 
 Sprint 6.1 PR1 zmergowany (PR #59, 2026-05-08). Następny krok: PR2 — RAG retrieval przez FAISS+S3+OpenAI embeddings, persona "asystent dietetyczny z biblioteki Lidla/Biedronki" (~150-200 przepisów z 5 PDFów w `samples/recipes/`).
 
-**Sprint 6.1 PR1 — DONE (commits f113b30 + 26972f1, PR #59):**
+**Sprint 6.1 PR1 — FULLY CLOSED (PRy #59 + #61 + #62 + #63, deployed + verified 2026-05-08):**
 - ✅ `POST /api/advisor/chat` multi-turn z 24h DDB TTL (`CHAT#{date}#{turn_idx:04d}`)
 - ✅ Rate limit 30 user turn/user/dzień → 429 `daily_quota`
-- ✅ System prompt 5 sekcji PL z anti-prompt-injection block
+- ✅ System prompt 5+ sekcji PL (24KB / 10803 tokens — z buforem nad Haiku 4.5 minimum 4096) z anti-prompt-injection block
 - ✅ PR1 invariant: `used_recipes=[]` (placeholder dla PR2 RAG fill)
 - ✅ Prompt injection guard (closing-tag breakout + history-line spoofing) via Pydantic validator
 - ✅ TOCTOU silent overwrite guard (`put_item_idempotent` z retry)
 - ✅ Cost-guard CloudWatch alarm functional (logging allowlist token fields fix)
 - ✅ `AdvisorBackendError(reason, status_code)` z fixed vocabulary — Anthropic SDK body NIE leakuje do logów (ADR-007 OPEN-4)
-- 🟡 Manual smoke test post-deploy: `POST https://api.bodysync.pl/api/advisor/chat` → oczekiwane 200 + `ChatResponse`. **Pending owner action.**
+- ✅ **Anthropic prompt cache verified live** — call 1 `cache_creation_input_tokens=10803`; call 2 `cache_read_input_tokens=10803` → ~80-90% input cost savings każdy follow-up w 5min window (PR #62, fix po smoke test wykrył miss przez za krótki prompt vs Haiku 4.5 minimum 4096 tokens)
+- ✅ **SNS topic + email subscription dla cost-guard alarm** (PR #63) — alarm 1.5M tokens/dzień ~$6 dzwoni teraz na `tlyko94@gmail.com`. **Manual: owner klika "Confirm subscription" link w mailu** (jednorazowo, status `PendingConfirmation` do potwierdzenia)
+- ✅ **Smoke test 5/5 ZIELONE 2026-05-08:** happy path, multi-turn `<conversation_history>`, rate limit 429, prompt injection 400, CloudWatch token fields obecne
 
 **Sprint 6.2 PR2 — TODO (~9-10h, 7 stepów per `docs/TODO.md` Sprint 6.2):**
 - SSM `/bodysync/openai/api_key` (już wpisany 2026-05-07) + IAM
@@ -78,10 +80,11 @@ Sprint 6.1 PR1 zmergowany (PR #59, 2026-05-08). Następny krok: PR2 — RAG retr
 
 **5 OPEN questions z ADR-007 (do rozwiązania w PR2 lub wcześniej):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
 
-**Residualny risk dokumentowany w PR1 (do follow-up):**
-- API GW per-second throttle nie skonfigurowany — burst attack z valid JWT może przebić 30/dzień quotę zanim quota się przeliczy. CloudWatch alarm 1.5M tokens/dzień jako absolute backstop.
-- CloudWatch alarm bez SNS — nie dzwoni. Backlog: dodać SNS topic dla pagingu.
+**Residualny risk dokumentowany (do follow-up post-PR2):**
+- API GW per-second throttle nie skonfigurowany — burst attack z valid JWT może przebić 30/dzień quotę zanim quota się przeliczy. CloudWatch alarm 1.5M tokens/dzień + teraz SNS email pinguje przy breach.
+- ~~CloudWatch alarm bez SNS~~ — DONE w PR #63.
 - `requirements.txt` bez `--require-hashes` — backlog dla PR2 (FAISS native deps, większy attack surface).
+- `iam:ListInstanceProfilesForRole` w bootstrap policy — DONE w PR #61. Inne similar AWS provider 5.x perms mogą wystrzelić w przyszłości; dodawać reactively jeśli terraform apply zafailuje.
 
 ## Active backlog
 
