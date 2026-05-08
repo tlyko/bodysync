@@ -271,6 +271,34 @@ code {
   letter-spacing: 0.08em;
   color: var(--text);
 }
+.section-panel-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+.section-panel-head .section-panel-title {
+  margin: 0 0 1rem;
+}
+.section-panel-link {
+  background: transparent;
+  border: 0;
+  color: var(--cyan);
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  padding: 0;
+  font-family: inherit;
+}
+.section-panel-link:hover {
+  text-decoration: underline;
+}
+.recent-activities-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: flex-start;
+}
 .placeholder-text {
   margin: 0;
   color: var(--text-muted);
