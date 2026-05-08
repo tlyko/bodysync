@@ -49,9 +49,15 @@ class JsonFormatter(logging.Formatter):
             "status_code",
             "exc_type",
             # advisor_chat RAG observability (Sprint 6.2 PR2 per ADR-007
-            # OPEN-4) — slugi (NIE content) + count w `chat_turn_complete`.
+            # OPEN-4) — slugi (NIE content) + count w `chat_turn_complete`
+            # plus `rag_retrieve_complete` w rag.py: query_length, top_score,
+            # results_count, slugs (per-call detailed metrics).
             "retrieved_slugs",
             "retrieved_count",
+            "query_length",
+            "top_score",
+            "results_count",
+            "slugs",
         ):
             value = getattr(record, key, None)
             if value is not None:

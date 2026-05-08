@@ -42,49 +42,56 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Apple Health webhook (Bearer auth + 13 mapperów + idempotency) | ✅ shipped (PR #33/#34/#35; pending: SSM secrets + HAE iOS config) |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ❌ |
 | Google Sheets read | ❌ |
-| Anthropic advisor (prompt cache, prompt injection guard) | 🟡 Sprint 6.1 PR1 shipped (PR #59, commits f113b30 + 26972f1 — `POST /api/advisor/chat` multi-turn, no RAG yet; rate limit 30/dzień; prompt injection guard via Pydantic validator; cost-guard CloudWatch alarm functional). Sprint 6.2 RAG (FAISS+S3+OpenAI embed) jako follow-up PR — planowany w `docs/TODO.md` Sprint 6.2 |
-| Recipe pipeline (PDF → DDB + FAISS) | 🟡 merged into Sprint 6 per ADR-007 (Sprint 8 nie istnieje osobno) — Sprint 6.2 PR2 |
+| Anthropic advisor (prompt cache, prompt injection guard) | ✅ Sprint 6.1 + 6.2 live (PRy #59/#62/#63/#65/#66/#67) — `POST /api/advisor/chat` multi-turn z RAG retrieval (139 przepisów Lidla/Biedronki, k=5 cosine), used_recipes populated, system prompt + retrieved_recipes oba cached (~13956 tokens razem) |
+| Recipe pipeline (PDF → DDB + FAISS) | ✅ Sprint 6.2 PR2 live (PR #65 + #67) — `seed_recipes.py` parsed 139 recipes z 5 PDFów; DDB `PK=RECIPES`; S3 `recipes/faiss-index.bin` (834KB) + `recipes-metadata.json` (21KB); embed cost ~$0.0003 |
 | Frontend dashboard | ❌ |
 
 ## Open PRs
 
 `gh pr list` — żadnych otwartych w danej chwili.
 
-## Aktywny sprint — Sprint 6.2 (per ADR-007) — RAG seed + retrieval
+## Aktywny sprint — żaden (Sprint 6 zamknięty 2026-05-08)
 
-Sprint 6.1 PR1 zmergowany (PR #59, 2026-05-08). Następny krok: PR2 — RAG retrieval przez FAISS+S3+OpenAI embeddings, persona "asystent dietetyczny z biblioteki Lidla/Biedronki" (~150-200 przepisów z 5 PDFów w `samples/recipes/`).
+Sprint 6 (chat advisor + RAG) **fully shipped i live verified end-to-end** w ciągu jednego dnia (2026-05-08). Następny ruch wybierany z backlogu — Sprint 4 Strava (zaległy), Sprint 4.5 Garmin Connect, lub Sprint 7 Frontend chat UI.
 
-**Sprint 6.1 PR1 — FULLY CLOSED (PRy #59 + #61 + #62 + #63, deployed + verified 2026-05-08):**
+**Sprint 6.1 PR1 — chat refactor multi-turn — DONE (PRy #59 + #61 + #62 + #63):**
 - ✅ `POST /api/advisor/chat` multi-turn z 24h DDB TTL (`CHAT#{date}#{turn_idx:04d}`)
 - ✅ Rate limit 30 user turn/user/dzień → 429 `daily_quota`
-- ✅ System prompt 5+ sekcji PL (24KB / 10803 tokens — z buforem nad Haiku 4.5 minimum 4096) z anti-prompt-injection block
-- ✅ PR1 invariant: `used_recipes=[]` (placeholder dla PR2 RAG fill)
+- ✅ System prompt 9 sekcji PL (26KB / ~10800 tokens — over Haiku 4.5 minimum 4096) z anti-prompt-injection block
 - ✅ Prompt injection guard (closing-tag breakout + history-line spoofing) via Pydantic validator
 - ✅ TOCTOU silent overwrite guard (`put_item_idempotent` z retry)
-- ✅ Cost-guard CloudWatch alarm functional (logging allowlist token fields fix)
-- ✅ `AdvisorBackendError(reason, status_code)` z fixed vocabulary — Anthropic SDK body NIE leakuje do logów (ADR-007 OPEN-4)
-- ✅ **Anthropic prompt cache verified live** — call 1 `cache_creation_input_tokens=10803`; call 2 `cache_read_input_tokens=10803` → ~80-90% input cost savings każdy follow-up w 5min window (PR #62, fix po smoke test wykrył miss przez za krótki prompt vs Haiku 4.5 minimum 4096 tokens)
-- ✅ **SNS topic + email subscription dla cost-guard alarm** (PR #63) — alarm 1.5M tokens/dzień ~$6 dzwoni teraz na `tlyko94@gmail.com`. **Manual: owner klika "Confirm subscription" link w mailu** (jednorazowo, status `PendingConfirmation` do potwierdzenia)
-- ✅ **Smoke test 5/5 ZIELONE 2026-05-08:** happy path, multi-turn `<conversation_history>`, rate limit 429, prompt injection 400, CloudWatch token fields obecne
+- ✅ `AdvisorBackendError(reason, status_code)` z fixed vocabulary — SDK body NIE leakuje do logów (ADR-007 OPEN-4)
+- ✅ Anthropic prompt cache verified — call 1 `cache_creation=10803`; call 2 `cache_read=10803` (~80-90% cost savings)
+- ✅ Cost-guard CloudWatch alarm 1.5M tokens/dzień + SNS email subscription (Gmail unsub'uje — backlog #17 Telegram bot)
 
-**Sprint 6.2 PR2 — TODO (~9-10h, 7 stepów per `docs/TODO.md` Sprint 6.2):**
-- SSM `/bodysync/openai/api_key` (już wpisany 2026-05-07) + IAM
-- Seed script (`apps/api/scripts/seed_recipes.py`) — pdfplumber + Anthropic Vision fallback + OpenAI embed + FAISS build + S3 upload + DDB BatchWrite
-- RAG retrieval module (`apps/api/handlers/advisor_chat/rag.py`)
-- Integrate retrieval into chat flow (handler + service)
-- IAM `s3:GetObject` na recipes bucket + Lambda env + requirements (faiss-cpu, openai)
-- System prompt update — `<retrieved_recipes>` block (drop `# TODO(PR2)` markers)
-- Tests — RAG mock + full chat flow + FAISS failure handling + retrieval slugs in log
+**Sprint 6.2 PR2 — RAG seed + retrieval — DONE (PRy #65 + #66 + #67):**
+- ✅ `seed_recipes.py` — 139 recipes parsed z 5 PDFów (pdfplumber, NIE Vision YAGNI), 70 wersji kobiet + 69 mężczyzn jako osobne sluga
+- ✅ OpenAI text-embedding-3-small batch embed (~$0.0003 jednorazowo); FAISS IndexFlatIP (cosine via L2)
+- ✅ S3 `recipes/faiss-index.bin` (834KB) + `recipes-metadata.json` (21KB)
+- ✅ DDB `PK=RECIPES, SK=RECIPE#{meal_type}#{slug}` z full attrs (name, kcal, makro, ingredients, instructions, source)
+- ✅ `rag.retrieve(query, k=5)` runtime z lazy cold-start init (S3 download FAISS + metadata, ~500ms cold start regression akceptowalne)
+- ✅ Multi-block content array w Anthropic call: system prompt + `<retrieved_recipes>` block oba `cache_control: ephemeral` (~13956 tokens cached razem)
+- ✅ Graceful degradation: `RAGUnavailableError` (S3/OpenAI/index missing) → handler 200 + `used_recipes=[]` + log warning
+- ✅ Lambda zip raw 35MB compressed / 96MB uncompressed (50/250MB limits) — Layer NIE potrzebny
+- ✅ IAM minimal: S3 `GetObject recipes/*` + SSM `openai/api_key` + DDB Query/GetItem (cross-PK; defense-in-code w `rag.py` literalne `PK=RECIPES`)
+- ✅ Smoke test live verified: `used_recipes: Array(5)`, Haiku cytuje DOKŁADNIE name z biblioteki ("Bajgiel z jajkiem, awokado i halloumi"), `chat_turn_complete` log ma `retrieved_count: 5` + `retrieved_slugs: [...]`
 
-**Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.2 (PR #57).
+**Wybrane bugfixes / lessons learned (chronologicznie):**
+- PR #61 — bootstrap OIDC missing `iam:ListInstanceProfilesForRole` (AWS provider 5.x delete prereq)
+- PR #62 — system_prompt 7KB → 26KB (Haiku 4.5 cache minimum 4096 tokens — pre-fix cache silently dropped)
+- PR #63 — SNS topic + email subscription do cost-guard alarm (Gmail auto-unsubscribe'uje — backlog Telegram replacement)
+- PR #66 — `terraform import` SSM `/bodysync/openai/api_key` (owner stworzył ręcznie pre-PR65, conflict)
+- PR #67 — bump `openai==1.50.*` → `openai>=1.55,<2.0` (httpx 0.28 incompat: `TypeError: 'proxies' kwarg`)
 
-**5 OPEN questions z ADR-007 (do rozwiązania w PR2 lub wcześniej):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
+**Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2.
 
-**Residualny risk dokumentowany (do follow-up post-PR2):**
-- API GW per-second throttle nie skonfigurowany — burst attack z valid JWT może przebić 30/dzień quotę zanim quota się przeliczy. CloudWatch alarm 1.5M tokens/dzień + teraz SNS email pinguje przy breach.
-- ~~CloudWatch alarm bez SNS~~ — DONE w PR #63.
-- `requirements.txt` bez `--require-hashes` — backlog dla PR2 (FAISS native deps, większy attack surface).
-- `iam:ListInstanceProfilesForRole` w bootstrap policy — DONE w PR #61. Inne similar AWS provider 5.x perms mogą wystrzelić w przyszłości; dodawać reactively jeśli terraform apply zafailuje.
+**Backlog post-Sprint 6 (do TaskList):**
+- **#17 Telegram bot subscriber** — replacement Gmail email który auto-unsub'uje SNS notifications (cost-guard alarm musi dzwonić)
+- **#18 Restore test_rag.py** — investigate faiss-cpu + pytest assertion rewrite segfault na macOS aarch64 + Linux GHA. Granular RAG unit tests skipped (`pytest.mark.skip`); coverage w `test_handler.py` integration tests
+- **API GW per-second throttle** — burst attack z valid JWT może przebić 30/dzień quotę zanim się przeliczy. CloudWatch alarm jako absolute backstop działa
+- **`requirements.txt` bez `--require-hashes`** — `pip-compile --generate-hashes` przed kolejnym sprintem z native deps
+
+**5 OPEN questions z ADR-007 (post-MVP):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
 
 ## Active backlog
 
