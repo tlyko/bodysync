@@ -44,6 +44,14 @@ resource "aws_dynamodb_table" "data" {
     enabled        = true
   }
 
+  # Sprint 4 — DDB Streams trigger dla strava_fetcher Lambda. NEW_IMAGE
+  # daje fetcherowi pełen item EVENT#strava (user_id, object_id, etc.) bez
+  # second GetItem call. Aws_lambda_event_source_mapping z filter_criteria
+  # `PK = EVENT#strava` zapewnia że fetcher invoked TYLKO dla tego prefix
+  # (nie dla każdego biometry/activity/recipe write w single-table).
+  stream_enabled   = true
+  stream_view_type = "NEW_IMAGE"
+
   lifecycle {
     prevent_destroy = true
   }
