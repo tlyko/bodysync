@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import logoIcon from '../../assets/logo-icon.svg';
 
 export type AppTab =
   | 'overview'
@@ -89,7 +90,13 @@ export function SidebarNav({ active, onSelect, userLabel, onLogout }: Props) {
   return (
     <aside className="app-sidebar" aria-label="Główne sekcje">
       <div className="app-sidebar-brand">
-        <span className="app-sidebar-logo" aria-hidden />
+        <img
+          src={logoIcon}
+          alt=""
+          className="app-sidebar-logo"
+          width={36}
+          height={36}
+        />
         <span className="app-sidebar-brand-text">bodysync</span>
       </div>
       <nav className="app-sidebar-nav">

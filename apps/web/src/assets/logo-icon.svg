@@ -1,0 +1,26 @@
+<svg width="512" height="512" viewBox="0 0 512 512" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="#00f0ff"/>
+<stop offset="50%" stop-color="#7b2cff"/>
+<stop offset="100%" stop-color="#ff2d9c"/>
+</linearGradient>
+</defs>
+
+<rect width="512" height="512" rx="96" fill="#0a0e1a"/>
+
+<polygon points="256,100 396,180 396,332 256,412 116,332 116,180"
+fill="#0a0e1a" stroke="url(#neon)" stroke-width="10" stroke-linejoin="round"/>
+
+<polygon points="256,128 372,194 372,318 256,384 140,318 140,194"
+fill="none" stroke="#00f0ff" stroke-width="1.5" opacity="0.4"/>
+
+<path d="M 130,256 L 170,256 L 185,210 L 205,310 L 225,170 L 245,322 L 256,256"
+fill="none" stroke="#00f0ff" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
+<path d="M 256,256 L 267,210 L 287,322 L 307,170 L 327,310 L 342,256 L 382,256"
+fill="none" stroke="#ff2d9c" stroke-width="9" stroke-linejoin="round" stroke-linecap="round"/>
+
+<circle cx="256" cy="256" r="14" fill="#ffffff"/>
+<circle cx="256" cy="256" r="24" fill="none" stroke="#ffffff" stroke-width="2" opacity="0.6"/>
+<circle cx="256" cy="256" r="36" fill="none" stroke="#00f0ff" stroke-width="1.5" opacity="0.5"/>
+</svg>
