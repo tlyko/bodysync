@@ -1,6 +1,13 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { getActivities, getBiometry } from '../api';
-import { buildSeries, latestValue, trendPct, valueForDate, type SeriesPoint } from '../biometry';
+import {
+  buildSeries,
+  latestValue,
+  sumSeries,
+  trendPct,
+  valueForDate,
+  type SeriesPoint,
+} from '../biometry';
 import type { Activity, BiometryDay, Me } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
 import { ActivitiesView } from './dashboard/ActivitiesView';
@@ -249,7 +256,11 @@ function DashboardOverview({
   trendWindow,
   onSelectTab,
 }: OverviewProps) {
-  const kcalActive = buildSeries(days, 'kcal_active');
+  // "Spalone kalorie" = active + basal (Garmin/Apple Total Daily Energy
+  // Expenditure). Owner: "nie interesuje mnie kcal aktywne, chce sumę".
+  const kcalActiveSeries = buildSeries(days, 'kcal_active');
+  const kcalBasalSeries = buildSeries(days, 'kcal_basal');
+  const kcalBurned = sumSeries(kcalActiveSeries, kcalBasalSeries);
   const kcalIn = buildSeries(days, 'kcal_in');
   const stepsSeries = buildSeries(days, 'steps');
   const weightSeries = buildSeries(days, 'weight');
@@ -279,12 +290,12 @@ function DashboardOverview({
 
       <div className="stat-grid">
         <MetricStatCard
-          label="Kcal aktywne"
-          series={kcalActive}
+          label="Spalone kalorie"
+          series={kcalBurned}
           unit="kcal"
           accent="orange"
           icon={<FlameIcon />}
-          fmt={(v) => Math.round(v).toString()}
+          fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
         />
         <TodayMetricStatCard
@@ -468,6 +479,8 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
   const sleepSeries = buildSeries(days, 'sleep');
   const stepsSeries = buildSeries(days, 'steps');
   const kcalActiveSeries = buildSeries(days, 'kcal_active');
+  const kcalBasalSeries = buildSeries(days, 'kcal_basal');
+  const kcalBurnedSeries = sumSeries(kcalActiveSeries, kcalBasalSeries);
   const restingHrSeries = buildSeries(days, 'resting_hr');
   const bodyFatSeries = buildSeries(days, 'body_fat');
   const weightSeries = buildSeries(days, 'weight');
@@ -506,12 +519,12 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           trendWindow={trendWindow}
         />
         <MetricStatCard
-          label="Kcal aktywne"
-          series={kcalActiveSeries}
+          label="Spalone kalorie"
+          series={kcalBurnedSeries}
           unit="kcal"
           accent="orange"
           icon={<FlameIcon />}
-          fmt={(v) => Math.round(v).toString()}
+          fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
         />
         <MetricStatCard
