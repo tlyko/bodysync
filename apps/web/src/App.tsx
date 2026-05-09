@@ -48,7 +48,25 @@ export function App() {
     return <div className="error-screen">Błąd: {auth.message}</div>;
   }
   if (auth.status === 'logged_in') {
-    return <Dashboard me={auth.me} onLogout={handleLogout} />;
+    return (
+      <>
+        {import.meta.env.VITE_PREVIEW_MODE === 'true' && <PreviewBanner />}
+        <Dashboard me={auth.me} onLogout={handleLogout} />
+      </>
+    );
   }
-  return <LoginScreen onLoginSuccess={checkSession} />;
+  return (
+    <>
+      {import.meta.env.VITE_PREVIEW_MODE === 'true' && <PreviewBanner />}
+      <LoginScreen onLoginSuccess={checkSession} />
+    </>
+  );
+}
+
+function PreviewBanner() {
+  return (
+    <div className="preview-banner" role="status" aria-label="Preview mode">
+      🔧 Preview — dane są mock'owane, brak prawdziwego API
+    </div>
+  );
 }
