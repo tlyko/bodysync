@@ -35,4 +35,24 @@ resource "aws_apigatewayv2_stage" "default" {
       integrationLatency = "$context.integrationLatency"
     })
   }
+
+  # Defense-in-depth throttling (security audit 2026-05-09 W3). 2-user prod
+  # — 50 req/s sustained / 100 burst jest hojnie, ale blokuje DDoS i auth
+  # spam (każdy /api/auth/google = JWKS fetch + crypto verify, $).
+  default_route_settings {
+    throttling_rate_limit  = var.default_throttle_rate
+    throttling_burst_limit = var.default_throttle_burst
+  }
+
+  # Per-route override dla advisor chat — chroni Anthropic API key cost.
+  # Burst 10 / sustained 5 req/s wystarcza na realne usage (DAILY_USER_TURN_LIMIT
+  # = 30/dzień DDB-side i tak gateway'uje), ale blokuje burst attack z
+  # valid JWT (np. po XSS via 'unsafe-inline' style-src — backlog W4).
+  # Nie używamy `for_each` bo aktualnie tylko advisor ma override; gdy
+  # dojdzie więcej routes przemyśleć map var.
+  route_settings {
+    route_key              = "POST /api/advisor/chat"
+    throttling_rate_limit  = var.advisor_chat_throttle_rate
+    throttling_burst_limit = var.advisor_chat_throttle_burst
+  }
 }
