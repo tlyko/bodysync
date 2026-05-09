@@ -36,6 +36,36 @@ resource "aws_s3_bucket_public_access_block" "data" {
   restrict_public_buckets = true
 }
 
+# Defense-in-depth: explicit deny dla request'ów po HTTP. AWS S3 redirects
+# HTTP→HTTPS automatycznie, ale wstępny request po plain HTTP może wyciec
+# metadata (bucket name w Host header, path). Compliance baseline (Security Hub).
+resource "aws_s3_bucket_policy" "data_deny_non_tls" {
+  bucket = aws_s3_bucket.data.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyNonTLS"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.data.arn,
+          "${aws_s3_bucket.data.arn}/*",
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      },
+    ]
+  })
+
+  depends_on = [aws_s3_bucket_public_access_block.data]
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "data" {
   bucket = aws_s3_bucket.data.id
 
