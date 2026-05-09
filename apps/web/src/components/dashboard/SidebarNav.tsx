@@ -83,7 +83,7 @@ const PlanIcon = () => (
 const ITEMS: Item[] = [
   { id: 'overview', label: 'Dashboard', icon: <ChartIcon /> },
   { id: 'activities', label: 'Aktywności', icon: <RunIcon /> },
-  { id: 'plan', label: 'Plan', icon: <PlanIcon /> },
+  { id: 'plan', label: 'Plan Treningowy', icon: <PlanIcon /> },
   { id: 'body', label: 'Ciało', icon: <ScaleIcon /> },
   { id: 'nutrition', label: 'Odżywianie', icon: <FoodIcon /> },
   { id: 'recipes', label: 'Przepisy AI', icon: <RecipeIcon /> },
