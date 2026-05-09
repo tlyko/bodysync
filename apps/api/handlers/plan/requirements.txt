@@ -1,0 +1,6 @@
+# Google Sheets API client. cache_discovery=False used in service.py żeby
+# uniknąć /tmp filesystem cache w Lambda cold start.
+google-api-python-client==2.150.*
+google-auth==2.35.*
+pydantic==2.10.*
+boto3==1.35.*
