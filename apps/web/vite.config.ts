@@ -9,5 +9,8 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: true,
+    // Top-level `await` w main.tsx (preview mock dynamic import) wymaga
+    // target esnext / chrome89+. Modern browsers OK; iOS 15+ supported.
+    target: 'esnext',
   },
 });

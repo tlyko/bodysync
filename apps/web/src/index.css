@@ -231,6 +231,28 @@ code {
   gap: 1.5rem;
 }
 
+/* ─── Preview banner (CF Workers Builds branch deployments) ─── */
+.preview-banner {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  z-index: 100;
+  padding: 0.4rem 1rem;
+  background: linear-gradient(135deg, var(--orange), var(--purple));
+  color: var(--bg);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-align: center;
+  letter-spacing: 0.02em;
+}
+/* Push wszystko poniżej banner'a */
+body:has(.preview-banner) .app-shell,
+body:has(.preview-banner) .login-screen {
+  padding-top: 1.85rem;
+}
+
 /* ─── Plan tab (Sprint 5 — Google Sheets training plan) ─── */
 .plan-screen {
   display: flex;
