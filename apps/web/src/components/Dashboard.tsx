@@ -164,7 +164,7 @@ export function Dashboard({ me, onLogout }: Props) {
 const TAB_TITLES: Record<AppTab, string> = {
   overview: 'Dashboard',
   activities: 'Aktywności',
-  plan: 'Plan',
+  plan: 'Plan Treningowy',
   body: 'Ciało',
   nutrition: 'Odżywianie',
   recipes: 'Przepisy AI',
