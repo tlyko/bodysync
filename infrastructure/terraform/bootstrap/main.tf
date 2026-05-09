@@ -35,6 +35,35 @@ resource "aws_s3_bucket_public_access_block" "tf_state" {
   restrict_public_buckets = true
 }
 
+# Defense-in-depth: explicit deny non-TLS. Bucket trzyma terraform.tfstate
+# z metadata o całej infrastrukturze — żaden non-TLS request nie ma prawa bytu.
+resource "aws_s3_bucket_policy" "tf_state_deny_non_tls" {
+  bucket = aws_s3_bucket.tf_state.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Sid       = "DenyNonTLS"
+        Effect    = "Deny"
+        Principal = "*"
+        Action    = "s3:*"
+        Resource = [
+          aws_s3_bucket.tf_state.arn,
+          "${aws_s3_bucket.tf_state.arn}/*",
+        ]
+        Condition = {
+          Bool = {
+            "aws:SecureTransport" = "false"
+          }
+        }
+      },
+    ]
+  })
+
+  depends_on = [aws_s3_bucket_public_access_block.tf_state]
+}
+
 resource "aws_s3_bucket_lifecycle_configuration" "tf_state" {
   bucket = aws_s3_bucket.tf_state.id
 
