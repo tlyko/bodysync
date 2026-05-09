@@ -230,9 +230,41 @@ export function parseTrainings(rows: string[][]): Training[] {
 
     if (sections.length === 0) continue; // empty block
 
-    const name = detectBlockName(rows, start, headerRowIdx);
-    trainings.push({ name, sections });
+    // Group sections w training units. Block może zawierać wiele "Trening X"
+    // labels (np. block 3 ma rozgrzewka+Trening A+rozgrzewka+Trening B —
+    // trener wpisała 2 jednostki treningowe w jednej kolumnie z 2 różnych
+    // tygodni). Każda Trening X label = osobny Training tab z dolepioną
+    // poprzedzającą rozgrzewką (i innymi sekcjami pomocniczymi).
+    const fallbackName = detectBlockName(rows, start, headerRowIdx);
+    trainings.push(...groupSectionsIntoTrainings(sections, fallbackName));
   }
 
   return disambiguateNames(trainings);
+}
+
+/**
+ * Group sequential sections w training units. Każda sekcja z labelem
+ * "Trening X" zamyka jeden unit (z poprzedzającymi rozgrzewkami).
+ *
+ * Edge case: trailing supplements (rozgrzewka bez następnego Trening X) →
+ * fallback unit z `defaultName`.
+ */
+function groupSectionsIntoTrainings(
+  sections: Section[],
+  defaultName: string,
+): Training[] {
+  const result: Training[] = [];
+  let bucket: Section[] = [];
+  for (const section of sections) {
+    if (section.label && section.label.startsWith('Trening ')) {
+      result.push({ name: section.label, sections: [...bucket, section] });
+      bucket = [];
+    } else {
+      bucket.push(section);
+    }
+  }
+  if (bucket.length > 0) {
+    result.push({ name: defaultName, sections: bucket });
+  }
+  return result;
 }

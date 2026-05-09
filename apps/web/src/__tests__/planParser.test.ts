@@ -130,6 +130,82 @@ describe('parseTrainings — multi-block (A + B side-by-side)', () => {
   });
 });
 
+describe('parseTrainings — block z multiple Trening X (rozłam na osobne tabs)', () => {
+  // Real layout od trenerki (owner bug): block 3 zawiera rozgrzewka + Trening A
+  // (week 1) + rozgrzewka + Trening B (week 2). Powinno dać 2 osobne tabs
+  // (Trening A z rozgrzewką + Trening B z rozgrzewką) zamiast jeden tab z
+  // mieszanką "1 tydzień A + 2 tydzień B".
+  const rows = [
+    blockHeader(),
+    dataRow('01', 'Hip opener', '', '5p/'), // rozgrzewka 1 ćw
+    emptyRow(),
+    emptyRow(),
+    trainingLabelRow('Trening A'),
+    blockHeader(), // duplicate header
+    dataRow('01', 'Squat-A', '', '5x5'), // Trening A 1 ćw
+    emptyRow(),
+    emptyRow(),
+    dataRow('01', 'Wall sit', '', '60s'), // rozgrzewka 2 (przed Trening B)
+    emptyRow(),
+    emptyRow(),
+    trainingLabelRow('Trening B'),
+    blockHeader(),
+    dataRow('01', 'Bench-B', '', '4x8'), // Trening B 1 ćw
+  ];
+
+  test('1 block daje 2 trainings (Trening A + Trening B)', () => {
+    const result = parseTrainings(rows);
+    expect(result).toHaveLength(2);
+    expect(result[0].name).toBe('Trening A');
+    expect(result[1].name).toBe('Trening B');
+  });
+
+  test('Trening A NIE zawiera Bench-B', () => {
+    const result = parseTrainings(rows);
+    const allACells = result[0].sections.flatMap((s) => s.exercises.flatMap((e) => e.cells));
+    expect(allACells).toContain('Squat-A');
+    expect(allACells).toContain('Hip opener');
+    expect(allACells).not.toContain('Bench-B');
+    expect(allACells).not.toContain('Wall sit');
+  });
+
+  test('Trening B NIE zawiera Squat-A', () => {
+    const result = parseTrainings(rows);
+    const allBCells = result[1].sections.flatMap((s) => s.exercises.flatMap((e) => e.cells));
+    expect(allBCells).toContain('Bench-B');
+    expect(allBCells).toContain('Wall sit'); // poprzedzająca rozgrzewka dolepiona
+    expect(allBCells).not.toContain('Squat-A');
+    expect(allBCells).not.toContain('Hip opener');
+  });
+
+  test('obsługuje dowolny Trening X (A/B/C/D)', () => {
+    // Real sheet może mieć Trening C/D — parser musi je rozpoznać
+    // (regex `startsWith('Trening ')` jest agnostic do litery).
+    const rowsCD = [
+      blockHeader(),
+      trainingLabelRow('Trening A'),
+      dataRow('01', 'Squat-A', '', '5x5'),
+      emptyRow(),
+      emptyRow(),
+      trainingLabelRow('Trening C'),
+      dataRow('01', 'Pull-C', '', 'AMRAP'),
+      emptyRow(),
+      emptyRow(),
+      trainingLabelRow('Trening D'),
+      dataRow('01', 'Deadlift-D', '', '3x5'),
+    ];
+    const result = parseTrainings(rowsCD);
+    expect(result).toHaveLength(3);
+    expect(result.map((t) => t.name)).toEqual(['Trening A', 'Trening C', 'Trening D']);
+    expect(result[1].sections.flatMap((s) => s.exercises.flatMap((e) => e.cells))).toContain(
+      'Pull-C',
+    );
+    expect(result[2].sections.flatMap((s) => s.exercises.flatMap((e) => e.cells))).toContain(
+      'Deadlift-D',
+    );
+  });
+});
+
 describe('parseTrainings — disambiguation duplicate names', () => {
   // 2 bloki Trening A (poprzedni + bieżący tydzień) — owner: "tylko trening A.
   // jeden sprzed tygodnia drugi z tego". Tabs powinny mieć "Trening A #1" + "#2".
