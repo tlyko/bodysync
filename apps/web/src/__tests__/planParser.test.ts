@@ -177,6 +177,33 @@ describe('parseTrainings — block z multiple Trening X (rozłam na osobne tabs)
     expect(allBCells).not.toContain('Squat-A');
     expect(allBCells).not.toContain('Hip opener');
   });
+
+  test('obsługuje dowolny Trening X (A/B/C/D)', () => {
+    // Real sheet może mieć Trening C/D — parser musi je rozpoznać
+    // (regex `startsWith('Trening ')` jest agnostic do litery).
+    const rowsCD = [
+      blockHeader(),
+      trainingLabelRow('Trening A'),
+      dataRow('01', 'Squat-A', '', '5x5'),
+      emptyRow(),
+      emptyRow(),
+      trainingLabelRow('Trening C'),
+      dataRow('01', 'Pull-C', '', 'AMRAP'),
+      emptyRow(),
+      emptyRow(),
+      trainingLabelRow('Trening D'),
+      dataRow('01', 'Deadlift-D', '', '3x5'),
+    ];
+    const result = parseTrainings(rowsCD);
+    expect(result).toHaveLength(3);
+    expect(result.map((t) => t.name)).toEqual(['Trening A', 'Trening C', 'Trening D']);
+    expect(result[1].sections.flatMap((s) => s.exercises.flatMap((e) => e.cells))).toContain(
+      'Pull-C',
+    );
+    expect(result[2].sections.flatMap((s) => s.exercises.flatMap((e) => e.cells))).toContain(
+      'Deadlift-D',
+    );
+  });
 });
 
 describe('parseTrainings — disambiguation duplicate names', () => {
