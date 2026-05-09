@@ -14,10 +14,12 @@ import {
   HeartPulseIcon,
   MoonIcon,
   PercentIcon,
+  RunIcon,
   ScaleIcon,
   UtensilsIcon,
   WheatIcon,
 } from './dashboard/icons';
+import { NutritionDonut } from './dashboard/NutritionDonut';
 import { ProfileTargetsForm } from './dashboard/ProfileTargetsForm';
 import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { SidebarNav, type AppTab } from './dashboard/SidebarNav';
@@ -233,6 +235,14 @@ function DashboardOverview({
   const sleepSeries = buildSeries(days, 'sleep');
   const restingHrSeries = buildSeries(days, 'resting_hr');
   const bodyFatSeries = buildSeries(days, 'body_fat');
+  const proteinSeries = buildSeries(days, 'protein');
+  const fatSeries = buildSeries(days, 'fat');
+  const carbsSeries = buildSeries(days, 'carbs');
+
+  const latestKcalIn = latestValue(kcalIn)?.value ?? null;
+  const latestProtein = latestValue(proteinSeries)?.value ?? null;
+  const latestFat = latestValue(fatSeries)?.value ?? null;
+  const latestCarbs = latestValue(carbsSeries)?.value ?? null;
 
   return (
     <>
@@ -259,6 +269,7 @@ function DashboardOverview({
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
         />
+        <WeeklyActivitiesCard />
         <MetricStatCard
           label="Kroki"
           series={stepsSeries}
@@ -316,9 +327,54 @@ function DashboardOverview({
           </div>
         </SectionPanel>
 
+        <SectionPanel title="Makroskładniki">
+          <NutritionDonut
+            kcal={latestKcalIn}
+            proteinG={latestProtein}
+            fatG={latestFat}
+            carbsG={latestCarbs}
+          />
+        </SectionPanel>
+
         <RecentActivitiesPanel onSeeAll={() => onSelectTab('activities')} />
       </div>
     </>
+  );
+}
+
+// "Aktywności (tydzień)" — count z getActivities filtered last 7 days.
+// Strava brand orange, brak sparkline (single liczba). Klikalne → zakładka
+// Aktywności (przekazujemy onSelectTab via context byłoby over-engineering;
+// zostawiamy jako visual-only, owner kliknie tab w sidebar).
+function WeeklyActivitiesCard() {
+  const [count, setCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    getActivities(20)
+      .then((res) => {
+        if (cancelled) return;
+        const cutoffMs = Date.now() - 7 * 24 * 3600 * 1000;
+        const recent = res.items.filter((a) => Date.parse(a.start_date) >= cutoffMs);
+        setCount(recent.length);
+      })
+      .catch(() => {
+        if (cancelled) return;
+        setCount(0);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return (
+    <StatCard
+      label="Aktywności (tydzień)"
+      value={count ?? '—'}
+      unit={count === 1 ? 'trening' : 'treningów'}
+      accent="orange"
+      icon={<RunIcon />}
+    />
   );
 }
 
