@@ -1,31 +1,43 @@
 // Parser raw 2D rows (Google Sheets dump) → structured Training[].
-// Heurystyka oparta na sample `samples/tomek-trening.xlsx` Arkusz5:
-//   - Każdy blok kolumn = jeden trening (A/B/C/D)
-//   - Block boundary = column index gdzie cell == "Numer" w header row
-//   - Header row = pierwszy row zawierający "Numer" jako cell value
-//   - Block name = "Trening A/B/C/D" / "Rozgrzewka" / "Dół" / "Góra" — pierwszy
-//     non-empty single-cell row gdy więcej niż 1 cell empty (heurystycznie
-//     bierzemy najbliższe non-empty słowo z cell na pozycji block_start)
 //
-// Owner pomijać: Link, Ból, komentarze trenerki/owner'a (nie-tabelaryczne
-// wiersze). Filtrujemy:
-//   - Kolumny których header to "Link" / "Ból"
-//   - Kolumny które są EMPTY w całym bloku
-//   - Wiersze które nie mają numeru w pierwszym non-empty col (header'em
-//     bloku jest "Numer", więc dane row musi mieć cell w col Numer)
+// Real layout od trenerki (uchwycone przez Sprint 5 follow-upy):
+//   - Każdy blok kolumn = jeden trening (Trening A z konkretnego tygodnia).
+//   - Block boundary = column index gdzie cell == "Numer" w header row.
+//   - W obrębie BLOKU mogą być wiele sekcji (Rozgrzewka + Trening A
+//     główny), oddzielone:
+//     a) pustym wierszem
+//     b) duplicate header row ("Numer | Ćwiczenie | ...")
+//     c) label row ("Trening A" / "Dół" / "Góra" w numer col).
+//   - Trener może powielać Trening A co tydzień (block 1 = ostatni tydzień,
+//     block 2 = bieżący tydzień). Owner chce DEFAULT pokazać najnowszy
+//     (last block in array) — disambiguation tabs przez `#N` suffix.
+//
+// Owner pomijać:
+//   - Kolumny "Link" / "Ból"
+//   - Kolumny CAŁKOWICIE puste w block
+//   - Wiersze które nie są ćwiczeniami (label rows, duplicate headers)
 
 export type Exercise = {
   number: string; // "01" | "01a" | "02b"
   cells: string[]; // ordered po headers (without Link/Ból)
 };
 
-export type Training = {
-  name: string; // "Trening A" / "Rozgrzewka" / "Trening B" / etc.
-  headers: string[]; // np. ["Numer", "Ćwiczenie", "Serie x powt.", "Int.", ...]
+export type Section = {
+  /** Optional label sekcji ("Rozgrzewka" / "Trening A"); null gdy bez label. */
+  label: string | null;
+  headers: string[];
   exercises: Exercise[];
 };
 
+export type Training = {
+  /** Wyświetlany w tabach (np. "Trening A", "Trening A #2" gdy duplicates). */
+  name: string;
+  /** Sekcje (rozgrzewka + trening główny). Min 1 element. */
+  sections: Section[];
+};
+
 const DROP_HEADERS = new Set(['Link', 'Ból']);
+const SECTION_LABELS = new Set(['Rozgrzewka', 'Dół', 'Góra']);
 
 function findFirstHeaderRowIdx(rows: string[][]): number | null {
   for (let r = 0; r < rows.length; r++) {
@@ -41,42 +53,71 @@ function isEmpty(cell: string): boolean {
 }
 
 /**
- * Find block name by scanning rows above + at exercise rows for cells
- * w col `blockStart`. Bierzemy pierwszy non-empty cell w tym col, w okolicy
- * header row (-3..+5 wierszy żeby uchwycić "Trening A" header).
+ * Detect block name (= tab label). Bierze pierwszy "Trening X" wiersz w col
+ * `blockStart` poniżej header row. Fallback "Rozgrzewka"/"Dół"/"Góra" powyżej.
  */
 function detectBlockName(
   rows: string[][],
   blockStart: number,
   headerRowIdx: number,
 ): string {
-  // Najpierw sprawdź wiersz z labelem block-level header (typically R12 w
-  // sample to "Trening A/B/C/D"). Skanujemy okno wokół header row.
-  const search = (from: number, to: number): string | null => {
+  const search = (from: number, to: number, predicate: (s: string) => boolean): string | null => {
     for (let r = Math.max(0, from); r < Math.min(rows.length, to); r++) {
       const cell = rows[r][blockStart]?.trim() ?? '';
-      // Match prefersz: "Trening X" / "Rozgrzewka" / "Dół" / "Góra"
-      if (
-        cell.startsWith('Trening ') ||
-        cell === 'Rozgrzewka' ||
-        cell === 'Dół' ||
-        cell === 'Góra'
-      ) {
-        return cell;
-      }
+      if (predicate(cell)) return cell;
     }
     return null;
   };
-  // Sprawdź najpierw wiersze poniżej header row (typowo "Trening X" w R12,
-  // header w R2 — search range +1..+15) — preferujemy "Trening X" nad
-  // "Rozgrzewka" (rozgrzewka bywa też powyżej header row).
-  const below = search(headerRowIdx + 1, headerRowIdx + 16);
+  // Trening X label preferowane (typowo R10-R12 w sample, poniżej header)
+  const below = search(headerRowIdx + 1, headerRowIdx + 30, (s) => s.startsWith('Trening '));
   if (below) return below;
-  // Fallback: wiersze powyżej header (R1 zazwyczaj "Rozgrzewka")
-  const above = search(0, headerRowIdx);
+  // Fallback do "Rozgrzewka" / "Dół" / "Góra"
+  const above = search(0, headerRowIdx, (s) => SECTION_LABELS.has(s));
   if (above) return above;
-  // Last resort
   return 'Trening';
+}
+
+/**
+ * Detect label sekcji powyżej first exercise — searcha do tyłu od
+ * `firstExerciseRow` po cell w numer col.
+ */
+function detectSectionLabel(
+  blockRows: string[][],
+  numerCol: number,
+  firstExerciseRow: number,
+  startBound: number,
+): string | null {
+  for (let r = firstExerciseRow - 1; r >= startBound; r--) {
+    const cell = (blockRows[r][numerCol] ?? '').trim();
+    if (!cell) continue;
+    if (cell.startsWith('Trening ')) return cell;
+    if (SECTION_LABELS.has(cell)) return cell;
+    // Cell = "Numer" (duplicate header) → continue search (label może być powyżej)
+    if (cell === 'Numer') continue;
+    // Inny non-empty cell — nie jest label, stop search
+    break;
+  }
+  return null;
+}
+
+/**
+ * Disambiguate tabs gdy multiple blocks mają tę samą `name` (np. 2 razy
+ * "Trening A" — poprzedni i bieżący tydzień). Append `#N` (1-indexed,
+ * highest = najnowszy bo trener appenduje w prawo / w dół).
+ */
+function disambiguateNames(trainings: Training[]): Training[] {
+  const counts = new Map<string, number>();
+  for (const t of trainings) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
+  const duplicates = new Set([...counts.entries()].filter(([, c]) => c > 1).map(([n]) => n));
+  if (duplicates.size === 0) return trainings;
+
+  const seenIdx = new Map<string, number>();
+  return trainings.map((t) => {
+    if (!duplicates.has(t.name)) return t;
+    const idx = (seenIdx.get(t.name) ?? 0) + 1;
+    seenIdx.set(t.name, idx);
+    return { ...t, name: `${t.name} #${idx}` };
+  });
 }
 
 export function parseTrainings(rows: string[][]): Training[] {
@@ -86,7 +127,6 @@ export function parseTrainings(rows: string[][]): Training[] {
   if (headerRowIdx === null) return [];
 
   const headerRow = rows[headerRowIdx];
-  // Block boundaries — col indices gdzie cell === "Numer"
   const blockStarts: number[] = [];
   headerRow.forEach((cell, idx) => {
     if (cell.trim() === 'Numer') blockStarts.push(idx);
@@ -103,51 +143,96 @@ export function parseTrainings(rows: string[][]): Training[] {
     const start = blockStarts[b];
     const end = blockEnds[b];
 
-    // Slice block rows: każdy row, kolumny [start..end)
     const blockRows = rows.map((row) => row.slice(start, end));
-
-    // Determine which cols inside block są usable (non-empty, non-DROP)
     const blockHeader = blockRows[headerRowIdx];
+
+    // Filter cols: drop "Link" / "Ból" + cols all-empty w block
     const colsKeep: number[] = [];
     blockHeader.forEach((cellRaw, idx) => {
       const cell = cellRaw.trim();
       if (DROP_HEADERS.has(cell)) return;
-      // Drop col jeśli jest CAŁKOWICIE pusty w block (no header AND no data).
       const allEmpty = blockRows.every((row) => isEmpty(row[idx] ?? ''));
       if (allEmpty) return;
       colsKeep.push(idx);
     });
-
-    if (colsKeep.length === 0) continue; // pusty blok → skip
+    if (colsKeep.length === 0) continue;
 
     const headers = colsKeep.map((c) => blockHeader[c]?.trim() ?? '');
-
-    // Exercises: każdy row PO header gdzie pierwszy keep'd col (zazwyczaj
-    // "Numer") ma non-empty value. Numer jest pierwszą kolumną zawsze
-    // (header "Numer" → kolumna numer/numer-ćwiczenia).
     const numerCol = colsKeep[0];
-    const exercises: Exercise[] = [];
+
+    // Section split: skanuj rows, rozdziel exercises na sekcje przez:
+    //   - duplicate header row (numer === "Numer")
+    //   - label row (numer startuje z "Trening " | "Rozgrzewka" | etc.)
+    //   - 2+ kolejne empty rows (treated jako separator)
+    const sections: Section[] = [];
+    let currentExercises: Exercise[] = [];
+    let currentSectionStartRow = headerRowIdx + 1;
+    let consecutiveEmpty = 0;
+
+    const flushSection = (label: string | null) => {
+      if (currentExercises.length === 0) return;
+      sections.push({ label, headers, exercises: currentExercises });
+      currentExercises = [];
+    };
+
     for (let r = headerRowIdx + 1; r < blockRows.length; r++) {
       const number = (blockRows[r][numerCol] ?? '').trim();
-      if (!number) continue;
-      // Skip "Trening X" header row (number col contains "Trening A" zamiast "01")
-      if (number.startsWith('Trening ')) continue;
-      // Skip block sub-headers "Rozgrzewka" / "Dół" / "Góra"
-      if (number === 'Rozgrzewka' || number === 'Dół' || number === 'Góra') continue;
-      // Skip duplicate header rows — trener często powtarza header między
-      // rozgrzewką a głównym treningiem w obrębie tej samej kolumny. Owner
-      // bug report: "w połowie taba widzę wiersz Numer Ćwiczenie...".
-      // Detect: numer col cell == "Numer" (header literal).
-      if (number === 'Numer') continue;
+
+      // Empty row — track consecutive empties jako section separator
+      if (!number) {
+        consecutiveEmpty += 1;
+        if (consecutiveEmpty >= 2 && currentExercises.length > 0) {
+          // 2 puste w rzędzie → section break
+          const label = detectSectionLabel(
+            blockRows,
+            numerCol,
+            currentSectionStartRow,
+            Math.max(0, currentSectionStartRow - 5),
+          );
+          flushSection(label);
+          currentSectionStartRow = r + 1;
+          consecutiveEmpty = 0;
+        }
+        continue;
+      }
+      consecutiveEmpty = 0;
+
+      // Section boundary triggers (label / duplicate header)
+      if (number === 'Numer' || number.startsWith('Trening ') || SECTION_LABELS.has(number)) {
+        if (currentExercises.length > 0) {
+          const label = detectSectionLabel(
+            blockRows,
+            numerCol,
+            currentSectionStartRow,
+            Math.max(0, currentSectionStartRow - 5),
+          );
+          flushSection(label);
+        }
+        currentSectionStartRow = r + 1;
+        continue;
+      }
+
+      // Real exercise row
       const cells = colsKeep.map((c) => (blockRows[r][c] ?? '').trim());
-      exercises.push({ number, cells });
+      currentExercises.push({ number, cells });
     }
 
-    if (exercises.length === 0) continue; // header-only blok → skip
+    // Flush final section
+    if (currentExercises.length > 0) {
+      const label = detectSectionLabel(
+        blockRows,
+        numerCol,
+        currentSectionStartRow,
+        Math.max(0, currentSectionStartRow - 5),
+      );
+      flushSection(label);
+    }
+
+    if (sections.length === 0) continue; // empty block
 
     const name = detectBlockName(rows, start, headerRowIdx);
-    trainings.push({ name, headers, exercises });
+    trainings.push({ name, sections });
   }
 
-  return trainings;
+  return disambiguateNames(trainings);
 }

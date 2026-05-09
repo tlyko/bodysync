@@ -1,13 +1,16 @@
 import { describe, expect, test } from 'vitest';
 import { parseTrainings } from '../components/dashboard/planParser';
 
-// Sample mirror real Arkusz5 layout (skompresowany do 2 bloków A/B z ~7 kol each):
+// Sample mirror real Arkusz5 layout od trenerki:
 //   - R0: "Rozgrzewka" header (powyżej kolumn z "Numer")
-//   - R1: header row z "Numer" / "Ćwiczenie" / "Link" / "Serie x powt." / "Int." / "Tempo" / "Ciężar (Anita)" / "Ciężar x serie x powtórzenia x RIR" / "Ból"
-//   - R2: data row 1
-//   - R3: data row 2
-//   - R10: "Trening A" / "Trening B" labels
-//   - R11+: training data rows
+//   - R1: header row z "Numer" / "Ćwiczenie" / "Link" / ... / "Ból"
+//   - R2-R3: rozgrzewka data
+//   - R4: empty
+//   - R5: empty
+//   - R6: "Trening A" label
+//   - R7: header duplicate
+//   - R8-R9: main training data
+
 function blockHeader(): string[] {
   return [
     'Numer',
@@ -31,54 +34,63 @@ function emptyRow(): string[] {
 }
 
 function trainingLabelRow(name: string): string[] {
-  // Tylko first cell wypełnione (mock dla "Trening A" w col block_start)
   return [name, ...Array(8).fill('')];
 }
 
-describe('parseTrainings — single block (Trening A)', () => {
+describe('parseTrainings — single block z dwoma sekcjami (rozgrzewka + main)', () => {
   const rows = [
     ['Rozgrzewka', ...Array(8).fill('')],
     blockHeader(),
     dataRow('01', 'Hip opener', 'https://yt/abc', '1-2s x 5p/'),
     dataRow('02', 'Wall sit', 'https://yt/def', '2-3s x 45-60s'),
     emptyRow(),
+    emptyRow(), // 2+ empty → section break
     trainingLabelRow('Trening A'),
-    blockHeader(), // duplicat header — w real sample każdy block ma swój header
+    blockHeader(), // duplicate header
     dataRow('01', 'Squat', 'https://yt/ghi', '5x5'),
     dataRow('02', 'Bench', '', '4x8'),
   ];
 
-  test('finds header row + parses 4 exercises (rozgrzewka 2 + Trening A 2)', () => {
+  test('1 training, 2 sections (rozgrzewka + Trening A)', () => {
     const result = parseTrainings(rows);
-    // First "Numer" header w R1 → block_start=0, block tylko jeden (jeden "Numer" w header row)
     expect(result).toHaveLength(1);
-    // Bo jest R1 + R6 z "Numer", obie counted jako blocks tylko jeśli są W TYM SAMYM header row
-    // R1 ma 1 "Numer" (col 0), R6 to TRAINING LABEL row
-    // Plus block name detected ze searchu okolic — first non-empty above header to "Rozgrzewka"
-    expect(result[0].name).toBe('Trening A'); // below header preferowane
+    expect(result[0].name).toBe('Trening A');
+    expect(result[0].sections).toHaveLength(2);
   });
 
-  test('drops Link + Ból columns', () => {
+  test('section labels detection (Rozgrzewka + Trening A)', () => {
     const result = parseTrainings(rows);
-    expect(result[0].headers).not.toContain('Link');
-    expect(result[0].headers).not.toContain('Ból');
-    expect(result[0].headers).toContain('Numer');
-    expect(result[0].headers).toContain('Ćwiczenie');
-    expect(result[0].headers).toContain('Serie x powt.');
+    const labels = result[0].sections.map((s) => s.label);
+    expect(labels).toContain('Rozgrzewka');
+    expect(labels).toContain('Trening A');
   });
 
-  test('exercises mają number + cells po filter', () => {
+  test('rozgrzewka section ma 2 ćwiczenia (Hip opener + Wall sit)', () => {
     const result = parseTrainings(rows);
-    const exes = result[0].exercises;
-    expect(exes[0].number).toBe('01');
-    expect(exes[0].cells).toContain('Hip opener');
-    expect(exes[0].cells).not.toContain('https://yt/abc'); // Link dropped
-    expect(exes[0].cells).not.toContain('0'); // Ból value dropped
+    const rozgrzewka = result[0].sections.find((s) => s.label === 'Rozgrzewka');
+    expect(rozgrzewka?.exercises).toHaveLength(2);
+    const names = rozgrzewka!.exercises.map((e) => e.cells[1]);
+    expect(names).toEqual(['Hip opener', 'Wall sit']);
+  });
+
+  test('Trening A section ma 2 ćwiczenia (Squat + Bench), bez Hip opener', () => {
+    const result = parseTrainings(rows);
+    const trening = result[0].sections.find((s) => s.label === 'Trening A');
+    expect(trening?.exercises).toHaveLength(2);
+    const names = trening!.exercises.map((e) => e.cells[1]);
+    expect(names).toEqual(['Squat', 'Bench']);
+  });
+
+  test('drops Link + Ból columns w obu sekcjach', () => {
+    const result = parseTrainings(rows);
+    for (const s of result[0].sections) {
+      expect(s.headers).not.toContain('Link');
+      expect(s.headers).not.toContain('Ból');
+    }
   });
 });
 
 describe('parseTrainings — multi-block (A + B side-by-side)', () => {
-  // Two "Numer" headers w jednym header row → 2 bloki
   const headerWithTwoBlocks = [
     ...blockHeader(),
     'Numer',
@@ -92,20 +104,14 @@ describe('parseTrainings — multi-block (A + B side-by-side)', () => {
     'Ból',
   ];
   const rows = [
-    Array(18).fill(''), // empty
+    Array(18).fill(''),
     headerWithTwoBlocks,
-    [
-      ...dataRow('01', 'Squat', '', '5x5'),
-      ...dataRow('01', 'Pull-up', '', 'AMRAP'),
-    ],
+    [...dataRow('01', 'Squat', '', '5x5'), ...dataRow('01', 'Pull-up', '', 'AMRAP')],
     [
       ...trainingLabelRow('Trening A').slice(0, 9),
       ...trainingLabelRow('Trening B').slice(0, 9),
     ],
-    [
-      ...dataRow('02', 'Bench', '', '4x8'),
-      ...dataRow('02', 'Rows', '', '3x10'),
-    ],
+    [...dataRow('02', 'Bench', '', '4x8'), ...dataRow('02', 'Rows', '', '3x10')],
   ];
 
   test('finds 2 blocks, names z label rows', () => {
@@ -117,10 +123,37 @@ describe('parseTrainings — multi-block (A + B side-by-side)', () => {
 
   test('block A nie zawiera ćwiczeń z bloku B', () => {
     const result = parseTrainings(rows);
-    const allACells = result[0].exercises.flatMap((e) => e.cells);
+    const allACells = result[0].sections.flatMap((s) => s.exercises.flatMap((e) => e.cells));
     expect(allACells).toContain('Squat');
     expect(allACells).not.toContain('Pull-up');
     expect(allACells).not.toContain('Rows');
+  });
+});
+
+describe('parseTrainings — disambiguation duplicate names', () => {
+  // 2 bloki Trening A (poprzedni + bieżący tydzień) — owner: "tylko trening A.
+  // jeden sprzed tygodnia drugi z tego". Tabs powinny mieć "Trening A #1" + "#2".
+  const headerWithTwoBlocks = [...blockHeader(), ...blockHeader()];
+  const rows = [
+    headerWithTwoBlocks,
+    [...trainingLabelRow('Trening A').slice(0, 9), ...trainingLabelRow('Trening A').slice(0, 9)],
+    [...dataRow('01', 'Squat-old', '', '5x5'), ...dataRow('01', 'Squat-new', '', '5x5')],
+  ];
+
+  test('appenduje #1, #2 dla duplicate names', () => {
+    const result = parseTrainings(rows);
+    expect(result.map((t) => t.name)).toEqual(['Trening A #1', 'Trening A #2']);
+  });
+
+  test('NIE appenduje suffix gdy unique name', () => {
+    const headerSingle = [...blockHeader(), ...blockHeader()];
+    const rowsSingle = [
+      headerSingle,
+      [...trainingLabelRow('Trening A').slice(0, 9), ...trainingLabelRow('Trening B').slice(0, 9)],
+      [...dataRow('01', 'Squat', '', '5x5'), ...dataRow('01', 'Pull-up', '', 'AMRAP')],
+    ];
+    const result = parseTrainings(rowsSingle);
+    expect(result.map((t) => t.name)).toEqual(['Trening A', 'Trening B']);
   });
 });
 
@@ -138,50 +171,27 @@ describe('parseTrainings — edge cases', () => {
     expect(parseTrainings(rows)).toEqual([]);
   });
 
-  test('skips duplicate header rows w środku bloku (rozgrzewka/main split)', () => {
-    // Real layout od trenerki: rozgrzewka pod headerem, potem header
-    // powtórzony między rozgrzewką a Trening A. Bez tego skip'a owner
-    // widzi wiersz "Numer | Ćwiczenie | ..." w środku tabu.
+  test('skips "Trening X" / "Numer" / "Rozgrzewka" rows jako section boundaries', () => {
     const rows = [
       blockHeader(),
-      dataRow('01', 'Hip opener', '', '5p/'),
-      dataRow('02', 'Wall sit', '', '60s'),
-      blockHeader(), // duplicate header w środku bloku
       trainingLabelRow('Trening A'),
       dataRow('01', 'Squat', '', '5x5'),
-      dataRow('02', 'Bench', '', '4x8'),
     ];
     const result = parseTrainings(rows);
-    // Wszystkie 4 ćwiczenia + skip duplicate header + skip "Trening A" label
-    expect(result[0].exercises.map((e) => e.cells[1])).toEqual([
-      'Hip opener',
-      'Wall sit',
-      'Squat',
-      'Bench',
-    ]);
-    // Header NIE pojawia się jako exercise number
-    expect(result[0].exercises.map((e) => e.number)).not.toContain('Numer');
-  });
-
-  test('skips "Trening X" label row jako exercise', () => {
-    const rows = [
-      blockHeader(),
-      trainingLabelRow('Trening A'), // numer="Trening A" — skipped
-      dataRow('01', 'Squat', '', '5x5'),
-    ];
-    const result = parseTrainings(rows);
-    expect(result[0].exercises).toHaveLength(1);
-    expect(result[0].exercises[0].number).toBe('01');
+    const allEx = result[0].sections.flatMap((s) => s.exercises);
+    // Tylko Squat (Trening A label skipped, Numer skipped — none are real exercises)
+    expect(allEx).toHaveLength(1);
+    expect(allEx[0].number).toBe('01');
   });
 
   test('drops kolumna z all-empty values w block', () => {
     const rows = [
-      // Header z extra empty col na końcu
       [...blockHeader(), ''],
       [...dataRow('01', 'Squat', '', '5x5'), ''],
     ];
     const result = parseTrainings(rows);
-    // Empty header col dropped → headers nie ma '' na końcu
-    expect(result[0].headers.filter((h) => h === '')).toHaveLength(0);
+    for (const s of result[0].sections) {
+      expect(s.headers.filter((h) => h === '')).toHaveLength(0);
+    }
   });
 });
