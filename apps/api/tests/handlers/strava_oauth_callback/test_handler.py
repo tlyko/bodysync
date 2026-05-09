@@ -297,3 +297,88 @@ def test_network_error_redirects_with_token_exchange_failed(
     ):
         result = h.handler(_event({"code": "abc", "state": "net-state"}), _FakeContext())
     assert _redirect_status(result) == "token_exchange_failed"
+
+
+# ─── Athlete map conflict (security audit W1, 2026-05-09) ─────────────────
+
+
+def test_update_athlete_map_idempotent_for_same_user() -> None:
+    """Re-OAuth tego samego usera — mapa nie zmienia się, no raise."""
+    from handlers.strava_oauth_callback.service import update_athlete_map
+
+    out = update_athlete_map('{"11111": "tomek"}', 11111, "tomek")
+    assert json.loads(out) == {"11111": "tomek"}
+
+
+def test_update_athlete_map_raises_when_athlete_already_mapped_to_other_user() -> None:
+    """athlete_id mapped do innego usera → AthleteMapConflictError."""
+    from handlers.strava_oauth_callback.service import (
+        AthleteMapConflictError,
+        update_athlete_map,
+    )
+
+    with pytest.raises(AthleteMapConflictError) as exc_info:
+        update_athlete_map('{"11111": "tomek"}', 11111, "weronika")
+    assert exc_info.value.athlete_id == 11111
+    assert exc_info.value.existing_user_id == "tomek"
+    assert exc_info.value.attempted_user_id == "weronika"
+
+
+def test_update_athlete_map_adds_new_athlete_for_new_user() -> None:
+    """New athlete_id → no conflict, append."""
+    from handlers.strava_oauth_callback.service import update_athlete_map
+
+    out = update_athlete_map('{"11111": "tomek"}', 22222, "weronika")
+    assert json.loads(out) == {"11111": "tomek", "22222": "weronika"}
+
+
+@pytest.mark.usefixtures("strava_ssm")
+def test_athlete_already_mapped_blocks_oauth_and_does_not_persist_tokens(
+    dynamodb_table: Any,
+) -> None:
+    """Pre-existing map ma athlete=99999→tomek; weronika próbuje połączyć się
+    z tym samym athlete_id → redirect athlete_already_connected, tokens NIE
+    zapisane, mapa NIE zmodyfikowana."""
+    from handlers.strava_oauth_callback import handler as h
+
+    ssm = boto3.client("ssm", region_name="eu-west-1")
+    ssm.put_parameter(
+        Name="/bodysync/strava/athlete-to-user",
+        Value='{"99999": "tomek"}',
+        Type="String",
+        Overwrite=True,
+    )
+    from shared import ssm as _ssm
+
+    _ssm.clear_cache()
+
+    _seed_state(dynamodb_table, "weronika-conflict-state", "weronika")
+    happy = httpx.Response(
+        200,
+        json={
+            "access_token": "AT_W",
+            "refresh_token": "RT_W",
+            "expires_at": int(time.time()) + 21600,
+            "athlete": {"id": 99999},
+        },
+    )
+    with patch(
+        "handlers.strava_oauth_callback.service.httpx.Client.post",
+        return_value=happy,
+    ):
+        result = h.handler(
+            _event({"code": "abc", "state": "weronika-conflict-state"}),
+            _FakeContext(),
+        )
+
+    assert _redirect_status(result) == "athlete_already_connected"
+
+    # Tokens NIE zapisane dla weronika
+    with pytest.raises(ssm.exceptions.ParameterNotFound):
+        ssm.get_parameter(Name="/bodysync/strava/weronika/tokens", WithDecryption=True)
+
+    # Mapa nie modyfikowana
+    map_data = json.loads(
+        ssm.get_parameter(Name="/bodysync/strava/athlete-to-user")["Parameter"]["Value"]
+    )
+    assert map_data == {"99999": "tomek"}
