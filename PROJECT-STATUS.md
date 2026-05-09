@@ -41,18 +41,64 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Security hardening (audit 2026-05-07: 2 Critical + 6 High) | ✅ shipped (PR #25-32) |
 | Apple Health webhook (Bearer auth + 13 mapperów + idempotency) | ✅ shipped (PR #33/#34/#35; pending: SSM secrets + HAE iOS config) |
 | Strava OAuth + webhook + fetcher (port wzorca ze sprawdzamszlak) | ✅ Sprint 4 shipped 2026-05-08/09 (PRy #91-#102) — OAuth start+callback z athlete-to-user mapping w SSM, webhook handler (handshake + idempotent events), DDB Streams `filter_criteria PK=EVENT#strava` → fetcher Lambda (token refresh, activity+streams, S3 raw), GET /api/activities, frontend Aktywności tab z Strava connect CTA + 10 ostatnich z `strava_backfill.py` |
-| Google Sheets read | ❌ |
-| Anthropic advisor (prompt cache, prompt injection guard) | ✅ Sprint 6.1 + 6.2 live (PRy #59/#62/#63/#65/#66/#67) — `POST /api/advisor/chat` multi-turn z RAG retrieval (139 przepisów Lidla/Biedronki, k=5 cosine), used_recipes populated, system prompt + retrieved_recipes oba cached (~13956 tokens razem) |
+| Google Sheets read (training plan) | ✅ Sprint 5 shipped 2026-05-09 (PRy #107/#112/#113/#116/#117/#119/#120/#121/#122/#123/#124) — `GET /api/plan` z service account JSON read-only, 15min DDB cache `PLAN#current` z stale fallback, frontend "Plan Treningowy" tab z parserem (split na Trening A/B/C/D + sekcje Rozgrzewka/Trening) + dropdown z weeks per group, advisor injekcja `<training_plan>` w prompt z STRICT no-guessing rule |
+| Anthropic advisor (prompt cache, prompt injection guard) | ✅ Sprint 6.1 + 6.2 live (PRy #59/#62/#63/#65/#66/#67) + Sprint 5 PR #4 (#119) advisor injekcja training_plan + #126/#127 STRICT anti-halucynacja — `POST /api/advisor/chat` multi-turn z RAG retrieval (139 przepisów Lidla/Biedronki, k=5 cosine) + training_plan block z DDB cache, used_recipes populated, system prompt + retrieved_recipes + training_plan ephemerally cached |
 | Recipe pipeline (PDF → DDB + FAISS) | ✅ Sprint 6.2 PR2 live (PR #65 + #67) — `seed_recipes.py` parsed 139 recipes z 5 PDFów; DDB `PK=RECIPES`; S3 `recipes/faiss-index.bin` (834KB) + `recipes-metadata.json` (21KB); embed cost ~$0.0003 |
 | Frontend dashboard + chat UI | ✅ Sprint 7+8+9 shipped 2026-05-08 — sidebar 240px z 6 tabami (Dashboard/Aktywności/Ciało/Odżywianie/Przepisy AI/Ustawienia), tinted StatCardy z 11 SVG icons (HRV/sen/kroki/kcal/RHR/body fat/makro/waga), Sparkline + WeightChart, range toggle 1d/7d/30d, ProfileTargetsForm z PUT /api/profile/targets, multi-turn chat z RecipeCard+RecipeModal. 34 vitest. Live verified |
+| Mobile UX (iPhone bottom nav, kcal_in today=0, dashboard symetria, NutritionDonut, Spalone kalorie) | ✅ shipped 2026-05-09 (PRy #109/#110/#114/#115/#128) — bottom navigation pattern dla iPhone 14/17 (Weronika), kcal_in/makro pokazują 0 dla dzisiaj jeśli HAE nie wysłał (zamiast wczoraj), NutritionDonut donut chart 1:1 prototype, Spalone kalorie = active+basal TDEE |
+| Logo pack + preview mock mode | ✅ shipped 2026-05-09 (PRy #108/#118) — bodysync brand pack (favicon + sidebar header + login screen), `VITE_PREVIEW_MODE=true` env w CF Workers Builds → window.fetch override z mock data dla preview branch deployments |
+| Plan Treningowy frontend tab (Sprint 5 PR #3 + follow-upy) | ✅ shipped 2026-05-09 (PRy #116/#117/#120-#124) — sidebar 7-y tab "Plan Treningowy", parser raw 2D rows → Training[] z sekcji Rozgrzewka+Trening, tabs po unique base names (Trening A/B/C), dropdown weeks per group (najnowszy default), STRICT no-guess advisor rule po halucynacji "wykonałeś Trening B zamiast C" |
 
 ## Open PRs
 
-`gh pr list` — żadnych otwartych w danej chwili.
+`gh pr list` — żadnych otwartych w danej chwili (po Sprint 5 + advisor strict + Spalone kalorie).
 
-## Aktywny sprint — żaden (Sprint 4 + 6 + 7 + 8 + 9 zamknięte 2026-05-08/09)
+## Aktywny sprint — żaden (Sprint 4+5+6+7+8+9 zamknięte 2026-05-09)
 
-Pięć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets + 1:1 prototype port (Sprint 9) + **Strava integration** (Sprint 4 zaległy, finalnie shipped). Następny ruch z backlogu — Sprint 4.5 Garmin Connect, Google Sheets training plan, lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, #19 frontend bundle code-split, #20 PDF hosting, #21 chat history GET endpoint).
+Sześć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets + 1:1 prototype port (Sprint 9) + **Strava integration** (Sprint 4 zaległy) + **Google Sheets training plan + advisor injekcja** (Sprint 5). Następny ruch z backlogu — Sprint 4.5 Garmin Connect, lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, #19 frontend bundle code-split, #20 PDF hosting, #21 chat history GET endpoint).
+
+**Sprint 5 — Google Sheets training plan + advisor injekcja — DONE (11 PRy #107-#128 spread over 1 dzień, ~5h pracy):**
+- ✅ PR #107 — `apps/api/handlers/plan/` service module: Google Sheets API readonly fetch z cred from SSM, jagged row padding, fixed-vocabulary errors (invalid_credentials_json/format, sheet_not_found_or_no_access, permission_denied, sheets_api_error), DDB cache load/save z 15min freshness check
+- ✅ PR #112 (re-target main z #111 base bug) — `handler.py` GET /api/plan z JWT auth + cache-or-fetch flow + stale fallback (Google API down + cache → 200 stale fresh=False) + Terraform module plan + IAM `LeadingKeys USER#*` + 3 SSM placeholders z `lifecycle.ignore_changes`
+- ✅ PR #113 — hotfix `terraform import` block dla `/bodysync/google/service_account_json` (owner stworzył ręcznie pre-PR #112, ParameterAlreadyExists)
+- ✅ PR #116 — frontend Plan Treningowy tab: PlanScreen z 4 error states (not_configured/permission_denied/sheet_not_found/sheets_api_error friendly PL), parseErrorMessage fix dla `{"error": "string"}` shape (handler.py używa raw string)
+- ✅ PR #117 — rename "Plan" → "Plan Treningowy" w sidebar + TAB_TITLES
+- ✅ PR #119 — advisor RAG plan injection: `load_training_plan(user_id)` + `<training_plan>` block w prompt z `cache_control: ephemeral`, system_prompt.txt extended z anti-injection clause dla planu
+- ✅ PR #120 — Plan tab Opcja 2 (trainings tabs): heurystyczny parser raw → Training[] z `parseTrainings`, secondary nav A/B/C/D, drop Link/Ból, drop empty cols
+- ✅ PR #121 — skip duplicate header rows w środku bloku (trener powtarza header między rozgrzewką a głównym treningiem)
+- ✅ PR #122 — sections (Rozgrzewka + Trening) + default newest tab + `Section` type w parser, `disambiguateNames` z #N suffix
+- ✅ PR #123 — fix block z multiple Trening X (parser splituje "rozgrzewka A + Trening A + rozgrzewka B + Trening B" jak osobne tabs zamiast mergować)
+- ✅ PR #124 — week dropdown per group: tabs po base name (Trening A | B | C), dropdown z weeks gdy >1 (najnowszy default), drop #N suffix
+
+**Sprint 5 hot-fixes (post-deploy):**
+- PR #125 — advisor 500: cross-handler import `from handlers.plan.schemas import CachedPlan` crashował Lambda runtime (build per-handler zip nie zawiera innych handlerów). Inline `CachedPlan` w `advisor_chat/schemas.py`.
+- PR #126 → #127 (escalating strictness) — advisor halucynował "wykonałeś Trening B" gdy owner robił C. v1 (#126) decision tree z logbook detection — Haiku ignorowało, bo logbook entries są z różnych tygodni (brak timestampów). v2 (#127) STRICT: drop logbook detection, "ZAWSZE PYTAJ który trening" gdy user nie wskazał wprost.
+
+**Sprint 5 metryki:**
+- Backend: 1 nowy Lambda (plan), 28 testów (17 service + 11 handler) + 4 testy advisor injekcji
+- Frontend: nowy tab + parser z 130 LOC + 30+ testów (planParser.test.ts + PlanScreen.test.tsx + biometry.test.ts updates)
+- DDB single-table extensions: `PLAN#current` SK
+- IaC: 1 module + 1 route + 3 SSM placeholders z `ignore_changes` (owner manualne wartości)
+- 11 main PRs + 3 hot-fixów + 1 re-target = 15 wystawionych w 1 dniu
+
+**Owner ręczne kroki podczas deploy:**
+1. GCP Console: stwórz service account `bodysync-sheets-reader` + JSON key
+2. SSM: `aws ssm put-parameter --name /bodysync/google/service_account_json --type SecureString --value file://sa-key.json --overwrite`
+3. Google Sheets: Share → wpisz SA email jako Viewer
+4. SSM: `/bodysync/tomek/training-sheet-id` (z URL Google Sheets) + `/bodysync/tomek/training-sheet-tab` (np. "Arkusz5")
+
+**Mid-sprint UX fixy 2026-05-09 (poza Sprint 5):**
+- PR #109/#110 — NutritionDonut + Aktywności (tydzień) + symetria boxów Dashboard overview (port 1:1 prototype)
+- PR #114 — mobile UX bottom nav (iPhone 14/17 viewport, sidebar fixed bottom, content padding-bottom + safe-area-inset-bottom, ActivityRow stack, stat-grid 2-col na 390px+, section-header smaller)
+- PR #115 — `valueForDate` helper, `TodayMetricStatCard` component → kcal_in/makro pokazują 0 dla dzisiaj jeśli HAE nie wysłał (zamiast wczorajszej wartości — mylące)
+- PR #128 — `Spalone kalorie` = `sumSeries(kcal_active, kcal_basal)` Garmin/Apple TDEE, replace "Kcal aktywne" w Dashboard + Ciało
+
+**Mid-sprint security 2026-05-09:**
+- PR #104 — S3 bucket policy `Deny aws:SecureTransport=false` dla data + tf-state buckets (W5 hardening)
+- PR #105 — API GW throttling default 50 req/s + advisor chat override 5 req/s (W3 hardening)
+- PR #106 — athlete map conflict guard (W1 hardening, raise zamiast silent overwrite)
+- PR #108 — bodysync logo pack integration (favicon + sidebar header + login screen)
+- PR #118 — preview mock mode dla CF Workers Builds branch deployments (`VITE_PREVIEW_MODE=true` env z dashboard, dynamic-import preview-mock.ts override window.fetch dla `/api/*`)
 
 **Sprint 4 — Strava integration — DONE (12 PRy #91-#102, ~1.5 dnia):**
 - ✅ Step 1 (PR #91) — `shared/strava.py` Pydantic schemas (StravaTokens, StravaWebhookEvent, StravaActivity z `extra='ignore'` ~80 fieldów Strava); SSM placeholders (athlete-to-user, subscription_id)
@@ -165,15 +211,16 @@ Pięć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor
 
 **Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2.
 
-**Backlog post-Sprint 6+7+8+9 (do TaskList):**
+**Backlog post-Sprint 4+5+6+7+8+9 (do TaskList):**
 - **#17 Telegram bot subscriber** — replacement Gmail email który auto-unsub'uje SNS notifications (cost-guard alarm musi dzwonić)
 - **#18 Restore test_rag.py** — investigate faiss-cpu + pytest segfault na macOS aarch64 + Linux GHA. Granular RAG unit tests skipped
-- **#19 Frontend bundle code-split** — `React.lazy(ChatScreen)` + dynamic `recipes.json` import. Aktualnie 611KB raw / 148.30KB gzip
+- **#19 Frontend bundle code-split** — `React.lazy(ChatScreen)` + dynamic `recipes.json` import. Aktualnie ~624KB raw / ~152KB gzip (wzrost z 611KB po Sprint 5 + dropdown weeks + Spalone kalorie)
 - **#20 PDF hosting decision** — Sprint 7.5 mini-sprint jeśli owner chce link do source PDF z RecipeCard (R2/S3 public/CF Pages assets, 127MB)
 - **#21 Conversation history GET endpoint** — chat history fetch z backend (24h TTL DDB już ma). Refresh page lose-state UX
-- **#22 Aktywności tab — Strava integration** — Sprint 4 zaległy, frontend sidebar już ma placeholder z CTA
-- **API GW per-second throttle** — burst attack z valid JWT może przebić 30/dzień quotę. CloudWatch alarm jako backstop działa
+- ~~**#22 Aktywności tab — Strava integration**~~ ✅ DONE 2026-05-08/09 (Sprint 4)
+- ~~**API GW per-second throttle**~~ ✅ DONE 2026-05-09 (PR #105 W3 hardening — 50 req/s default + 5 req/s advisor)
 - **`requirements.txt` bez `--require-hashes`** — `pip-compile --generate-hashes` przed kolejnym sprintem z native deps
+- **#23 Backend training_plan logbook timestamps** — gdy trener doda kolumnę z datą per ćwiczenie / refreshe owner manualne, advisor mógłby auto-detect "wykonany dziś" zamiast pytać. Aktualnie advisor STRICT zawsze pyta (PR #127). Future: backend preprocesuje training_plan → `<training_status>` block z heurystyką per training (`Trening A: 6/8 logbook recently filled, najnowszy`).
 
 **5 OPEN questions z ADR-007 (post-MVP):** Strava/Sheets enrichment timing, conv_date forking, embedding refresh strategy, content logging policy (PII), frontend chat UI scope.
 
@@ -185,13 +232,15 @@ Pięć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor
 - **Layout decision dla Step 2** — bootstrap obecnie zajmuje `infrastructure/terraform/`. Główny workspace nie może tam siedzieć (różne backendy). Decyzja: przenieść bootstrap do `infrastructure/terraform/bootstrap/` (preferowane per ADR-003) lub stworzyć główny w `infrastructure/terraform-app/`. Ruszanie state file = manualnie + `terraform init -migrate-state`.
 - **Provider binaries w `infrastructure/terraform/hashicorp/`** — pusty katalog, nic w git ✓ (alarm fałszywy, do usunięcia z backlogu)
 - **Open follow-upy z audytu 2026-05-06** — HAE auth scheme, OIDC tightening (rola IAM ma `*` z ABAC tagiem — do zacieśnienia), naming policy ADR (jeśli potrzebne)
-- **Security audit follow-upy (Notes z 2026-05-07)** — accept lub planuj na otwarcie projektu:
+- **Security audit follow-upy (Notes z 2026-05-07 + 2026-05-09 sweep):**
   - SSM cache bez TTL (rotacja secret = cold restart Lambdy) → ADR jeśli zaczniemy rotować runtime
-  - S3 deny-non-TLS bucket policy (Security Hub flaguje)
+  - ~~S3 deny-non-TLS bucket policy~~ ✅ DONE 2026-05-09 (PR #104 W5)
   - DDB CMK zamiast aws-managed key (compliance trigger)
-  - `requirements.txt` bez `--require-hashes` — `pip-compile --generate-hashes` przed Sprint 3 jeśli dochodzi większy stack deps (Anthropic SDK, googleapiclient, faiss)
+  - `requirements.txt` bez `--require-hashes` — `pip-compile --generate-hashes` przed kolejnym sprintem z native deps
   - Logger `reason=str(e)` whitelistuj typy (zamiast surowego google-auth message) jeśli library zacznie loggować raw token
-  - CSP `style-src 'unsafe-inline'` → migracja na nonce-based gdy dashboard scaffold (Sprint 7)
+  - CSP `style-src 'unsafe-inline'` → migracja na nonce-based gdy dashboard scaffold (post-MVP)
+  - ~~API GW per-second throttle~~ ✅ DONE 2026-05-09 (PR #105 W3)
+  - ~~Athlete map silent overwrite race~~ ✅ DONE 2026-05-09 (PR #106 W1 — raise zamiast overwrite gdy conflict)
 
 ## Architectural commitments (do zapisania w ADRs)
 
@@ -203,27 +252,34 @@ Pięć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor
 - **ADR-006 advisor on-demand vs cron** ⚠️ Superseded by ADR-007 (`docs/adr/ADR-006-advisor-on-demand-vs-cron.md`) — single-shot dinner endpoint odrzucony po user feedback 2026-05-07 (chat + RAG zamiast button "kolacja"). PR #50 infra zachowane jako baseline refactoru.
 - **ADR-007 chat assistant + RAG** ✅ shipped (`docs/adr/ADR-007-chat-assistant-rag.md`) — primary advisor feature: `POST /api/advisor/chat` (multi-turn, 24h TTL DDB history, RAG retrieval z FAISS+S3+OpenAI embeddings, recipes Lidla/Biedronki ~150-200 entries w DDB `RECIPES` PK, Anthropic Haiku 4.5 prompt cached, free-form polski text response). Supersedes ADR-006. Subsumes Sprint 8 (recipe pipeline merged into Sprint 6).
 
-## SSM parameters (planowane)
+## SSM parameters
 
-| name | type | who writes | who reads |
-|---|---|---|---|
-| `/bodysync/anthropic/api_key` | SecureString | owner (CLI) | advisor Lambda + seed_recipes.py (Vision fallback) |
-| `/bodysync/openai/api_key` | SecureString | owner (CLI) | advisor Lambda (per-turn embed query) + seed_recipes.py (batch embed) — NEW per ADR-007 |
-| `/bodysync/strava/client_id` | String | owner (CLI) | api Lambda (oauth + fetcher) |
-| `/bodysync/strava/client_secret` | SecureString | owner (CLI) | api Lambda |
-| `/bodysync/strava/{user_id}/tokens` | SecureString | api Lambda (oauth callback + fetcher refresh) | fetcher Lambda |
-| `/bodysync/strava/verify_token` | SecureString | strava:subscribe CLI | api Lambda (webhook handshake) |
-| `/bodysync/health-auto-export/webhook_secret` | SecureString | owner (CLI) | api Lambda (signature verify) |
-| `/bodysync/google/service_account_json` | SecureString | owner (CLI) | api Lambda (Sheets read) |
-| `/bodysync/{user_id}/training-sheet-id` | String | owner (CLI) | api Lambda |
-| `/bodysync/jwt/signing_secret` | SecureString | owner (CLI) | api Lambda (mint + verify) |
+| name | type | who writes | who reads | status |
+|---|---|---|---|---|
+| `/bodysync/anthropic/api_key` | SecureString | owner (CLI) | advisor Lambda + seed_recipes.py | ✅ live |
+| `/bodysync/openai/api_key` | SecureString | owner (CLI) | advisor Lambda (per-turn embed query) + seed_recipes.py (batch embed) | ✅ live (per ADR-007) |
+| `/bodysync/strava/client_id` | String | owner (CLI) | api Lambda (oauth + fetcher) | ✅ live |
+| `/bodysync/strava/client_secret` | SecureString | owner (CLI) | api Lambda | ✅ live |
+| `/bodysync/strava/{user_id}/tokens` | SecureString | api Lambda (oauth callback + fetcher refresh) | fetcher Lambda | ✅ live |
+| `/bodysync/strava/verify_token` | SecureString | strava:subscribe CLI | api Lambda (webhook handshake) | ✅ live |
+| `/bodysync/strava/athlete-to-user` | String | api Lambda (oauth callback) | strava_webhook + fetcher | ✅ live |
+| `/bodysync/strava/subscription_id` | String | strava:subscribe CLI | strava_webhook (verify event) | ✅ live |
+| `/bodysync/health-auto-export/webhook_secret_{user_id}` | SecureString | owner (CLI) | health_webhook (Bearer constant-time compare) | ✅ live (tomek + weronika) |
+| `/bodysync/google/service_account_json` | SecureString | owner (CLI) | plan Lambda (Sheets read) | ✅ live (Sprint 5) |
+| `/bodysync/{user_id}/training-sheet-id` | String | owner (CLI) | plan Lambda | ✅ live (Sprint 5) |
+| `/bodysync/{user_id}/training-sheet-tab` | String | owner (CLI) | plan Lambda (np. "Arkusz5") | ✅ live (Sprint 5) |
+| `/bodysync/google/oauth_client_id` | String | owner (CLI) | google_auth (audience verify) | ✅ live |
+| `/bodysync/auth/allowed_emails` | String (JSON list) | owner (CLI) | google_auth (allowlist 2 emaili) | ✅ live |
+| `/bodysync/jwt/signing_secret` | SecureString | owner (CLI) | api Lambda (mint + verify) | ✅ live |
 
 ## Operational items still open
 
 - TFC migration to S3+DDB — N/A (ten projekt od początku S3+DDB)
 - Provider binaries w `infrastructure/terraform/hashicorp/` — nie commit-uj, dodaj `.terraform/` i `hashicorp/` do `.gitignore` jeśli brak
-- Health Auto Export — owner musi wpisać webhook URL + secret na telefonie (manual, post-deploy)
-- Strava webhook subskrypcja — manual `pnpm strava:subscribe` (lub odpowiednik Python) po deployu
+- Health Auto Export — owner musi wpisać webhook URL + secret na telefonie (manual, post-deploy) ✅ tomek + weronika done
+- Strava webhook subskrypcja — manual `python scripts/strava_subscribe.py subscribe` po deployu ✅ done
+- Plan Treningowy SSM (Google service account JSON + sheet-id + sheet-tab) ✅ done 2026-05-09
+- Cloudflare Workers Builds env var `VITE_PREVIEW_MODE=true` dla Preview environment (po PR #118 — daje preview branch URL z mock data zamiast 'Failed to fetch')
 
 ## Repo
 
