@@ -2,5 +2,7 @@
 # uniknąć /tmp filesystem cache w Lambda cold start.
 google-api-python-client==2.150.*
 google-auth==2.35.*
+# JWT verify dla bodysync_session cookie (mirror profile_targets/auth_logout).
+PyJWT==2.9.*
 pydantic==2.10.*
 boto3==1.35.*
