@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest';
-import { buildSeries, latestValue, trendPct, valueForDate, type SeriesPoint } from '../biometry';
+import {
+  buildSeries,
+  latestValue,
+  sumSeries,
+  trendPct,
+  valueForDate,
+  type SeriesPoint,
+} from '../biometry';
 import type { BiometryDay } from '../types';
 
 function day(date: string, metrics: BiometryDay['metrics']): BiometryDay {
@@ -149,5 +156,39 @@ describe('valueForDate', () => {
 
   test('handles date present at the start', () => {
     expect(valueForDate(series, '2026-05-07')?.value).toBe(1800);
+  });
+});
+
+describe('sumSeries', () => {
+  test('sums values per matching date', () => {
+    const a: SeriesPoint[] = [
+      { date: '2026-05-08', value: 500 },
+      { date: '2026-05-09', value: 600 },
+    ];
+    const b: SeriesPoint[] = [
+      { date: '2026-05-08', value: 1500 },
+      { date: '2026-05-09', value: 1550 },
+    ];
+    expect(sumSeries(a, b)).toEqual([
+      { date: '2026-05-08', value: 2000 },
+      { date: '2026-05-09', value: 2150 },
+    ]);
+  });
+
+  test('union dat — date present only in a, treats b missing as 0', () => {
+    const a: SeriesPoint[] = [{ date: '2026-05-08', value: 500 }];
+    const b: SeriesPoint[] = [];
+    expect(sumSeries(a, b)).toEqual([{ date: '2026-05-08', value: 500 }]);
+  });
+
+  test('result sorted by date asc', () => {
+    const a: SeriesPoint[] = [{ date: '2026-05-09', value: 100 }];
+    const b: SeriesPoint[] = [{ date: '2026-05-07', value: 200 }];
+    const result = sumSeries(a, b);
+    expect(result.map((p) => p.date)).toEqual(['2026-05-07', '2026-05-09']);
+  });
+
+  test('empty + empty → []', () => {
+    expect(sumSeries([], [])).toEqual([]);
   });
 });

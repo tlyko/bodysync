@@ -81,6 +81,20 @@ export function valueForDate(series: SeriesPoint[], dateIso: string): SeriesPoin
   return series.find((p) => p.date === dateIso) ?? null;
 }
 
+// Sumuje 2 series po dacie. Dla każdego dnia gdzie KTÓRYŚ z metryków
+// istnieje (czyli union dat), zwraca punkt z sumą (brakujący traktowany
+// jako 0). Używane dla "Spalone kalorie" = kcal_active + kcal_basal
+// (Garmin/Apple total daily energy expenditure).
+export function sumSeries(a: SeriesPoint[], b: SeriesPoint[]): SeriesPoint[] {
+  const aMap = new Map(a.map((p) => [p.date, p.value]));
+  const bMap = new Map(b.map((p) => [p.date, p.value]));
+  const allDates = [...new Set([...aMap.keys(), ...bMap.keys()])].sort();
+  return allDates.map((date) => ({
+    date,
+    value: (aMap.get(date) ?? 0) + (bMap.get(date) ?? 0),
+  }));
+}
+
 // % zmiana avg ostatnie N vs poprzednie N.
 // Zwraca null gdy brak danych w którymkolwiek oknie. Domyślnie 7d vs 7-14d ago.
 export function trendPct(series: SeriesPoint[], windowDays = 7): number | null {
