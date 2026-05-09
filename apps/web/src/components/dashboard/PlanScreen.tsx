@@ -125,7 +125,11 @@ export function PlanScreen() {
 
 function PlanContent({ plan }: { plan: PlanResponse }) {
   const trainings = useMemo(() => parseTrainings(plan.rows), [plan.rows]);
-  const [activeIdx, setActiveIdx] = useState(0);
+  // Default = ostatni trening (najnowszy, owner: "to co jest najnizej").
+  // Trener appenduje nowe bloki w prawo / w dół, więc last in array = newest.
+  const [activeIdx, setActiveIdx] = useState(() =>
+    trainings.length > 0 ? trainings.length - 1 : 0,
+  );
 
   if (plan.rows.length === 0) {
     return (
@@ -164,34 +168,41 @@ function PlanContent({ plan }: { plan: PlanResponse }) {
         ))}
       </nav>
 
-      <TrainingTable training={active} />
+      <TrainingSections training={active} />
     </>
   );
 }
 
-function TrainingTable({ training }: { training: Training }) {
+function TrainingSections({ training }: { training: Training }) {
   return (
-    <div className="training-table-wrap">
-      <table className="training-table">
-        <thead>
-          <tr>
-            {training.headers.map((h, i) => (
-              <th key={i}>{h}</th>
-            ))}
-          </tr>
-        </thead>
-        <tbody>
-          {training.exercises.map((ex, i) => (
-            <tr key={`${ex.number}-${i}`}>
-              {ex.cells.map((cell, ci) => (
-                <td key={ci} className={cell === '' ? 'plan-cell-empty' : undefined}>
-                  {cell}
-                </td>
-              ))}
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <div className="training-sections">
+      {training.sections.map((section, si) => (
+        <section key={si} className="training-section">
+          {section.label && <h3 className="training-section-label">{section.label}</h3>}
+          <div className="training-table-wrap">
+            <table className="training-table">
+              <thead>
+                <tr>
+                  {section.headers.map((h, i) => (
+                    <th key={i}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {section.exercises.map((ex, i) => (
+                  <tr key={`${ex.number}-${i}`}>
+                    {ex.cells.map((cell, ci) => (
+                      <td key={ci} className={cell === '' ? 'plan-cell-empty' : undefined}>
+                        {cell}
+                      </td>
+                    ))}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      ))}
     </div>
   );
 }
