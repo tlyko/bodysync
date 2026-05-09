@@ -32,3 +32,27 @@ variable "log_retention_days" {
   type    = number
   default = 14
 }
+
+# Throttling defaults — security audit 2026-05-09 W3. AWS account quota
+# default to 10000 req/s / 5000 burst — nasz throttle jest 200x niżej.
+# Adjustować jeśli legitnie potrzebujemy więcej (CW alarm 4XX rate
+# jako early warning).
+variable "default_throttle_rate" {
+  type    = number
+  default = 50 # req/s sustained
+}
+
+variable "default_throttle_burst" {
+  type    = number
+  default = 100
+}
+
+variable "advisor_chat_throttle_rate" {
+  type    = number
+  default = 5 # req/s sustained — Anthropic cost guard
+}
+
+variable "advisor_chat_throttle_burst" {
+  type    = number
+  default = 10
+}
