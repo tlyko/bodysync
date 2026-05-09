@@ -133,7 +133,21 @@ export function Dashboard({ me, onLogout }: Props) {
           )}
           {activeTab === 'activities' && <ActivitiesView />}
           {activeTab === 'recipes' && <ChatScreen />}
-          {activeTab === 'settings' && <ProfileTargetsForm />}
+          {activeTab === 'settings' && (
+            <>
+              <ProfileTargetsForm />
+              {/* Mobile fallback — sidebar foot z "Wyloguj" jest hidden na mobile
+                  (bottom nav nie ma miejsca). Settings tab to logiczne miejsce
+                  na konto/account actions. */}
+              <button
+                type="button"
+                className="settings-logout-button"
+                onClick={onLogout}
+              >
+                Wyloguj
+              </button>
+            </>
+          )}
         </div>
       </main>
     </div>
