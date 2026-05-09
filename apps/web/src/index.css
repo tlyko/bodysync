@@ -65,12 +65,13 @@ code {
   justify-content: center;
   padding: 2rem;
 }
-.login-screen h1 {
-  font-family: 'JetBrains Mono', ui-monospace, monospace;
-  font-size: 3rem;
-  margin: 0 0 0.5rem;
-  color: var(--cyan);
-  letter-spacing: -0.02em;
+.login-screen .login-logo {
+  display: block;
+  width: 280px;
+  max-width: 80vw;
+  height: auto;
+  margin: 0 0 1rem;
+  border-radius: 16px;
 }
 .login-screen .tagline {
   color: var(--text-muted);
@@ -124,9 +125,9 @@ code {
   width: 36px;
   height: 36px;
   border-radius: 8px;
-  background: linear-gradient(135deg, var(--cyan), var(--purple));
   flex-shrink: 0;
-  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.25);
+  display: block;
+  box-shadow: 0 4px 12px rgba(34, 211, 238, 0.18);
 }
 .app-sidebar-brand-text {
   font-family: 'JetBrains Mono', ui-monospace, monospace;

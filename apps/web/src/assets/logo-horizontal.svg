@@ -1,0 +1,24 @@
+<svg width="310" height="120" viewBox="0 0 310 120" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<linearGradient id="neon" x1="0%" y1="0%" x2="100%" y2="100%">
+<stop offset="0%" stop-color="#00f0ff"/>
+<stop offset="50%" stop-color="#7b2cff"/>
+<stop offset="100%" stop-color="#ff2d9c"/>
+</linearGradient>
+</defs>
+
+<rect width="310" height="120" rx="12" fill="#0a0e1a"/>
+
+<polygon points="60,30 95,50 95,90 60,110 25,90 25,50"
+fill="#0a0e1a" stroke="url(#neon)" stroke-width="2" stroke-linejoin="round"/>
+
+<path d="M 30,70 L 42,70 L 47,58 L 53,82 L 60,52 L 67,86 L 73,64 L 78,70 L 90,70"
+fill="none" stroke="#00f0ff" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/>
+<circle cx="60" cy="70" r="2.5" fill="#ff2d9c"/>
+
+<text x="125" y="80"
+font-family="ui-monospace, 'SF Mono', Menlo, monospace"
+font-size="22" font-weight="700" letter-spacing="-1">
+<tspan fill="#ffffff">body</tspan><tspan fill="#00f0ff">sync</tspan>
+</text>
+</svg>

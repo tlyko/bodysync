@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { GOOGLE_CLIENT_ID } from '../config';
 import { loginWithGoogle } from '../api';
+import logoHorizontal from '../assets/logo-horizontal.svg';
 
 // Google Identity Services types — minimum potrzebne, biblioteka inject'uje
 // `window.google.accounts.id` po załadowaniu skryptu z gsi/client.
@@ -85,7 +86,7 @@ export function LoginScreen({ onLoginSuccess }: Props) {
   if (!GOOGLE_CLIENT_ID) {
     return (
       <div className="login-screen">
-        <h1>bodysync</h1>
+        <img src={logoHorizontal} alt="bodysync" className="login-logo" />
         <p className="error">
           Konfiguracja niekompletna — brak <code>VITE_GOOGLE_CLIENT_ID</code>. Ustaw w
           Cloudflare project Environment Variables i przebuduj.
@@ -96,7 +97,7 @@ export function LoginScreen({ onLoginSuccess }: Props) {
 
   return (
     <div className="login-screen">
-      <h1>bodysync</h1>
+      <img src={logoHorizontal} alt="bodysync" className="login-logo" />
       <p className="tagline">Personal health + fitness dashboard</p>
       <div ref={buttonRef} className="gsi-button" />
     </div>
