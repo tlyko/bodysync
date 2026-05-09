@@ -32,12 +32,11 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from handlers.plan.schemas import CachedPlan
 from shared.dynamo import get_item, put_item_idempotent, query_by_pk, sum_metric_today
 from shared.logging import get_logger
 from shared.ssm import SecretMisconfiguredError, load_secure_secret
 
-from .schemas import ChatMessage, TodayState, TokenUsage, UsedRecipe
+from .schemas import CachedPlan, ChatMessage, TodayState, TokenUsage, UsedRecipe
 
 if TYPE_CHECKING:
     from anthropic import Anthropic
