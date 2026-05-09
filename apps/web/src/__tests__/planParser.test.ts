@@ -138,6 +138,31 @@ describe('parseTrainings — edge cases', () => {
     expect(parseTrainings(rows)).toEqual([]);
   });
 
+  test('skips duplicate header rows w środku bloku (rozgrzewka/main split)', () => {
+    // Real layout od trenerki: rozgrzewka pod headerem, potem header
+    // powtórzony między rozgrzewką a Trening A. Bez tego skip'a owner
+    // widzi wiersz "Numer | Ćwiczenie | ..." w środku tabu.
+    const rows = [
+      blockHeader(),
+      dataRow('01', 'Hip opener', '', '5p/'),
+      dataRow('02', 'Wall sit', '', '60s'),
+      blockHeader(), // duplicate header w środku bloku
+      trainingLabelRow('Trening A'),
+      dataRow('01', 'Squat', '', '5x5'),
+      dataRow('02', 'Bench', '', '4x8'),
+    ];
+    const result = parseTrainings(rows);
+    // Wszystkie 4 ćwiczenia + skip duplicate header + skip "Trening A" label
+    expect(result[0].exercises.map((e) => e.cells[1])).toEqual([
+      'Hip opener',
+      'Wall sit',
+      'Squat',
+      'Bench',
+    ]);
+    // Header NIE pojawia się jako exercise number
+    expect(result[0].exercises.map((e) => e.number)).not.toContain('Numer');
+  });
+
   test('skips "Trening X" label row jako exercise', () => {
     const rows = [
       blockHeader(),

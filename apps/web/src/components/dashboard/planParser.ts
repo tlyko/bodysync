@@ -132,8 +132,13 @@ export function parseTrainings(rows: string[][]): Training[] {
       if (!number) continue;
       // Skip "Trening X" header row (number col contains "Trening A" zamiast "01")
       if (number.startsWith('Trening ')) continue;
-      // Skip block sub-headers "Rozgrzewka"
+      // Skip block sub-headers "Rozgrzewka" / "Dół" / "Góra"
       if (number === 'Rozgrzewka' || number === 'Dół' || number === 'Góra') continue;
+      // Skip duplicate header rows — trener często powtarza header między
+      // rozgrzewką a głównym treningiem w obrębie tej samej kolumny. Owner
+      // bug report: "w połowie taba widzę wiersz Numer Ćwiczenie...".
+      // Detect: numer col cell == "Numer" (header literal).
+      if (number === 'Numer') continue;
       const cells = colsKeep.map((c) => (blockRows[r][c] ?? '').trim());
       exercises.push({ number, cells });
     }
