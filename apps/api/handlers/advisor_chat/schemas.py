@@ -22,7 +22,7 @@ from __future__ import annotations
 import re
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 # Forbidden closing tags — block attacks że user message zamyka wrapper
 # `<user_message>` w `service.build_chat_messages`, by potem wstrzyknąć
@@ -157,3 +157,20 @@ class ChatResponse(BaseModel):
     turn_idx: int
     tokens_used: TokenUsage
     generated_at: str  # ISO 8601 UTC, np. "2026-05-07T19:23:45+00:00"
+
+
+# Sprint 5 PR #4 fix — inline CachedPlan definition (mirror handlers/plan/schemas.py).
+# Cross-handler import `from handlers.plan.schemas import CachedPlan` powodował
+# ImportError w Lambda (build script per-handler zip nie zawiera innych handlerów).
+# Single source of truth nadal w handlers/plan; advisor_chat ma własną kopię
+# tylko dla load_training_plan return type. DDB shape musi pasować do plan/.
+class CachedPlan(BaseModel):
+    """Mirror handlers/plan/schemas.py CachedPlan — inline żeby uniknąć
+    cross-handler import bundle issue. Walidacja jest tu best-effort
+    (dane już zapisane przez handlers.plan.service); shape musi pasować."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    rows: list[list[str]] = Field(default_factory=list)
+    fetched_at: int
+    sheet_tab: str = Field(..., min_length=1, max_length=200)
