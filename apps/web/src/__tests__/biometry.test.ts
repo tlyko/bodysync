@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest';
-import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
+import { buildSeries, latestValue, trendPct, valueForDate, type SeriesPoint } from '../biometry';
 import type { BiometryDay } from '../types';
 
 function day(date: string, metrics: BiometryDay['metrics']): BiometryDay {
@@ -122,5 +122,32 @@ describe('trendPct', () => {
       value: i < 7 ? 0 : 50,
     }));
     expect(trendPct(series, 7)).toBeNull();
+  });
+});
+
+describe('valueForDate', () => {
+  const series: SeriesPoint[] = [
+    { date: '2026-05-07', value: 1800 },
+    { date: '2026-05-08', value: 1950 },
+    { date: '2026-05-09', value: 2100 },
+  ];
+
+  test('returns point for matching date', () => {
+    expect(valueForDate(series, '2026-05-08')).toEqual({
+      date: '2026-05-08',
+      value: 1950,
+    });
+  });
+
+  test('returns null when date not in series (e.g. user nie wpisał kcal_in dziś)', () => {
+    expect(valueForDate(series, '2026-05-10')).toBeNull();
+  });
+
+  test('returns null for empty series', () => {
+    expect(valueForDate([], '2026-05-09')).toBeNull();
+  });
+
+  test('handles date present at the start', () => {
+    expect(valueForDate(series, '2026-05-07')?.value).toBe(1800);
   });
 });

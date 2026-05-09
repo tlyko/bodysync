@@ -1,6 +1,6 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { getActivities, getBiometry } from '../api';
-import { buildSeries, latestValue, trendPct, type SeriesPoint } from '../biometry';
+import { buildSeries, latestValue, trendPct, valueForDate, type SeriesPoint } from '../biometry';
 import type { Activity, BiometryDay, Me } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
 import { ActivitiesView } from './dashboard/ActivitiesView';
@@ -253,10 +253,15 @@ function DashboardOverview({
   const fatSeries = buildSeries(days, 'fat');
   const carbsSeries = buildSeries(days, 'carbs');
 
-  const latestKcalIn = latestValue(kcalIn)?.value ?? null;
-  const latestProtein = latestValue(proteinSeries)?.value ?? null;
-  const latestFat = latestValue(fatSeries)?.value ?? null;
-  const latestCarbs = latestValue(carbsSeries)?.value ?? null;
+  // Manualne metryki (kcal_in + makro) — pokazujemy wartość TYLKO jeśli
+  // mamy entry dla today. Inaczej "0 kcal/0g" zamiast wczoraj — owner
+  // chce widzieć "nic dziś nie spożyłem" (HAE webhook może nie być
+  // wysłany jeśli user nie zaktualizował Fitatu/MyFitnessPal).
+  const today = localTodayIso();
+  const kcalInToday = valueForDate(kcalIn, today)?.value ?? 0;
+  const proteinToday = valueForDate(proteinSeries, today)?.value ?? 0;
+  const fatToday = valueForDate(fatSeries, today)?.value ?? 0;
+  const carbsToday = valueForDate(carbsSeries, today)?.value ?? 0;
 
   return (
     <>
@@ -274,7 +279,7 @@ function DashboardOverview({
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
         />
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Kcal spożyte"
           series={kcalIn}
           unit="kcal"
@@ -282,6 +287,7 @@ function DashboardOverview({
           icon={<UtensilsIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
+          today={today}
         />
         <WeeklyActivitiesCard />
         <MetricStatCard
@@ -309,10 +315,10 @@ function DashboardOverview({
         <div className="overview-right-stack">
           <SectionPanel title="Makroskładniki">
             <NutritionDonut
-              kcal={latestKcalIn}
-              proteinG={latestProtein}
-              fatG={latestFat}
-              carbsG={latestCarbs}
+              kcal={kcalInToday}
+              proteinG={proteinToday}
+              fatG={fatToday}
+              carbsG={carbsToday}
             />
           </SectionPanel>
 
@@ -536,6 +542,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
   const proteinSeries = buildSeries(days, 'protein');
   const fatSeries = buildSeries(days, 'fat');
   const carbsSeries = buildSeries(days, 'carbs');
+  const today = localTodayIso();
 
   return (
     <>
@@ -543,7 +550,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
         <RangeToggle value={range} onChange={onRangeChange} />
       </SectionHeader>
       <div className="stat-grid">
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Kcal spożyte"
           series={kcalInSeries}
           unit="kcal"
@@ -551,8 +558,9 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           icon={<UtensilsIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
+          today={today}
         />
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Białko"
           series={proteinSeries}
           unit="g"
@@ -560,8 +568,9 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           icon={<EggIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
+          today={today}
         />
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Tłuszcz"
           series={fatSeries}
           unit="g"
@@ -569,8 +578,9 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           icon={<DropletIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
+          today={today}
         />
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Węgle"
           series={carbsSeries}
           unit="g"
@@ -578,6 +588,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           icon={<WheatIcon />}
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
+          today={today}
         />
       </div>
     </>
@@ -652,6 +663,41 @@ function MetricStatCard({
     <StatCard
       label={label}
       value={last ? fmt(last.value) : null}
+      unit={unit}
+      accent={accent}
+      icon={icon}
+      sparkData={sparkData}
+      change={trend}
+    />
+  );
+}
+
+// Wariant MetricStatCard dla manualnych metryk (kcal_in + makro) — pokazuje
+// wartość TYLKO jeśli mamy entry dla `today`, inaczej 0. Owner: jeśli HAE
+// nie wysłał kcal_in dla dzisiaj, "0 kcal" lepsze niż wczorajsza wartość
+// (która myli — wygląda jak dziś już wpisałeś).
+type TodayMetricStatCardProps = MetricStatCardProps & { today: string };
+
+function TodayMetricStatCard({
+  label,
+  series,
+  unit,
+  accent,
+  fmt,
+  trendWindow,
+  icon,
+  today,
+}: TodayMetricStatCardProps) {
+  const todayPoint = valueForDate(series, today);
+  const value = todayPoint?.value ?? 0;
+  const sparkData = trendWindow === null ? undefined : series.map((p) => p.value);
+  // Trend hide gdy brak today data — "spadek do 0" jest mylący semantycznie.
+  const trend =
+    todayPoint && trendWindow !== null ? trendPct(series, trendWindow) : null;
+  return (
+    <StatCard
+      label={label}
+      value={fmt(value)}
       unit={unit}
       accent={accent}
       icon={icon}
