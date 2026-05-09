@@ -32,6 +32,7 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
+from handlers.plan.schemas import CachedPlan
 from shared.dynamo import get_item, put_item_idempotent, query_by_pk, sum_metric_today
 from shared.logging import get_logger
 from shared.ssm import SecretMisconfiguredError, load_secure_secret
@@ -440,29 +441,53 @@ def append_message(
 # ─── Prompt composition ────────────────────────────────────────────────────
 
 
+def load_training_plan(user_id: str) -> CachedPlan | None:
+    """DDB GetItem PK=USER#{id} SK=PLAN#current — reuse handlers.plan cache.
+
+    None gdy brak (user nie ma jeszcze planu — backend zwracał 503
+    `not_configured` lub frontend nigdy nie wywołał `/api/plan`). Stale
+    cache (>15min) NIE jest blokiem — advisor i tak używa, owner refresh'uje
+    Plan tab gdy chce świeżych danych.
+
+    Wrap w try/except — DDB errror nie powinien crashować chatu. Logger
+    łapie w handlerze.
+    """
+    item = get_item(f"USER#{user_id}", "PLAN#current")
+    if item is None:
+        return None
+    item.pop("PK", None)
+    item.pop("SK", None)
+    try:
+        return CachedPlan.model_validate(item)
+    except Exception:
+        return None
+
+
 def build_chat_messages(
     history: list[ChatMessage],
     today_state: TodayState,
     user_message: str,
     *,
     retrieved_recipes: list[UsedRecipe] | None = None,
+    training_plan: CachedPlan | None = None,
 ) -> list[dict[str, Any]]:
-    """Buduje pojedynczy user message z 3-4 blokami XML-ish:
+    """Buduje pojedynczy user message z 3-5 blokami XML-ish:
     `<conversation_history>`, `<today_context>`,
-    (opcjonalnie) `<retrieved_recipes>`, `<user_message>`.
+    (opcjonalnie) `<retrieved_recipes>`, (opcjonalnie) `<training_plan>`,
+    `<user_message>`.
 
     Per ADR-007 D7: pojedynczy user message do Anthropic (NIE native
     multi-turn `messages=[{role:user},{role:assistant},...]`) — daje
     stabilny prompt cache (system prompt cached osobno via `cache_control`).
 
-    Per ADR-007 D6 "User message structure": `<retrieved_recipes>` block
-    dostaje **osobny** content block z dedykowanym `cache_control: ephemeral`
-    markerem — top-K dla podobnych queries jest stable enough żeby cache
-    hit ratio (~30-50% w wielo-turnowej rozmowie) opłacił się; history +
-    today_context są dynamic per turn (nie cached).
+    Per ADR-007 D6 "User message structure": `<retrieved_recipes>` +
+    `<training_plan>` bloki dostają **osobne** content blocks z dedykowanym
+    `cache_control: ephemeral` markerem. Plan jest stable across turn
+    (15min DDB TTL frontend-side), więc cache hit ~70-80% w trakcie sesji
+    chat. Hist + today_context są dynamic per turn.
 
-    `retrieved_recipes` keyword-only (backward-compat z PR1 callers); `None`
-    lub `[]` ⇒ block pominięty (graceful degradation gdy RAG fail).
+    `retrieved_recipes` / `training_plan` keyword-only; `None` ⇒ block
+    pominięty (graceful degradation gdy RAG fail / plan brak).
 
     Hard cap 20 ostatnich tur historii (drop oldest) — chroni token budget.
     """
@@ -494,6 +519,25 @@ def build_chat_messages(
             {
                 "type": "text",
                 "text": retrieved_block,
+                "cache_control": {"type": "ephemeral"},
+            }
+        )
+
+    # Block 2.5 — training_plan (cached gdy truthy). Raw rows TSV-podobny
+    # tekst (tabs jako col separator) — Haiku parsuje semantycznie.
+    if training_plan and training_plan.rows:
+        plan_text = "\n".join("\t".join(row) for row in training_plan.rows)
+        plan_block = (
+            f"<training_plan>\n"
+            f"sheet_tab: {training_plan.sheet_tab}\n"
+            f"fetched_at: {training_plan.fetched_at}\n"
+            f"rows:\n{plan_text}\n"
+            f"</training_plan>"
+        )
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": plan_block,
                 "cache_control": {"type": "ephemeral"},
             }
         )
@@ -607,5 +651,6 @@ __all__ = [
     "build_today_state",
     "call_chat",
     "get_anthropic_client",
+    "load_training_plan",
     "read_history",
 ]
