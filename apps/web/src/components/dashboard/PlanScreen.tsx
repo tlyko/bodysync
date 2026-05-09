@@ -3,9 +3,10 @@
 // Strukturalny parser → exercises objects post-MVP (gdy owner odczuje
 // potrzebę structured view).
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { ApiError, getPlan } from '../../api';
 import type { PlanResponse } from '../../types';
+import { parseTrainings, type Training } from './planParser';
 
 type State =
   | { status: 'loading' }
@@ -117,27 +118,80 @@ export function PlanScreen() {
         </button>
       </div>
 
-      {plan.rows.length === 0 ? (
-        <p className="placeholder-text">
-          Arkusz jest pusty albo zakładka <strong>{plan.sheet_tab}</strong> nie istnieje.
-        </p>
-      ) : (
-        <div className="plan-table-wrap">
-          <table className="plan-table">
-            <tbody>
-              {plan.rows.map((row, ri) => (
-                <tr key={ri}>
-                  {row.map((cell, ci) => (
-                    <td key={ci} className={cell === '' ? 'plan-cell-empty' : undefined}>
-                      {cell}
-                    </td>
-                  ))}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
+      <PlanContent plan={plan} />
     </section>
+  );
+}
+
+function PlanContent({ plan }: { plan: PlanResponse }) {
+  const trainings = useMemo(() => parseTrainings(plan.rows), [plan.rows]);
+  const [activeIdx, setActiveIdx] = useState(0);
+
+  if (plan.rows.length === 0) {
+    return (
+      <p className="placeholder-text">
+        Arkusz jest pusty albo zakładka <strong>{plan.sheet_tab}</strong> nie istnieje.
+      </p>
+    );
+  }
+
+  if (trainings.length === 0) {
+    return (
+      <p className="placeholder-text">
+        Nie udało się sparsować planu (brak nagłówka <code>Numer</code> w arkuszu).
+        Sprawdź czy zakładka <strong>{plan.sheet_tab}</strong> ma standardowy
+        layout od trenerki.
+      </p>
+    );
+  }
+
+  const safeIdx = Math.min(activeIdx, trainings.length - 1);
+  const active = trainings[safeIdx];
+
+  return (
+    <>
+      <nav className="training-tabs" aria-label="Wybierz trening">
+        {trainings.map((t, i) => (
+          <button
+            key={`${t.name}-${i}`}
+            type="button"
+            className={`training-tab${i === safeIdx ? ' active' : ''}`}
+            onClick={() => setActiveIdx(i)}
+            aria-current={i === safeIdx ? 'page' : undefined}
+          >
+            {t.name}
+          </button>
+        ))}
+      </nav>
+
+      <TrainingTable training={active} />
+    </>
+  );
+}
+
+function TrainingTable({ training }: { training: Training }) {
+  return (
+    <div className="training-table-wrap">
+      <table className="training-table">
+        <thead>
+          <tr>
+            {training.headers.map((h, i) => (
+              <th key={i}>{h}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {training.exercises.map((ex, i) => (
+            <tr key={`${ex.number}-${i}`}>
+              {ex.cells.map((cell, ci) => (
+                <td key={ci} className={cell === '' ? 'plan-cell-empty' : undefined}>
+                  {cell}
+                </td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

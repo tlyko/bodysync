@@ -307,6 +307,86 @@ body:has(.preview-banner) .login-screen {
   opacity: 0.5;
   cursor: not-allowed;
 }
+/* Trainings tabs (Sprint 5 follow-up — Opcja 2 split na A/B/C/D) */
+.training-tabs {
+  display: flex;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+  padding: 0.4rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.training-tab {
+  flex: 1 1 auto;
+  min-width: 80px;
+  padding: 0.55rem 0.85rem;
+  background: transparent;
+  color: var(--text-muted);
+  border: 1px solid transparent;
+  border-radius: 8px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.82rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.training-tab:hover:not(.active) {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.training-tab.active {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  border-color: rgba(34, 211, 238, 0.3);
+}
+.training-table-wrap {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.5rem;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+}
+.training-table {
+  border-collapse: collapse;
+  width: 100%;
+  min-width: max-content;
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.85rem;
+  color: var(--text);
+}
+.training-table th {
+  padding: 0.55rem 0.7rem;
+  border-bottom: 2px solid var(--border-light);
+  text-align: left;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  background: var(--card);
+}
+.training-table td {
+  padding: 0.5rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+  white-space: nowrap;
+}
+.training-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+.training-table td.plan-cell-empty {
+  color: var(--text-dim);
+}
+
 .plan-table-wrap {
   overflow-x: auto;
   background: var(--card);
