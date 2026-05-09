@@ -73,6 +73,14 @@ export function latestValue(series: SeriesPoint[]): SeriesPoint | null {
   return series[series.length - 1];
 }
 
+// Zwraca point dla konkretnej daty (YYYY-MM-DD), null gdy brak.
+// Używane dla manualnych metryk (kcal_in, makro) gdzie chcemy pokazać
+// "0 spożyte" jeśli user dziś nic nie wpisał, zamiast wartości z wczoraj
+// (która myli — wygląda jakby user wpisał kcal_in i są takie samo).
+export function valueForDate(series: SeriesPoint[], dateIso: string): SeriesPoint | null {
+  return series.find((p) => p.date === dateIso) ?? null;
+}
+
 // % zmiana avg ostatnie N vs poprzednie N.
 // Zwraca null gdy brak danych w którymkolwiek oknie. Domyślnie 7d vs 7-14d ago.
 export function trendPct(series: SeriesPoint[], windowDays = 7): number | null {
