@@ -1,5 +1,6 @@
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, test, vi } from 'vitest';
+import { NutritionDonut } from '../components/dashboard/NutritionDonut';
 import { RangeToggle } from '../components/dashboard/RangeToggle';
 import { Sparkline } from '../components/dashboard/Sparkline';
 import { StatCard } from '../components/dashboard/StatCard';
@@ -103,5 +104,53 @@ describe('RangeToggle', () => {
     render(<RangeToggle value="30d" onChange={onChange} />);
     fireEvent.click(screen.getByRole('button', { name: 'Dziś' }));
     expect(onChange).toHaveBeenCalledWith('1d');
+  });
+});
+
+describe('NutritionDonut', () => {
+  test('renders kcal value w środku ringa + 3 segmenty', () => {
+    const { container } = render(
+      <NutritionDonut kcal={1850} proteinG={120} fatG={70} carbsG={180} />,
+    );
+    // Center text — kcal liczba (pl-PL używa NBSP jako thousands separator,
+    // więc raw normalize "1 850" / "1 850" — matcher na wszystkie spacje).
+    const kcalText = container.querySelector('.nutrition-donut-kcal');
+    expect(kcalText?.textContent?.replace(/\s/g, '')).toBe('1850');
+    expect(screen.getByText('kcal')).toBeInTheDocument();
+    // 3 stroked circles dla segments (no placeholder ring bo hasData=true)
+    const circles = container.querySelectorAll('circle');
+    expect(circles).toHaveLength(3);
+    // Legend rows
+    expect(screen.getByText('Białko')).toBeInTheDocument();
+    expect(screen.getByText('Tłuszcz')).toBeInTheDocument();
+    expect(screen.getByText('Węgle')).toBeInTheDocument();
+    expect(screen.getByText('120g')).toBeInTheDocument();
+    expect(screen.getByText('70g')).toBeInTheDocument();
+    expect(screen.getByText('180g')).toBeInTheDocument();
+  });
+
+  test('empty state — placeholder ring + dashes w legend gdy makro=null', () => {
+    const { container } = render(
+      <NutritionDonut kcal={null} proteinG={null} fatG={null} carbsG={null} />,
+    );
+    // 1 placeholder ring (no segments)
+    const circles = container.querySelectorAll('circle');
+    expect(circles).toHaveLength(1);
+    // 4 dashes total: 1 center kcal + 3 legend wartości
+    const dashes = screen.getAllByText('—');
+    expect(dashes).toHaveLength(4);
+  });
+
+  test('aria-label opisuje makro skład dla screen readers', () => {
+    render(<NutritionDonut kcal={1500} proteinG={100} fatG={50} carbsG={200} />);
+    const svg = screen.getByRole('img');
+    expect(svg).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('białko 100g'),
+    );
+    expect(svg).toHaveAttribute(
+      'aria-label',
+      expect.stringContaining('tłuszcz 50g'),
+    );
   });
 });

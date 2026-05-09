@@ -25,6 +25,16 @@ export const FlameIcon = () => (
   </svg>
 );
 
+// Run/Activity (chevron up) — Strava-vibe, używane w "Aktywności tygodnia"
+// StatCard. Mirror RunIcon w SidebarNav (sidebar nav używa swojej wewnętrznej
+// kopii; tutaj export żeby StatCard mógł reużyć).
+export const RunIcon = () => (
+  <svg {...baseProps}>
+    <polyline points="5 19 12 5 19 19" />
+    <polyline points="14 15 12 11 10 15" />
+  </svg>
+);
+
 export const FootprintsIcon = () => (
   <svg {...baseProps}>
     <path d="M4 16v-2a3 3 0 116 0v2a3 3 0 01-6 0z" />
