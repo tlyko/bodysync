@@ -9,6 +9,7 @@ import type {
   ChatRequest,
   LoginResponse,
   Me,
+  PlanResponse,
   ProfileTargets,
   ProfileTargetsUpdate,
 } from './types';
@@ -26,8 +27,14 @@ class ApiError extends Error {
 // lub plain text. Spróbuj JSON, fallback do raw text.
 function parseErrorMessage(body: string): string {
   try {
-    const parsed = JSON.parse(body) as { detail?: string; error?: { reason?: string } };
-    return parsed.detail ?? parsed.error?.reason ?? body;
+    const parsed = JSON.parse(body) as {
+      detail?: string;
+      error?: string | { reason?: string };
+    };
+    if (typeof parsed.error === 'string') return parsed.error;
+    if (typeof parsed.error?.reason === 'string') return parsed.error.reason;
+    if (typeof parsed.detail === 'string') return parsed.detail;
+    return body;
   } catch {
     return body;
   }
@@ -105,6 +112,12 @@ export async function putProfileTargets(t: ProfileTargetsUpdate): Promise<Profil
 
 export async function getActivities(limit = 20): Promise<ActivitiesResponse> {
   return request<ActivitiesResponse>(`/api/activities?limit=${limit}`);
+}
+
+// Sprint 5 — Google Sheets training plan. Backend cache 15min, frontend
+// może `force=true` przekazać żeby wymusić fresh fetch (button "Odśwież").
+export async function getPlan(force = false): Promise<PlanResponse> {
+  return request<PlanResponse>(`/api/plan${force ? '?refresh=1' : ''}`);
 }
 
 // Strava OAuth start endpoint zwraca 302 do strava.com — frontend

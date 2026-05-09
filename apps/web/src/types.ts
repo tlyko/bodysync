@@ -98,3 +98,12 @@ export type Activity = {
 export type ActivitiesResponse = {
   items: Activity[];
 };
+
+// ─── Plan (Sprint 5 — Google Sheets training plan, mirror handlers/plan/schemas.py) ───
+
+export type PlanResponse = {
+  rows: string[][]; // 2D array, sheet content as-is (raw text)
+  fetched_at: number; // epoch seconds
+  fresh: boolean; // true = just fetched z Sheets, false = z DDB cache
+  sheet_tab: string;
+};

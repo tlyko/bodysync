@@ -231,6 +231,92 @@ code {
   gap: 1.5rem;
 }
 
+/* ─── Plan tab (Sprint 5 — Google Sheets training plan) ─── */
+.plan-screen {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+.plan-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem 1.5rem;
+  align-items: center;
+  padding: 1rem 1.25rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.plan-meta > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+.plan-meta-label {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+}
+.plan-meta-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 700;
+  color: var(--text);
+  font-size: 0.95rem;
+}
+.plan-refresh-button {
+  margin-left: auto;
+  padding: 0.55rem 1.1rem;
+  background: var(--cyan);
+  color: var(--bg);
+  border: 0;
+  border-radius: 8px;
+  font-family: inherit;
+  font-weight: 600;
+  font-size: 0.85rem;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+.plan-refresh-button:hover:not(:disabled) {
+  background: #06b6d4;
+}
+.plan-refresh-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.plan-table-wrap {
+  overflow-x: auto;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 0.5rem;
+  -webkit-overflow-scrolling: touch;
+}
+.plan-table {
+  border-collapse: collapse;
+  width: max-content;
+  min-width: 100%;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--text);
+}
+.plan-table td {
+  padding: 0.4rem 0.65rem;
+  border: 1px solid var(--border);
+  white-space: nowrap;
+  vertical-align: top;
+}
+.plan-table td.plan-cell-empty {
+  background: rgba(0, 0, 0, 0.15);
+}
+.plan-error {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1rem;
+}
+
 /* Settings tab "Wyloguj" — visible na desktop też (drugi entry point obok
    sidebar foot button). Mobile: jedyny logout point bo bottom nav ukrywa
    sidebar-foot. */

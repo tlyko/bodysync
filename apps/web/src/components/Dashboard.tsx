@@ -20,6 +20,7 @@ import {
   WheatIcon,
 } from './dashboard/icons';
 import { NutritionDonut } from './dashboard/NutritionDonut';
+import { PlanScreen } from './dashboard/PlanScreen';
 import { ProfileTargetsForm } from './dashboard/ProfileTargetsForm';
 import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { SidebarNav, type AppTab } from './dashboard/SidebarNav';
@@ -90,7 +91,12 @@ export function Dashboard({ me, onLogout }: Props) {
 
   useEffect(() => {
     if (days !== null) return;
-    if (activeTab === 'recipes' || activeTab === 'settings' || activeTab === 'activities') {
+    if (
+      activeTab === 'recipes' ||
+      activeTab === 'settings' ||
+      activeTab === 'activities' ||
+      activeTab === 'plan'
+    ) {
       // chat / settings / activities nie wymagają biometry — odłóż fetch
       // jeśli user nigdy nie wejdzie na tab Body/Nutrition/Overview.
       return;
@@ -132,6 +138,7 @@ export function Dashboard({ me, onLogout }: Props) {
             />
           )}
           {activeTab === 'activities' && <ActivitiesView />}
+          {activeTab === 'plan' && <PlanScreen />}
           {activeTab === 'recipes' && <ChatScreen />}
           {activeTab === 'settings' && (
             <>
@@ -157,6 +164,7 @@ export function Dashboard({ me, onLogout }: Props) {
 const TAB_TITLES: Record<AppTab, string> = {
   overview: 'Dashboard',
   activities: 'Aktywności',
+  plan: 'Plan',
   body: 'Ciało',
   nutrition: 'Odżywianie',
   recipes: 'Przepisy AI',

@@ -4,6 +4,7 @@ import logoIcon from '../../assets/logo-icon.svg';
 export type AppTab =
   | 'overview'
   | 'activities'
+  | 'plan'
   | 'body'
   | 'nutrition'
   | 'recipes'
@@ -69,10 +70,20 @@ const SettingsIcon = () => (
     <path d="M19.4 15a1.65 1.65 0 00.33 1.82l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.65 1.65 0 00-1.82-.33 1.65 1.65 0 00-1 1.51V21a2 2 0 11-4 0v-.09A1.65 1.65 0 008.6 19.4a1.65 1.65 0 00-1.82.33l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.65 1.65 0 00.33-1.82 1.65 1.65 0 00-1.51-1H3a2 2 0 110-4h.09A1.65 1.65 0 004.6 9a1.65 1.65 0 00-.33-1.82l-.06-.06a2 2 0 112.83-2.83l.06.06a1.65 1.65 0 001.82.33H9a1.65 1.65 0 001-1.51V3a2 2 0 114 0v.09a1.65 1.65 0 001 1.51 1.65 1.65 0 001.82-.33l.06-.06a2 2 0 112.83 2.83l-.06.06a1.65 1.65 0 00-.33 1.82V9a1.65 1.65 0 001.51 1H21a2 2 0 110 4h-.09a1.65 1.65 0 00-1.51 1z" />
   </svg>
 );
+// Sprint 5 — Plan tab. Calendar/list icon dla training plan z Google Sheets.
+const PlanIcon = () => (
+  <svg {...baseSvg} aria-hidden>
+    <rect x="3" y="4" width="18" height="18" rx="2" />
+    <line x1="16" y1="2" x2="16" y2="6" />
+    <line x1="8" y1="2" x2="8" y2="6" />
+    <line x1="3" y1="10" x2="21" y2="10" />
+  </svg>
+);
 
 const ITEMS: Item[] = [
   { id: 'overview', label: 'Dashboard', icon: <ChartIcon /> },
   { id: 'activities', label: 'Aktywności', icon: <RunIcon /> },
+  { id: 'plan', label: 'Plan', icon: <PlanIcon /> },
   { id: 'body', label: 'Ciało', icon: <ScaleIcon /> },
   { id: 'nutrition', label: 'Odżywianie', icon: <FoodIcon /> },
   { id: 'recipes', label: 'Przepisy AI', icon: <RecipeIcon /> },
