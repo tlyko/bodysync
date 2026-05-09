@@ -193,6 +193,122 @@ resource "aws_lambda_permission" "profile_targets_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
+# Sprint 5 — Google Sheets training plan. GET /api/plan, JWT cookie auth,
+# 15min DDB cache w PLAN#current, force-refresh przez ?refresh=1.
+# google-api-python-client + google-auth — większy bundle (~10MB) ale w limicie
+# Lambda zip (50MB compressed). Memory 512MB / timeout 15s (Sheets API call ~1s
+# typowo + cold start credentials init).
+module "plan" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "plan"
+  source_zip    = "${path.module}/../../apps/api/dist/plan.zip"
+  handler       = "handlers.plan.handler.handler"
+  memory_size   = 512
+  timeout       = 15
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Read + Write PLAN#current row. LeadingKeys USER#* defense in depth.
+      Sid      = "DDBPlanRW"
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTSecret"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+    {
+      # Google Sheets credentials (SA JSON, SecureString) + per-user
+      # sheet-id/sheet-tab. Wildcard na user portion — handler scope'uje
+      # na user_id z JWT, IAM allowuje wszystkie userów (pozwala otworzyć
+      # projekt dla nowych userów bez TF apply per user).
+      Sid    = "ReadPlanConfig"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/google/service_account_json",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/*/training-sheet-id",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/*/training-sheet-tab",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "plan" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.plan.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "plan_get" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/plan"
+  target    = "integrations/${aws_apigatewayv2_integration.plan.id}"
+}
+
+resource "aws_lambda_permission" "plan_apigw" {
+  statement_id  = "AllowAPIGWInvokePlan"
+  action        = "lambda:InvokeFunction"
+  function_name = module.plan.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
+# SSM placeholders dla Google Sheets config — owner wpisuje wartości po
+# pierwszym deployu (manualnie via aws ssm put-parameter, NIE w TF state).
+# `ignore_changes = [value]` żeby owner update'y SSM nie były revertowane
+# przez następne `terraform apply`.
+resource "aws_ssm_parameter" "google_service_account_json" {
+  name        = "/bodysync/google/service_account_json"
+  description = "Google service account JSON dla Sheets API readonly. Owner: pobierz z GCP Console → IAM → SA → Keys → Add → JSON, wklej całą zawartość."
+  type        = "SecureString"
+  value       = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "training_sheet_id_tomek" {
+  name        = "/bodysync/tomek/training-sheet-id"
+  description = "Spreadsheet ID z URL: docs.google.com/spreadsheets/d/<TEN>/edit. Owner wpisuje ręcznie."
+  type        = "String"
+  value       = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
+resource "aws_ssm_parameter" "training_sheet_tab_tomek" {
+  name        = "/bodysync/tomek/training-sheet-tab"
+  description = "Nazwa zakładki z aktywnym tygodniem (np. Arkusz5). Owner update gdy trenerka zmieni layout."
+  type        = "String"
+  value       = "PLACEHOLDER"
+
+  lifecycle {
+    ignore_changes = [value]
+  }
+}
+
 # Sprint 3 — Apple Health webhook. POST /api/health/webhook,
 # Bearer auth (per-user secret w SSM, server resolves user_id po hmac match).
 module "health_webhook" {
