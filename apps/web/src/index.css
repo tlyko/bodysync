@@ -343,6 +343,44 @@ body:has(.preview-banner) .login-screen {
   color: var(--cyan);
   border-color: rgba(34, 211, 238, 0.3);
 }
+/* Week selector dropdown — pokazany tylko gdy training group ma >1 tydzień */
+.training-week-selector {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.6rem 0.85rem;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+}
+.training-week-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+}
+.training-week-select {
+  flex: 1;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.45rem 0.7rem;
+  font-family: inherit;
+  font-size: 0.9rem;
+  cursor: pointer;
+  appearance: auto;
+}
+.training-week-select:hover {
+  border-color: var(--border-light);
+}
+.training-week-select:focus {
+  outline: 2px solid var(--cyan);
+  outline-offset: 1px;
+}
+
 .training-sections {
   display: flex;
   flex-direction: column;
