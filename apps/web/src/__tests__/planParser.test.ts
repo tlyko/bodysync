@@ -206,9 +206,9 @@ describe('parseTrainings — block z multiple Trening X (rozłam na osobne tabs)
   });
 });
 
-describe('parseTrainings — disambiguation duplicate names', () => {
-  // 2 bloki Trening A (poprzedni + bieżący tydzień) — owner: "tylko trening A.
-  // jeden sprzed tygodnia drugi z tego". Tabs powinny mieć "Trening A #1" + "#2".
+describe('parseTrainings — weekIdx + weekTotal per name', () => {
+  // 2 bloki Trening A (poprzedni + bieżący tydzień). UI grupuje po name +
+  // dropdown z weeks — name zostaje "Trening A" bez #N suffix.
   const headerWithTwoBlocks = [...blockHeader(), ...blockHeader()];
   const rows = [
     headerWithTwoBlocks,
@@ -216,12 +216,20 @@ describe('parseTrainings — disambiguation duplicate names', () => {
     [...dataRow('01', 'Squat-old', '', '5x5'), ...dataRow('01', 'Squat-new', '', '5x5')],
   ];
 
-  test('appenduje #1, #2 dla duplicate names', () => {
+  test('name zostaje base (bez #N suffix)', () => {
     const result = parseTrainings(rows);
-    expect(result.map((t) => t.name)).toEqual(['Trening A #1', 'Trening A #2']);
+    expect(result.map((t) => t.name)).toEqual(['Trening A', 'Trening A']);
   });
 
-  test('NIE appenduje suffix gdy unique name', () => {
+  test('weekIdx 1-indexed, weekTotal = count per name', () => {
+    const result = parseTrainings(rows);
+    expect(result[0].weekIdx).toBe(1);
+    expect(result[0].weekTotal).toBe(2);
+    expect(result[1].weekIdx).toBe(2);
+    expect(result[1].weekTotal).toBe(2);
+  });
+
+  test('różne names → osobne weekIdx counters', () => {
     const headerSingle = [...blockHeader(), ...blockHeader()];
     const rowsSingle = [
       headerSingle,
@@ -230,6 +238,10 @@ describe('parseTrainings — disambiguation duplicate names', () => {
     ];
     const result = parseTrainings(rowsSingle);
     expect(result.map((t) => t.name)).toEqual(['Trening A', 'Trening B']);
+    expect(result[0].weekIdx).toBe(1);
+    expect(result[0].weekTotal).toBe(1);
+    expect(result[1].weekIdx).toBe(1);
+    expect(result[1].weekTotal).toBe(1);
   });
 });
 

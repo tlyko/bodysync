@@ -30,8 +30,16 @@ export type Section = {
 };
 
 export type Training = {
-  /** Wyświetlany w tabach (np. "Trening A", "Trening A #2" gdy duplicates). */
+  /** Base name (np. "Trening A"). Powtórzenia tej samej nazwy z różnych
+   * tygodni są rozróżniane przez `weekIdx` (UI grupuje po name + dropdown
+   * dla weeks). */
   name: string;
+  /** 1-indexed numer wystąpienia per name. Najnowszy = highest weekIdx
+   * (parser zachowuje source order: lewa-prawa blocks, góra-dół sekcji). */
+  weekIdx: number;
+  /** Total liczba weeks dla tej nazwy w całym sheet'cie. Jeśli `weekIdx ===
+   * weekTotal`, to ten Training jest najnowszy w grupie. */
+  weekTotal: number;
   /** Sekcje (rozgrzewka + trening główny). Min 1 element. */
   sections: Section[];
 };
@@ -101,22 +109,20 @@ function detectSectionLabel(
 }
 
 /**
- * Disambiguate tabs gdy multiple blocks mają tę samą `name` (np. 2 razy
- * "Trening A" — poprzedni i bieżący tydzień). Append `#N` (1-indexed,
- * highest = najnowszy bo trener appenduje w prawo / w dół).
+ * Assign weekIdx (1-indexed per name) + weekTotal (count per name) do każdego
+ * Training. UI grupuje tabs po `name` (unique) + per group dropdown z weeks
+ * (jeśli weekTotal > 1). Najnowszy week = `weekIdx === weekTotal` (parser
+ * zachowuje source order: lewa-prawa blocks, góra-dół sekcji).
  */
-function disambiguateNames(trainings: Training[]): Training[] {
-  const counts = new Map<string, number>();
-  for (const t of trainings) counts.set(t.name, (counts.get(t.name) ?? 0) + 1);
-  const duplicates = new Set([...counts.entries()].filter(([, c]) => c > 1).map(([n]) => n));
-  if (duplicates.size === 0) return trainings;
+function assignWeekIndices(trainings: Training[]): Training[] {
+  const totals = new Map<string, number>();
+  for (const t of trainings) totals.set(t.name, (totals.get(t.name) ?? 0) + 1);
 
-  const seenIdx = new Map<string, number>();
+  const seen = new Map<string, number>();
   return trainings.map((t) => {
-    if (!duplicates.has(t.name)) return t;
-    const idx = (seenIdx.get(t.name) ?? 0) + 1;
-    seenIdx.set(t.name, idx);
-    return { ...t, name: `${t.name} #${idx}` };
+    const idx = (seen.get(t.name) ?? 0) + 1;
+    seen.set(t.name, idx);
+    return { ...t, weekIdx: idx, weekTotal: totals.get(t.name) ?? 1 };
   });
 }
 
@@ -239,7 +245,7 @@ export function parseTrainings(rows: string[][]): Training[] {
     trainings.push(...groupSectionsIntoTrainings(sections, fallbackName));
   }
 
-  return disambiguateNames(trainings);
+  return assignWeekIndices(trainings);
 }
 
 /**
@@ -253,18 +259,20 @@ function groupSectionsIntoTrainings(
   sections: Section[],
   defaultName: string,
 ): Training[] {
+  // weekIdx + weekTotal są przypisywane na końcu (assignWeekIndices) — tu
+  // tymczasowo placeholder 0/0, override w outer pipeline.
   const result: Training[] = [];
   let bucket: Section[] = [];
   for (const section of sections) {
     if (section.label && section.label.startsWith('Trening ')) {
-      result.push({ name: section.label, sections: [...bucket, section] });
+      result.push({ name: section.label, weekIdx: 0, weekTotal: 0, sections: [...bucket, section] });
       bucket = [];
     } else {
       bucket.push(section);
     }
   }
   if (bucket.length > 0) {
-    result.push({ name: defaultName, sections: bucket });
+    result.push({ name: defaultName, weekIdx: 0, weekTotal: 0, sections: bucket });
   }
   return result;
 }

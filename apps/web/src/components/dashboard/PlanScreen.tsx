@@ -123,13 +123,37 @@ export function PlanScreen() {
   );
 }
 
+type TrainingGroup = {
+  name: string;
+  weeks: Training[]; // sorted by weekIdx asc (najnowszy = last)
+};
+
+function groupTrainings(trainings: Training[]): TrainingGroup[] {
+  // Zachowaj source order pierwszego wystąpienia każdej grupy
+  const order: string[] = [];
+  const map = new Map<string, Training[]>();
+  for (const t of trainings) {
+    if (!map.has(t.name)) {
+      order.push(t.name);
+      map.set(t.name, []);
+    }
+    map.get(t.name)!.push(t);
+  }
+  return order.map((name) => ({ name, weeks: map.get(name)! }));
+}
+
 function PlanContent({ plan }: { plan: PlanResponse }) {
   const trainings = useMemo(() => parseTrainings(plan.rows), [plan.rows]);
-  // Default = ostatni trening (najnowszy, owner: "to co jest najnizej").
-  // Trener appenduje nowe bloki w prawo / w dół, więc last in array = newest.
-  const [activeIdx, setActiveIdx] = useState(() =>
-    trainings.length > 0 ? trainings.length - 1 : 0,
-  );
+  const groups = useMemo(() => groupTrainings(trainings), [trainings]);
+
+  const [activeGroupIdx, setActiveGroupIdx] = useState(0);
+  // Per-group week selection. Default = najnowszy (last week in group).
+  // Map<groupName, weekIdx> — initialize z group.weeks.length (1-indexed).
+  const [weekByGroup, setWeekByGroup] = useState<Record<string, number>>(() => {
+    const init: Record<string, number> = {};
+    for (const g of groups) init[g.name] = g.weeks.length; // 1-indexed last
+    return init;
+  });
 
   if (plan.rows.length === 0) {
     return (
@@ -139,7 +163,7 @@ function PlanContent({ plan }: { plan: PlanResponse }) {
     );
   }
 
-  if (trainings.length === 0) {
+  if (groups.length === 0) {
     return (
       <p className="placeholder-text">
         Nie udało się sparsować planu (brak nagłówka <code>Numer</code> w arkuszu).
@@ -149,28 +173,62 @@ function PlanContent({ plan }: { plan: PlanResponse }) {
     );
   }
 
-  const safeIdx = Math.min(activeIdx, trainings.length - 1);
-  const active = trainings[safeIdx];
+  const safeGroupIdx = Math.min(activeGroupIdx, groups.length - 1);
+  const activeGroup = groups[safeGroupIdx];
+  const selectedWeekIdx = weekByGroup[activeGroup.name] ?? activeGroup.weeks.length;
+  const safeWeek = Math.min(Math.max(1, selectedWeekIdx), activeGroup.weeks.length);
+  const activeTraining = activeGroup.weeks[safeWeek - 1];
 
   return (
     <>
       <nav className="training-tabs" aria-label="Wybierz trening">
-        {trainings.map((t, i) => (
+        {groups.map((g, i) => (
           <button
-            key={`${t.name}-${i}`}
+            key={g.name}
             type="button"
-            className={`training-tab${i === safeIdx ? ' active' : ''}`}
-            onClick={() => setActiveIdx(i)}
-            aria-current={i === safeIdx ? 'page' : undefined}
+            className={`training-tab${i === safeGroupIdx ? ' active' : ''}`}
+            onClick={() => setActiveGroupIdx(i)}
+            aria-current={i === safeGroupIdx ? 'page' : undefined}
           >
-            {t.name}
+            {g.name}
           </button>
         ))}
       </nav>
 
-      <TrainingSections training={active} />
+      {activeGroup.weeks.length > 1 && (
+        <div className="training-week-selector">
+          <label htmlFor="training-week" className="training-week-label">
+            Tydzień:
+          </label>
+          <select
+            id="training-week"
+            className="training-week-select"
+            value={safeWeek}
+            onChange={(e) =>
+              setWeekByGroup((prev) => ({
+                ...prev,
+                [activeGroup.name]: Number(e.target.value),
+              }))
+            }
+          >
+            {activeGroup.weeks.map((w) => (
+              <option key={w.weekIdx} value={w.weekIdx}>
+                {weekLabel(w.weekIdx, w.weekTotal)}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
+
+      <TrainingSections training={activeTraining} />
     </>
   );
+}
+
+function weekLabel(idx: number, total: number): string {
+  if (idx === total) return `#${idx} (najnowszy)`;
+  if (idx === total - 1) return `#${idx} (poprzedni)`;
+  return `#${idx}`;
 }
 
 function TrainingSections({ training }: { training: Training }) {
