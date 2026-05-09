@@ -26,6 +26,10 @@ dev = [
     "pydantic>=2.10",
     "PyJWT>=2.9",
     "google-auth>=2.35",
+    # Sprint 5 — `tests/handlers/plan/test_service.py` importuje
+    # `googleapiclient.errors.HttpError` do konstrukcji error fixtures.
+    # Lambda runtime version w handlers/plan/requirements.txt.
+    "google-api-python-client>=2.150",
     "boto3>=1.35",
     "boto3-stubs[dynamodb,ssm]>=1.35",
     "anthropic>=0.40",
