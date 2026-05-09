@@ -798,3 +798,128 @@ def test_history_hard_cap_20(dynamodb_table: Any, patched_anthropic_client: Magi
     # Turny 0..4 NIE present (dropped)
     for idx in range(0, 5):
         assert f"MARKER_TURN_{idx:02d}" not in user_msg_content, f"old turn {idx} leaked"
+
+
+# ─── Sprint 5 PR #4 — training plan injection ─────────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_training_plan_in_request_when_present_in_ddb(dynamodb_table: Any) -> None:
+    """Sprint 5 PR #4 — DDB ma PLAN#current ⇒ <training_plan> block w prompt
+    + cache_control marker + log info training_plan_present=True."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    # Pre-seed DDB cache (mirror handlers.plan.service.save_cached_plan)
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#user_a",
+            "SK": "PLAN#current",
+            "rows": [
+                ["Trening A", "Squat", "5x5", "60kg"],
+                ["", "Bench", "5x5", "40kg"],
+            ],
+            "fetched_at": int(time.time()) - 600,
+            "sheet_tab": "Arkusz5",
+        }
+    )
+
+    result = h.handler(
+        _event({"message": "co jeść po treningu A?"}, cookie=_cookie("user_a")),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
+
+    create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
+    blocks = create_call.kwargs["messages"][0]["content"]
+    composed = _flatten_user_content(blocks)
+
+    assert "<training_plan>" in composed
+    assert "Arkusz5" in composed
+    assert "Squat" in composed
+    assert "Bench" in composed
+    # Cache marker — training_plan i retrieved_recipes (jeśli) osobno cached
+    cache_blocks = [b for b in blocks if b.get("cache_control") == {"type": "ephemeral"}]
+    plan_cache = [b for b in cache_blocks if "<training_plan>" in b["text"]]
+    assert len(plan_cache) == 1
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_no_training_plan_block_when_ddb_empty(dynamodb_table: Any) -> None:
+    """Brak PLAN#current row → graceful degradation, brak <training_plan>
+    w prompt, advisor odpowiada bez planu."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    result = h.handler(
+        _event({"message": "co jeść?"}, cookie=_cookie("user_a")),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
+
+    create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
+    blocks = create_call.kwargs["messages"][0]["content"]
+    composed = _flatten_user_content(blocks)
+
+    assert "<training_plan>" not in composed
+    assert "</training_plan>" not in composed
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_corrupted_plan_row_treated_as_missing(dynamodb_table: Any) -> None:
+    """DDB ma PLAN#current row ale shape niepoprawny (np. brak rows field) →
+    load_training_plan zwraca None → block pominięty, advisor kontynuuje."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#user_a",
+            "SK": "PLAN#current",
+            "deprecated_field": "old_shape",
+            # missing rows + fetched_at + sheet_tab
+        }
+    )
+
+    result = h.handler(
+        _event({"message": "co jeść?"}, cookie=_cookie("user_a")),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
+
+    create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
+    blocks = create_call.kwargs["messages"][0]["content"]
+    composed = _flatten_user_content(blocks)
+
+    assert "<training_plan>" not in composed
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_training_plan_pk_isolation(dynamodb_table: Any) -> None:
+    """user_a ma plan, user_b nie ma → user_b chat NIE widzi planu user_a."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#user_a",
+            "SK": "PLAN#current",
+            "rows": [["secret-user-a-row"]],
+            "fetched_at": int(time.time()),
+            "sheet_tab": "Arkusz5",
+        }
+    )
+
+    # user_b chat — nie widzi user_a planu
+    result = h.handler(
+        _event({"message": "co jeść?"}, cookie=_cookie("user_b")),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
+
+    create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
+    blocks = create_call.kwargs["messages"][0]["content"]
+    composed = _flatten_user_content(blocks)
+
+    assert "<training_plan>" not in composed
+    assert "secret-user-a-row" not in composed

@@ -210,6 +210,24 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 },
             )
 
+        # ── 6.6 Training plan injection (Sprint 5 PR #4) ───────────────────
+        # Best-effort load z DDB (PK=USER#{id} SK=PLAN#current — populated
+        # przez handlers.plan przy każdym successful fetch z Google Sheets).
+        # Brak planu (owner nie skonfigurował SSM lub frontend nigdy nie
+        # wywołał /api/plan) → None → block pominięty w prompt.
+        training_plan = None
+        try:
+            training_plan = service.load_training_plan(user_id)
+        except Exception as exc:  # noqa: BLE001 — DDB nie crashuje chatu
+            logger.warning(
+                "training_plan_load_failed",
+                extra={
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+
         # `history` to snapshot SPRZED appendu user turn — `build_chat_messages`
         # samo wrapuje `request.message` w `<user_message>` block, więc nie
         # duplikujemy (gdybyśmy wzięli post-append history, mielibyśmy bieżącą
@@ -219,6 +237,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             today_state,
             request.message,
             retrieved_recipes=retrieved,
+            training_plan=training_plan,
         )
 
         # ── 7. Anthropic call ──────────────────────────────────────────────
@@ -286,6 +305,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 # slugi (NIE content) + count, dla CloudWatch debug.
                 "retrieved_slugs": retrieved_slugs,
                 "retrieved_count": len(retrieved_slugs),
+                # Sprint 5 PR #4 — plan injection observability.
+                "training_plan_present": training_plan is not None,
+                "training_plan_rows": (len(training_plan.rows) if training_plan else 0),
             },
         )
 
