@@ -20,6 +20,7 @@ import time
 from typing import Any
 
 from handlers.strava_oauth_callback.service import (
+    AthleteMapConflictError,
     StravaTokenExchangeError,
     exchange_code_for_tokens,
     frontend_redirect,
@@ -114,6 +115,29 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
         return _redirect(frontend_redirect("token_exchange_failed"))
 
+    # Conflict check PRZED persist tokens — gdy athlete_id już jest mapped
+    # do innego user_id (account takeover wektor przy >2 userach), nie chcemy
+    # nadpisać per-user tokens path bo to wciąż per-user, ale zostawić mapę.
+    # Owner ręcznie rozwiązuje konflikt w SSM `/bodysync/strava/athlete-to-user`.
+    try:
+        existing_map = get_param(ATHLETE_MAP_PARAM, decrypt=False)
+    except Exception:
+        existing_map = "{}"
+
+    try:
+        updated_map = update_athlete_map(existing_map, tokens.athlete_id, user_id)
+    except AthleteMapConflictError as e:
+        logger.warning(
+            "athlete_already_mapped_to_other_user",
+            extra={
+                "request_id": request_id,
+                "user_id": user_id,
+                "athlete_id": e.athlete_id,
+                "existing_user_id": e.existing_user_id,
+            },
+        )
+        return _redirect(frontend_redirect("athlete_already_connected"))
+
     # Persist tokens (SecureString — encrypted at rest by KMS)
     try:
         put_param(
@@ -129,15 +153,9 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
         return _redirect(frontend_redirect("persist_error"))
 
-    # Update athlete-to-user map. Read-modify-write — race window mały
-    # (single user clicks Connect raz, nie współbieżne).
+    # Update athlete-to-user map. Po conflict check'u więc bezpieczne nadpisanie.
     try:
-        existing = get_param(ATHLETE_MAP_PARAM, decrypt=False)
-    except Exception:
-        existing = "{}"
-    try:
-        updated = update_athlete_map(existing, tokens.athlete_id, user_id)
-        put_param(ATHLETE_MAP_PARAM, updated, secure=False, overwrite=True)
+        put_param(ATHLETE_MAP_PARAM, updated_map, secure=False, overwrite=True)
     except Exception:
         # Nie blokuj UX gdy map update fail — webhook handler ma fallback
         # (re-read SSM przy unknown athlete miss). Tokens już persistowane.

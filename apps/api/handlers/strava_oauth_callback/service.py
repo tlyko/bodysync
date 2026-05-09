@@ -38,6 +38,21 @@ class StravaTokenExchangeError(Exception):
         self.status_code = status_code
 
 
+class AthleteMapConflictError(Exception):
+    """Athlete_id jest już mapped do innego user_id w SSM map.
+
+    Wektor: gdy 2-user model się rozszerzy, drugi user nie może wejść
+    przez OAuth z tym samym athlete_id (account takeover via webhook
+    redirect). Owner musi ręcznie rozwiązać konflikt w SSM.
+    """
+
+    def __init__(self, athlete_id: int, existing_user_id: str, attempted_user_id: str) -> None:
+        super().__init__(f"athlete_already_mapped:{athlete_id}")
+        self.athlete_id = athlete_id
+        self.existing_user_id = existing_user_id
+        self.attempted_user_id = attempted_user_id
+
+
 def exchange_code_for_tokens(code: str, client_id: str, client_secret: str) -> StravaTokens:
     """POST /oauth/token z `grant_type=authorization_code` → StravaTokens.
 
@@ -97,6 +112,9 @@ def update_athlete_map(existing_map_json: str, athlete_id: int, user_id: str) ->
 
     `existing_map_json` może być pusty `{}` (initial state) lub mapą z
     poprzednich OAuth flows. Returns JSON-serialized updated map.
+
+    Raises AthleteMapConflictError gdy athlete_id jest już mapped do INNEGO
+    user_id (re-OAuth tego samego user'a jest idempotent — no raise).
     """
     try:
         m = json.loads(existing_map_json) if existing_map_json else {}
@@ -104,7 +122,15 @@ def update_athlete_map(existing_map_json: str, athlete_id: int, user_id: str) ->
         m = {}
     if not isinstance(m, dict):
         m = {}
-    m[str(athlete_id)] = user_id
+    key = str(athlete_id)
+    existing_user = m.get(key)
+    if existing_user is not None and existing_user != user_id:
+        raise AthleteMapConflictError(
+            athlete_id=athlete_id,
+            existing_user_id=str(existing_user),
+            attempted_user_id=user_id,
+        )
+    m[key] = user_id
     return json.dumps(m, sort_keys=True)
 
 
