@@ -307,12 +307,26 @@ code {
   line-height: 1.5;
 }
 
-/* Overview grid — Recovery / Macros / Activities triple panel, auto-fit
-   wraps to 2 lub 1 column na węższych viewport. */
+/* Overview grid — port z prototype line 645:
+   Lewa kolumna = Recent Activities (długi panel, ~4 entries),
+   Prawa kolumna = stack 2 panel (Makroskładniki + Recovery) który matchuje
+   wysokość Activities. Bez auto-stretch pustego boxa — każdy panel jest
+   tylko jak duże jego content. */
 .overview-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  grid-template-columns: 1fr 1fr;
   gap: 1.25rem;
+  align-items: start;
+}
+.overview-right-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+@media (max-width: 900px) {
+  .overview-grid {
+    grid-template-columns: 1fr;
+  }
 }
 
 /* Macroskładniki donut — SVG circle + legend stacked. */
@@ -490,7 +504,7 @@ code {
 
 .stat-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
   gap: 1rem;
 }
 
