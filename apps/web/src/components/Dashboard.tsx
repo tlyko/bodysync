@@ -290,53 +290,55 @@ function DashboardOverview({
       </div>
 
       <div className="overview-grid">
-        <SectionPanel title="Recovery">
-          <div className="mini-stat-grid">
-            <MiniStat
-              label="HRV"
-              value={latestValue(hrvSeries)?.value.toFixed(1) ?? '—'}
-              unit="ms"
-              accent="cyan"
-              icon={<HeartPulseIcon />}
-            />
-            <MiniStat
-              label="Sen"
-              value={latestValue(sleepSeries)?.value.toFixed(1) ?? '—'}
-              unit="h"
-              accent="purple"
-              icon={<MoonIcon />}
-            />
-            <MiniStat
-              label="RHR"
-              value={
-                latestValue(restingHrSeries)
-                  ? Math.round(latestValue(restingHrSeries)!.value).toString()
-                  : '—'
-              }
-              unit="bpm"
-              accent="red"
-              icon={<HeartIcon />}
-            />
-            <MiniStat
-              label="Body fat"
-              value={latestValue(bodyFatSeries)?.value.toFixed(1) ?? '—'}
-              unit="%"
-              accent="muted"
-              icon={<PercentIcon />}
-            />
-          </div>
-        </SectionPanel>
-
-        <SectionPanel title="Makroskładniki">
-          <NutritionDonut
-            kcal={latestKcalIn}
-            proteinG={latestProtein}
-            fatG={latestFat}
-            carbsG={latestCarbs}
-          />
-        </SectionPanel>
-
         <RecentActivitiesPanel onSeeAll={() => onSelectTab('activities')} />
+
+        <div className="overview-right-stack">
+          <SectionPanel title="Makroskładniki">
+            <NutritionDonut
+              kcal={latestKcalIn}
+              proteinG={latestProtein}
+              fatG={latestFat}
+              carbsG={latestCarbs}
+            />
+          </SectionPanel>
+
+          <SectionPanel title="Recovery">
+            <div className="mini-stat-grid">
+              <MiniStat
+                label="HRV"
+                value={latestValue(hrvSeries)?.value.toFixed(1) ?? '—'}
+                unit="ms"
+                accent="cyan"
+                icon={<HeartPulseIcon />}
+              />
+              <MiniStat
+                label="Sen"
+                value={latestValue(sleepSeries)?.value.toFixed(1) ?? '—'}
+                unit="h"
+                accent="purple"
+                icon={<MoonIcon />}
+              />
+              <MiniStat
+                label="RHR"
+                value={
+                  latestValue(restingHrSeries)
+                    ? Math.round(latestValue(restingHrSeries)!.value).toString()
+                    : '—'
+                }
+                unit="bpm"
+                accent="red"
+                icon={<HeartIcon />}
+              />
+              <MiniStat
+                label="Body fat"
+                value={latestValue(bodyFatSeries)?.value.toFixed(1) ?? '—'}
+                unit="%"
+                accent="muted"
+                icon={<PercentIcon />}
+              />
+            </div>
+          </SectionPanel>
+        </div>
       </div>
     </>
   );
