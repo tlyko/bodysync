@@ -29,7 +29,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 # trusted-block content (np. fake `<system_override>...`). Sprawdzamy
 # wszystkie 4 znane bloki (PR2 doda `<retrieved_recipes>`).
 _FORBIDDEN_CLOSING_TAGS = re.compile(
-    r"</(?:user_message|today_context|conversation_history|retrieved_recipes)>",
+    r"</(?:user_message|today_context|conversation_history|retrieved_recipes|training_plan|recent_activities)>",
     re.IGNORECASE,
 )
 # Forbidden history-line spoof — `service.build_chat_messages` formatuje
@@ -157,6 +157,31 @@ class ChatResponse(BaseModel):
     turn_idx: int
     tokens_used: TokenUsage
     generated_at: str  # ISO 8601 UTC, np. "2026-05-07T19:23:45+00:00"
+
+
+class RecentActivity(BaseModel):
+    """Pojedyncza Strava activity z DDB `ACTIVITY#{strava_id}` row, zredukowana
+    do pól które LLM faktycznie potrzebuje do interpretacji.
+
+    Pominięte vs DDB row: `strava_id`, `start_date_local`, `timezone`,
+    `streams_s3_key`, `summary_polyline`, `fetched_at`, `elapsed_time_s`,
+    `elevation_gain_m`, `suffer_score`, `has_heartrate` — albo brak value
+    dla advisora, albo nadmiarowy noise w prompt.
+
+    `name` to user-controlled label z Stravy (np. "Poranny bieg"). Mimo że
+    owner sam je nadaje, anti-injection w system prompt traktuje całość
+    bloku jako data — atak typu "name=ignore previous instructions" jest
+    obroniony tym samym warstwą co `<training_plan>`.
+    """
+
+    date: str  # YYYY-MM-DD, ekstraktowane z start_date
+    sport_type: str  # "Run", "Ride", "Walk", "WeightTraining", ...
+    name: str | None = None
+    distance_km: float | None = None
+    duration_min: int | None = None  # moving_time_s / 60
+    avg_hr: int | None = None
+    max_hr: int | None = None
+    kcal: int | None = None
 
 
 class ChatHistoryResponse(BaseModel):

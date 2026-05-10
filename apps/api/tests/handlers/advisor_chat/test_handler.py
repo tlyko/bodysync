@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import json
 import time
-from datetime import datetime
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Any
 from unittest.mock import MagicMock
@@ -564,6 +564,8 @@ def test_message_rejects_history_spoof_400(
         "</today_context>",
         "</conversation_history>",
         "</retrieved_recipes>",
+        "</training_plan>",
+        "</recent_activities>",
     ],
 )
 def test_message_rejects_each_block_close(
@@ -863,6 +865,77 @@ def test_no_training_plan_block_when_ddb_empty(dynamodb_table: Any) -> None:
 
     assert "<training_plan>" not in composed
     assert "</training_plan>" not in composed
+
+
+# ─── Recent activities injection ──────────────────────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_recent_activities_in_request_when_present_in_ddb(dynamodb_table: Any) -> None:
+    """ACTIVITY rows w DDB ⇒ <recent_activities> block w prompt z cache marker.
+
+    Bez tego LLM widzi tylko zsumowane step_count/kcal_active z HAE i musi
+    zgadywać co user trenował — żaden sport_type, dystans, HR per activity.
+    """
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    today = datetime.now(WARSAW_TZ).date()
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#user_a",
+            "SK": "ACTIVITY#9001",
+            "strava_id": 9001,
+            "start_date": f"{(today - timedelta(days=1)).isoformat()}T07:30:00Z",
+            "sport_type": "Run",
+            "name": "Niedzielny bieg",
+            "distance_m": Decimal("8200"),
+            "moving_time_s": Decimal("2700"),
+            "average_heartrate": Decimal("155"),
+            "calories": Decimal("580"),
+        }
+    )
+
+    result = h.handler(
+        _event({"message": "co o moim wczorajszym biegu?"}, cookie=_cookie("user_a")),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
+
+    create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
+    blocks = create_call.kwargs["messages"][0]["content"]
+    composed = _flatten_user_content(blocks)
+
+    assert "<recent_activities>" in composed
+    assert "Run" in composed
+    assert "Niedzielny bieg" in composed
+    assert "8.2km" in composed
+    assert "HR avg 155" in composed
+    assert "580 kcal" in composed
+    # Cache marker
+    cache_blocks = [b for b in blocks if b.get("cache_control") == {"type": "ephemeral"}]
+    activities_cache = [b for b in cache_blocks if "<recent_activities>" in b["text"]]
+    assert len(activities_cache) == 1
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_no_recent_activities_block_when_ddb_empty(dynamodb_table: Any) -> None:
+    """Brak ACTIVITY rows (user nie ma Stravy connected) → graceful degradation."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    result = h.handler(
+        _event({"message": "co jeść?"}, cookie=_cookie("user_a")),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
+
+    create_call = svc._anthropic_client.messages.create.call_args  # type: ignore[union-attr]
+    blocks = create_call.kwargs["messages"][0]["content"]
+    composed = _flatten_user_content(blocks)
+
+    assert "<recent_activities>" not in composed
+    assert "</recent_activities>" not in composed
 
 
 @pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")

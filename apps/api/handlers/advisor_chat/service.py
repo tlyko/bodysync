@@ -36,7 +36,7 @@ from shared.dynamo import get_item, put_item_idempotent, query_by_pk, sum_metric
 from shared.logging import get_logger
 from shared.ssm import SecretMisconfiguredError, load_secure_secret
 
-from .schemas import CachedPlan, ChatMessage, TodayState, TokenUsage, UsedRecipe
+from .schemas import CachedPlan, ChatMessage, RecentActivity, TodayState, TokenUsage, UsedRecipe
 
 if TYPE_CHECKING:
     from anthropic import Anthropic
@@ -70,6 +70,16 @@ DEFAULT_KCAL_TARGET = 2000
 DEFAULT_PROTEIN_TARGET_G = 130
 DEFAULT_FAT_TARGET_G = 70
 DEFAULT_CARBS_TARGET_G = 200
+
+# Recent activities — okno czasowe + hard cap dla token budget. 7 dni
+# zwykle daje 3-10 wpisów dla aktywnego usera; cap 15 chroni przed peak
+# tygodniami bez wybuchu kontekstu.
+RECENT_ACTIVITIES_LOOKBACK_DAYS = 7
+RECENT_ACTIVITIES_MAX = 15
+# Trim long Strava activity name (user-controlled) — defense-in-depth
+# przeciw payload bombs (Strava sam ogranicza do ~256 znaków, ale lepiej
+# enforced w prompt path).
+RECENT_ACTIVITIES_NAME_MAX_LEN = 80
 
 # System prompt — file read na cold start (mały plik, deterministic).
 _SYSTEM_PROMPT_PATH = Path(__file__).parent / "system_prompt.txt"
@@ -462,6 +472,76 @@ def load_training_plan(user_id: str) -> CachedPlan | None:
         return None
 
 
+def load_recent_activities(
+    user_id: str, *, today: date, days: int = RECENT_ACTIVITIES_LOOKBACK_DAYS
+) -> list[RecentActivity]:
+    """DDB query `ACTIVITY#` rows pod USER#{id}, filter po `start_date >=
+    today - days`, sort desc po start_date, cap RECENT_ACTIVITIES_MAX.
+
+    Pusta lista gdy brak — advisor pomija block w prompt (nie injectujemy
+    pustego XML wrappera dla zera tokensów oszczędności + clean UX gdy
+    user nie ma jeszcze Strava connected).
+
+    Per-activity row z DDB ma `start_date` w ISO 8601 ("2026-05-09T07:30:00Z").
+    Bierzemy YYYY-MM-DD jako filtr boundary — porównanie stringów lex-OK
+    bo ISO format jest sortowalny.
+    """
+    cutoff = (today - timedelta(days=days - 1)).isoformat()
+    rows = query_by_pk(f"USER#{user_id}", sk_prefix="ACTIVITY#")
+
+    # Filter + sort desc po start_date (najnowsze pierwsze).
+    filtered = [r for r in rows if str(r.get("start_date", "")) >= cutoff]
+    filtered.sort(key=lambda r: str(r.get("start_date", "")), reverse=True)
+
+    activities: list[RecentActivity] = []
+    for row in filtered[:RECENT_ACTIVITIES_MAX]:
+        start_date = str(row.get("start_date", ""))
+        if not start_date:
+            continue
+        # ISO 8601 "YYYY-MM-DDThh:mm:ssZ" → "YYYY-MM-DD"
+        activity_date = start_date.split("T", 1)[0]
+
+        name = row.get("name")
+        if name is not None:
+            name = str(name)[:RECENT_ACTIVITIES_NAME_MAX_LEN]
+
+        distance_m = row.get("distance_m")
+        distance_km = (
+            round(_decimal_to_float(distance_m) / 1000, 2) if distance_m is not None else None
+        )
+
+        moving_time_s = row.get("moving_time_s")
+        duration_min = (
+            int(_decimal_to_float(moving_time_s) / 60) if moving_time_s is not None else None
+        )
+
+        avg_hr_raw = row.get("average_heartrate")
+        avg_hr = int(_decimal_to_float(avg_hr_raw)) if avg_hr_raw is not None else None
+        max_hr_raw = row.get("max_heartrate")
+        max_hr = int(_decimal_to_float(max_hr_raw)) if max_hr_raw is not None else None
+        kcal_raw = row.get("calories")
+        kcal = int(_decimal_to_float(kcal_raw)) if kcal_raw is not None else None
+
+        try:
+            activities.append(
+                RecentActivity(
+                    date=activity_date,
+                    sport_type=str(row.get("sport_type") or "Other"),
+                    name=name,
+                    distance_km=distance_km,
+                    duration_min=duration_min,
+                    avg_hr=avg_hr,
+                    max_hr=max_hr,
+                    kcal=kcal,
+                )
+            )
+        except Exception:
+            # Skip malformed row — defensive, advisor nie crashuje na bad data.
+            continue
+
+    return activities
+
+
 def build_chat_messages(
     history: list[ChatMessage],
     today_state: TodayState,
@@ -469,6 +549,7 @@ def build_chat_messages(
     *,
     retrieved_recipes: list[UsedRecipe] | None = None,
     training_plan: CachedPlan | None = None,
+    recent_activities: list[RecentActivity] | None = None,
 ) -> list[dict[str, Any]]:
     """Buduje pojedynczy user message z 3-5 blokami XML-ish:
     `<conversation_history>`, `<today_context>`,
@@ -537,6 +618,48 @@ def build_chat_messages(
             {
                 "type": "text",
                 "text": plan_block,
+                "cache_control": {"type": "ephemeral"},
+            }
+        )
+
+    # Block 2.75 — recent_activities (cached). Per-activity 1 linia w formacie
+    # `YYYY-MM-DD SportType "Name" Xkm / Ymin / HR avg Z / N kcal`. Pól null
+    # opuszczamy (Strava może nie mieć HR dla Walk, kcal dla starych aktywności).
+    # Aktywności zmieniają się tylko gdy nowy webhook event → DDB Stream →
+    # fetcher zapisze nowy ACTIVITY row. W trakcie typical chat session
+    # (kilka pytań pod rząd, <5 min) blok jest stabilny ⇒ ephemeral cache hit.
+    if recent_activities:
+        activity_lines: list[str] = []
+        for a in recent_activities:
+            parts: list[str] = [a.date, a.sport_type]
+            if a.name:
+                parts.append(f'"{a.name}"')
+            metrics: list[str] = []
+            if a.distance_km is not None:
+                metrics.append(f"{a.distance_km}km")
+            if a.duration_min is not None:
+                metrics.append(f"{a.duration_min}min")
+            if a.avg_hr is not None:
+                hr_str = f"HR avg {a.avg_hr}"
+                if a.max_hr is not None and a.max_hr != a.avg_hr:
+                    hr_str += f"/max {a.max_hr}"
+                metrics.append(hr_str)
+            if a.kcal is not None:
+                metrics.append(f"{a.kcal} kcal")
+            if metrics:
+                parts.append("/".join(metrics))
+            activity_lines.append("- " + " ".join(parts))
+        activities_block = (
+            "<recent_activities>\n"
+            f"Ostatnie {RECENT_ACTIVITIES_LOOKBACK_DAYS} dni z Stravy "
+            f"({len(recent_activities)} treningów):\n"
+            + "\n".join(activity_lines)
+            + "\n</recent_activities>"
+        )
+        content_blocks.append(
+            {
+                "type": "text",
+                "text": activities_block,
                 "cache_control": {"type": "ephemeral"},
             }
         )
