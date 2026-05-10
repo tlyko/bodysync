@@ -10,11 +10,6 @@ locals {
 
   account_id = data.aws_caller_identity.current.account_id
 
-  # Owner email — SNS subscriber dla CloudWatch alarms (cost guard).
-  # AWS SNS wymaga manual confirmation linkiem w mailu po pierwszym
-  # subscribe (PendingConfirmation state until confirmed).
-  owner_email = "tlyko94@gmail.com"
-
   # Custom domain dla API GW — frontend na bodysync.pl używa same-parent
   # cookie domain (.bodysync.pl) by sesyjny JWT cookie był dostępny
   # cross-subdomain.
@@ -44,6 +39,9 @@ locals {
     "/bodysync/health-auto-export/webhook_secret_tomek",
     "/bodysync/health-auto-export/webhook_secret_weronika",
     "/bodysync/jwt/signing_secret",
+    # Telegram bot dla cost-guard SNS subscriber (zastępuje email subscription
+    # po Gmail auto-unsub). Owner wpisuje token od @BotFather po deploy.
+    "/bodysync/telegram/bot_token",
   ]
 
   ssm_strings = [
@@ -58,6 +56,10 @@ locals {
     "/bodysync/strava/subscription_id",
     "/bodysync/google/oauth_client_id",
     "/bodysync/auth/allowed_emails",
+    # Telegram chat_id (private chat between owner i bot) — destination dla
+    # cost-guard notifications. Numeric string, owner pobiera z `/start`
+    # message po stworzeniu bota.
+    "/bodysync/telegram/chat_id",
   ]
 
   # EventBridge cron rules. Targety dochodzą w Sprint 2+ kiedy Lambdy
