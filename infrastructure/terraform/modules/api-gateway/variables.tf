@@ -20,7 +20,8 @@ variable "cors_allow_methods" {
   # PUT dodane Sprint 9 dla `/api/profile/targets` (write user-managed
   # kcal/macro targets). Bez PUT browser blokuje preflight zanim request
   # dotrze do Lambdy — owner debugowal "nie udaje sie zapisac" 2026-05-08.
-  default = ["GET", "POST", "PUT", "OPTIONS"]
+  # DELETE dla `/api/advisor/chat/history` ("Wyczyść rozmowę") — analogicznie.
+  default = ["GET", "POST", "PUT", "DELETE", "OPTIONS"]
 }
 
 variable "cors_allow_headers" {

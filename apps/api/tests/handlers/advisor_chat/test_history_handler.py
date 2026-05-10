@@ -24,13 +24,14 @@ def _event(
     cookie: str | None,
     *,
     query: dict[str, str] | None = None,
+    method: str = "GET",
 ) -> dict[str, Any]:
     cookies: list[str] = [cookie] if cookie else []
     return {
         "version": "2.0",
-        "routeKey": "GET /api/advisor/chat/history",
+        "routeKey": f"{method} /api/advisor/chat/history",
         "rawPath": "/api/advisor/chat/history",
-        "requestContext": {"http": {"method": "GET"}},
+        "requestContext": {"http": {"method": method}},
         "headers": {"content-type": "application/json"},
         "cookies": cookies,
         "queryStringParameters": query or {},
@@ -165,3 +166,126 @@ def test_history_pk_isolation_user_b_does_not_see_user_a_turns(
     assert result["statusCode"] == 200
     body = json.loads(result["body"])
     assert body["messages"] == []  # user_b ma 0 turn
+
+
+# ─── DELETE /api/advisor/chat/history ─────────────────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_delete_history_removes_today_turns(
+    dynamodb_table_with_chat_history: Any,
+) -> None:
+    """Fixture pre-seeds 5 turn user_a today → DELETE wipuje wszystkie."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    cookie = f"bodysync_session={_mint_test_jwt('user_a')}"
+    today = datetime.now().astimezone().date()
+
+    # Sanity check pre-delete (fixture seed jest valid).
+    pre = svc.read_history("user_a", today)
+    assert len(pre) == 5
+
+    result = h.handler(_event(cookie, method="DELETE"), _FakeContext())
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["deleted"] == 5
+    assert body["date"] == today.isoformat()
+
+    # Post-delete history empty — LLM widzi pusty `<conversation_history>`.
+    post = svc.read_history("user_a", today)
+    assert post == []
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_delete_history_idempotent_when_empty(dynamodb_table: Any) -> None:
+    """Brak rows → 200 z `deleted: 0`. UX: silent success, owner kliknął
+    przycisk i widzi "wyczyszczono" niezależnie czy coś było."""
+    from handlers.advisor_chat import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('lonely_user')}"
+    result = h.handler(_event(cookie, method="DELETE"), _FakeContext())
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["deleted"] == 0
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_delete_history_pk_isolation(
+    dynamodb_table_with_chat_history: Any,
+) -> None:
+    """Critical: user_b DELETE NIE rusza user_a 5 turn pod USER#user_a PK."""
+    from handlers.advisor_chat import handler as h
+    from handlers.advisor_chat import service as svc
+
+    today = datetime.now().astimezone().date()
+
+    cookie = f"bodysync_session={_mint_test_jwt('user_b')}"
+    result = h.handler(_event(cookie, method="DELETE"), _FakeContext())
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["deleted"] == 0  # user_b miał 0 turn
+
+    # user_a history intact — nie skreślone przez user_b DELETE.
+    user_a_history = svc.read_history("user_a", today)
+    assert len(user_a_history) == 5
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client", "dynamodb_table")
+def test_delete_history_no_cookie_returns_401() -> None:
+    """DELETE bez JWT cookie → 401 (NIE wipuje nic)."""
+    from handlers.advisor_chat import handler as h
+
+    result = h.handler(_event(cookie=None, method="DELETE"), _FakeContext())
+    assert result["statusCode"] == 401
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")
+def test_delete_history_preserves_yesterday_chat(dynamodb_table: Any) -> None:
+    """Boundary: DELETE czyści TYLKO today. Wczorajsze CHAT rows zostają
+    (TTL 24h sam wymiecie). Bez tego cross-day wipe psułby UX gdy user
+    czatował o północy i klika clear rano."""
+    from handlers.advisor_chat import handler as h
+
+    today = datetime.now().astimezone().date()
+    yesterday = today - timedelta(days=1)
+
+    # Seed: 2 turn dziś, 1 wczoraj
+    for idx, content in enumerate(["dziś-1", "dziś-2"]):
+        dynamodb_table.put_item(
+            Item={
+                "PK": "USER#tomek",
+                "SK": f"CHAT#{today.isoformat()}#{idx:04d}",
+                "role": "user",
+                "content": content,
+                "ts": f"{today.isoformat()}T10:00:00+00:00",
+                "ttl": 9999999999,
+                "turn_idx": idx,
+            }
+        )
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#tomek",
+            "SK": f"CHAT#{yesterday.isoformat()}#0000",
+            "role": "user",
+            "content": "wczoraj",
+            "ts": f"{yesterday.isoformat()}T22:00:00+00:00",
+            "ttl": 9999999999,
+            "turn_idx": 0,
+        }
+    )
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handler(_event(cookie, method="DELETE"), _FakeContext())
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["deleted"] == 2  # tylko dwa today
+
+    # Wczorajszy wpis nadal w DDB.
+    yest_item = dynamodb_table.get_item(
+        Key={"PK": "USER#tomek", "SK": f"CHAT#{yesterday.isoformat()}#0000"}
+    )
+    assert "Item" in yest_item

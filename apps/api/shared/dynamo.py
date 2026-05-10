@@ -85,6 +85,24 @@ def delete_item_if_exists(pk: str, sk: str) -> dict[str, Any] | None:
     return dict(resp.get("Attributes") or {}) or None
 
 
+def batch_delete(keys: list[tuple[str, str]]) -> None:
+    """Batch delete items by `(PK, SK)` tuples — używane przez chat history
+    wipe (Sprint 11 prep — "Wyczyść rozmowę" przycisk).
+
+    DDB `BatchWriteItem` ma limit 25 items per call; boto3 `batch_writer()`
+    context manager auto-batch'uje + retry'uje unprocessed items. Dla
+    typowej dziennej historii (≤ 60 turns = max 30 user × 30 assistant)
+    to 2-3 batche, ~150-300ms total.
+
+    Idempotent — DDB DeleteItem na nieistniejący item to no-op (no error).
+    """
+    if not keys:
+        return
+    with _table.batch_writer() as batch:
+        for pk, sk in keys:
+            batch.delete_item(Key={"PK": pk, "SK": sk})
+
+
 def query_by_pk(pk: str, sk_prefix: str | None = None) -> list[dict[str, Any]]:
     """Query items for a given PK, optionally filtered by SK begins_with."""
     kwargs: dict[str, Any] = {"KeyConditionExpression": "PK = :pk"}

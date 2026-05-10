@@ -11,6 +11,7 @@ vi.mock('../api', async () => {
     ...actual,
     postAdvisorChat: vi.fn(),
     getChatHistory: vi.fn(),
+    deleteChatHistory: vi.fn(),
   };
 });
 
@@ -38,10 +39,11 @@ vi.mock('../recipes', () => ({
   RECIPE_COUNT: 1,
 }));
 
-import { getChatHistory, postAdvisorChat } from '../api';
+import { deleteChatHistory, getChatHistory, postAdvisorChat } from '../api';
 
 const mockPostAdvisorChat = vi.mocked(postAdvisorChat);
 const mockGetChatHistory = vi.mocked(getChatHistory);
+const mockDeleteChatHistory = vi.mocked(deleteChatHistory);
 
 function makeDto(overrides: Partial<ChatMessageDTO> = {}): ChatMessageDTO {
   return {
@@ -73,6 +75,8 @@ beforeEach(() => {
   // Default: empty chat history (każdy test może override).
   mockGetChatHistory.mockReset();
   mockGetChatHistory.mockResolvedValue({ messages: [], date: '2026-05-10' });
+  mockDeleteChatHistory.mockReset();
+  mockDeleteChatHistory.mockResolvedValue({ deleted: 0, date: '2026-05-10' });
 });
 
 afterEach(() => {
@@ -236,5 +240,77 @@ describe('ChatScreen', () => {
     await waitFor(() => {
       expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     });
+  });
+
+  test('Wyczyść rozmowę: confirm → DELETE → thread empty + suggested prompts wracają', async () => {
+    mockGetChatHistory.mockResolvedValueOnce({
+      messages: [
+        { role: 'user', content: 'Mogę zjeść ciasto?', turn_idx: 0, ts: '2026-05-10T10:00:00+00:00' },
+        {
+          role: 'assistant',
+          content: 'Tak, **150g** ciasta zmieści Ci się w budżecie.',
+          turn_idx: 1,
+          ts: '2026-05-10T10:00:01+00:00',
+        },
+      ],
+      date: '2026-05-10',
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ChatScreen />);
+
+    // Hydrate wypełnia thread
+    await waitFor(() => {
+      expect(screen.getByText('Mogę zjeść ciasto?')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Wyczyść rozmowę/i }));
+
+    await waitFor(() => {
+      expect(mockDeleteChatHistory).toHaveBeenCalledTimes(1);
+    });
+
+    // Thread empty → suggested prompts CTA wraca (jeden z chip-prompts z A4)
+    await waitFor(() => {
+      expect(screen.queryByText('Mogę zjeść ciasto?')).not.toBeInTheDocument();
+      expect(screen.getByText(/Spróbuj zapytać/i)).toBeInTheDocument();
+    });
+
+    confirmSpy.mockRestore();
+  });
+
+  test('Wyczyść: confirm=false → brak DELETE call, thread nietknięty', async () => {
+    mockGetChatHistory.mockResolvedValueOnce({
+      messages: [
+        { role: 'user', content: 'pytanie X', turn_idx: 0, ts: '2026-05-10T10:00:00+00:00' },
+      ],
+      date: '2026-05-10',
+    });
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(false);
+
+    render(<ChatScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('pytanie X')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Wyczyść rozmowę/i }));
+
+    expect(mockDeleteChatHistory).not.toHaveBeenCalled();
+    expect(screen.getByText('pytanie X')).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  test('Wyczyść: button hidden gdy thread pusty (po hydrate)', async () => {
+    // Default mockGetChatHistory zwraca pustą historię.
+    render(<ChatScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText(/Spróbuj zapytać/i)).toBeInTheDocument();
+    });
+
+    // Nie renderuj clear button gdy nie ma czego czyścić.
+    expect(screen.queryByRole('button', { name: /Wyczyść rozmowę/i })).not.toBeInTheDocument();
   });
 });

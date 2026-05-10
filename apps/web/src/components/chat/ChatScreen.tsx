@@ -1,5 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, chatErrorMessage, getChatHistory, postAdvisorChat } from '../../api';
+import {
+  ApiError,
+  chatErrorMessage,
+  deleteChatHistory,
+  getChatHistory,
+  postAdvisorChat,
+} from '../../api';
 import { getRecipeBySlug, type RecipeFull } from '../../recipes';
 import type {
   ChatHistoryEntry,
@@ -140,8 +146,38 @@ export function ChatScreen() {
     // modal. RecipeCard widoczna w threadzie z basic info (name, kcal, match).
   }, []);
 
+  // Wyczyść rozmowę — confirm → DELETE backend → local reset. Idempotent
+  // backend (zwraca 200 nawet gdy brak rows), więc nawet race condition
+  // (clear w trakcie pending chat call) nie crashuje UI; pending response
+  // wpadnie do pustego thread'a co OK (NIE odtwarzamy bo poprzednia tura
+  // została właśnie wymazana).
+  const handleClear = useCallback(async () => {
+    if (!window.confirm('Wyczyścić dzisiejszą rozmowę? Tego nie cofniesz.')) return;
+    controllerRef.current?.abort();
+    setError(null);
+    try {
+      await deleteChatHistory();
+      setMessages([]);
+    } catch (e) {
+      setError(chatErrorMessage(e));
+    }
+  }, []);
+
   return (
     <div className="chat-screen">
+      {!hydrating && messages.length > 0 && (
+        <div className="chat-header">
+          <button
+            type="button"
+            className="chat-clear-btn"
+            onClick={handleClear}
+            disabled={pending}
+            aria-label="Wyczyść rozmowę"
+          >
+            Wyczyść rozmowę
+          </button>
+        </div>
+      )}
       <div className="chat-thread">
         {hydrating && (
           <div className="chat-thread-empty">

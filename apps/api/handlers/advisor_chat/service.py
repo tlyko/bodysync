@@ -32,7 +32,13 @@ from decimal import Decimal
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
-from shared.dynamo import get_item, put_item_idempotent, query_by_pk, sum_metric_today
+from shared.dynamo import (
+    batch_delete,
+    get_item,
+    put_item_idempotent,
+    query_by_pk,
+    sum_metric_today,
+)
 from shared.logging import get_logger
 from shared.ssm import SecretMisconfiguredError, load_secure_secret
 
@@ -360,6 +366,28 @@ def _now_iso() -> str:
 def _now_epoch() -> int:
     """Test seam — pozwala mockować unix epoch w testach."""
     return int(time.time())
+
+
+def delete_chat_history(user_id: str, today: date) -> int:
+    """Hard delete wszystkich `CHAT#{today}#*` rows pod `USER#{user_id}`.
+
+    Boundary: Europe/Warsaw `today` — matchuje `read_history` + rate limit,
+    czyli czyści dokładnie to co LLM widzi w `<conversation_history>` przy
+    kolejnym chat call. Wczorajsza historia (jeśli czat przekroczył północ)
+    nie jest tknięta i tak zniknie po TTL 24h.
+
+    Idempotent — zwraca 0 gdy brak rows (nie 404). LLM cache_control:ephemeral
+    auto-invaliduje się po 5min, więc po wipe + 5min czat startuje 100%
+    od nowa (przed 5min cache wciąż żyje, ale `<conversation_history>` jest
+    pusty więc LLM i tak nie widzi poprzednich tur).
+    """
+    sk_prefix = f"CHAT#{today.isoformat()}#"
+    rows = query_by_pk(f"USER#{user_id}", sk_prefix=sk_prefix)
+    if not rows:
+        return 0
+    keys = [(row["PK"], row["SK"]) for row in rows]
+    batch_delete(keys)
+    return len(keys)
 
 
 def read_history(user_id: str, today: date) -> list[ChatMessage]:

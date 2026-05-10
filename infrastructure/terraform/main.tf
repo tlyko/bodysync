@@ -569,11 +569,18 @@ module "advisor_chat" {
       # Per CLAUDE.md "Reguła PK isolation" + sec audit H5 — IAM jako
       # druga linia obrony. advisor_chat czyta BIOMETRY (Query po
       # USER#{id} + sk_prefix) + PROFILE (GetItem) + chat history (Query
-      # CHAT#{date}#*), pisze chat turns (PutItem CHAT#{date}#{idx})
+      # CHAT#{date}#*), pisze chat turns (PutItem CHAT#{date}#{idx}),
+      # czyści chat history przy "Wyczyść rozmowę" (BatchWriteItem delete)
       # — wszystko pod USER#{id} PK.
-      Sid      = "DDBReadBiometryWriteChat"
-      Effect   = "Allow"
-      Action   = ["dynamodb:GetItem", "dynamodb:Query", "dynamodb:PutItem"]
+      Sid    = "DDBReadBiometryWriteChat"
+      Effect = "Allow"
+      Action = [
+        "dynamodb:GetItem",
+        "dynamodb:Query",
+        "dynamodb:PutItem",
+        "dynamodb:DeleteItem",
+        "dynamodb:BatchWriteItem",
+      ]
       Resource = aws_dynamodb_table.data.arn
       Condition = {
         "ForAllValues:StringLike" = {
@@ -639,6 +646,14 @@ resource "aws_apigatewayv2_route" "advisor_chat" {
 resource "aws_apigatewayv2_route" "advisor_chat_history" {
   api_id    = module.api_gateway.api_id
   route_key = "GET /api/advisor/chat/history"
+  target    = "integrations/${aws_apigatewayv2_integration.advisor_chat.id}"
+}
+
+# Hard wipe dzisiejszej chat history — "Wyczyść rozmowę" przycisk w ChatScreen.
+# Same Lambda dispatchuje per method (DELETE → _history_handler.handle_delete_history).
+resource "aws_apigatewayv2_route" "advisor_chat_history_delete" {
+  api_id    = module.api_gateway.api_id
+  route_key = "DELETE /api/advisor/chat/history"
   target    = "integrations/${aws_apigatewayv2_integration.advisor_chat.id}"
 }
 

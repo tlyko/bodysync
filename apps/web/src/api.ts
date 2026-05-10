@@ -111,6 +111,15 @@ export async function getChatHistory(date?: string): Promise<ChatHistoryResponse
   return request<ChatHistoryResponse>(`/api/advisor/chat/history${qs}`);
 }
 
+// "Wyczyść rozmowę" — hard wipe dzisiejszej chat history (boundary Warsaw).
+// Po nim LLM widzi pusty `<conversation_history>` i nie kontynuuje poprzedniego
+// wątku (np. ciasta z 3h temu). Idempotent: brak rows → 200 z `deleted: 0`.
+export async function deleteChatHistory(): Promise<{ deleted: number; date: string }> {
+  return request<{ deleted: number; date: string }>('/api/advisor/chat/history', {
+    method: 'DELETE',
+  });
+}
+
 export async function getProfileTargets(): Promise<ProfileTargets> {
   return request<ProfileTargets>('/api/profile/targets');
 }

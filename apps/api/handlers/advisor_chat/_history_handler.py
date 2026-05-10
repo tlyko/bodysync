@@ -1,7 +1,11 @@
-"""GET /api/advisor/chat/history dispatch (Sprint 10 A1).
+"""GET + DELETE /api/advisor/chat/history dispatch.
 
 Wydzielone do osobnego pliku żeby `handler.py` (~340 LOC) nie urósł
 ponad próg czytelności. Importowane wprost z `handler.py`.
+
+- GET: Sprint 10 A1 — frontend hydrate na mount (zachowanie kontekstu po refresh).
+- DELETE: "Wyczyść rozmowę" — owner czyści kontekst gdy poprzedni wątek
+  zboczył / nie chce żeby LLM kontynuował (np. ciasto z 3 godzin temu).
 """
 
 from __future__ import annotations
@@ -74,3 +78,36 @@ def handle_get_history(event: dict[str, Any], user_id: str, request_id: str) -> 
         },
     )
     return _response(200, response.model_dump())
+
+
+def handle_delete_history(event: dict[str, Any], user_id: str, request_id: str) -> dict[str, Any]:
+    """Hard delete dzisiejszej (Europe/Warsaw) chat history pod USER#{user_id}.
+
+    Boundary: TYLKO `today` Warsaw — matchuje to co LLM widzi w
+    `<conversation_history>` (read_history używa same boundary). Wczorajsza
+    historia (gdyby czat przeszedł przez północ) zostaje, TTL 24h sam wyczyści.
+
+    Idempotent: brak rows → 200 z `deleted: 0`. Zwracamy też `date` żeby
+    frontend mógł sanity-check że usunięto z tego samego dnia co widziany
+    thread (UX paranoja).
+    """
+    target_date = datetime.now(UTC).astimezone(WARSAW_TZ).date()
+
+    try:
+        deleted = service.delete_chat_history(user_id, target_date)
+    except Exception:
+        logger.exception(
+            "history_delete_failed",
+            extra={"request_id": request_id, "user_id": user_id},
+        )
+        return _response(500, {"error": "internal_error"})
+
+    logger.info(
+        "history_delete",
+        extra={
+            "request_id": request_id,
+            "user_id": user_id,
+            "deleted_count": deleted,
+        },
+    )
+    return _response(200, {"deleted": deleted, "date": target_date.isoformat()})
