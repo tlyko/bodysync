@@ -19,8 +19,6 @@ from typing import Any
 import boto3
 import pytest
 
-from handlers.telegram_notifier.handler import handler
-
 
 def _ctx() -> SimpleNamespace:
     return SimpleNamespace(aws_request_id="test-req-1")
@@ -40,6 +38,14 @@ def _alarm_event(
         "StateChangeTime": "2026-05-09T12:00:00.000+0000",
     }
     return {"Records": [{"Sns": {"Message": json.dumps(payload)}}]}
+
+
+@pytest.fixture
+def telegram_handler() -> Any:
+    """Lazy-import handler — top-level import crashes on missing AWS_REGION."""
+    from handlers.telegram_notifier.handler import handler as _h
+
+    return _h
 
 
 @pytest.fixture
@@ -75,7 +81,7 @@ class _FakeResponse:
 
 
 def test_alarm_state_sends_telegram_message_with_payload(
-    telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     captured: list[urllib.request.Request] = []
 
@@ -85,7 +91,7 @@ def test_alarm_state_sends_telegram_message_with_payload(
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    res = handler(_alarm_event(state="ALARM"), _ctx())
+    res = telegram_handler(_alarm_event(state="ALARM"), _ctx())
 
     assert res == {"ok": True}
     assert len(captured) == 1
@@ -103,7 +109,9 @@ def test_alarm_state_sends_telegram_message_with_payload(
     assert "bodysync-anthropic-daily-cost-high" in body["text"]
 
 
-def test_ok_state_sends_recovery_icon(telegram_ssm: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_ok_state_sends_recovery_icon(
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     captured: list[urllib.request.Request] = []
     monkeypatch.setattr(
         urllib.request,
@@ -111,7 +119,7 @@ def test_ok_state_sends_recovery_icon(telegram_ssm: None, monkeypatch: pytest.Mo
         lambda req, timeout=None: captured.append(req) or _FakeResponse(status=200),
     )
 
-    res = handler(_alarm_event(state="OK"), _ctx())
+    res = telegram_handler(_alarm_event(state="OK"), _ctx())
 
     assert res == {"ok": True}
     body = json.loads(captured[0].data or b"{}")
@@ -120,7 +128,7 @@ def test_ok_state_sends_recovery_icon(telegram_ssm: None, monkeypatch: pytest.Mo
 
 
 def test_html_special_chars_in_alarm_payload_are_escaped(
-    telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """`<`/`>`/`&` w `NewStateReason` (np. "Threshold > 1500000") muszą być
     escape'owane bo Telegram parse_mode=HTML rzuci 400 inaczej.
@@ -133,7 +141,7 @@ def test_html_special_chars_in_alarm_payload_are_escaped(
     )
 
     event = _alarm_event(reason="Threshold > 1.5M & datapoint <breached>")
-    handler(event, _ctx())
+    telegram_handler(event, _ctx())
 
     body = json.loads(captured[0].data or b"{}")
     assert "&gt;" in body["text"]
@@ -144,7 +152,7 @@ def test_html_special_chars_in_alarm_payload_are_escaped(
 
 
 def test_malformed_sns_event_returns_no_send(
-    telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     called = False
 
@@ -157,22 +165,24 @@ def test_malformed_sns_event_returns_no_send(
 
     # Records[0].Sns.Message nie jest valid JSON
     bad_event = {"Records": [{"Sns": {"Message": "not-json"}}]}
-    res = handler(bad_event, _ctx())
+    res = telegram_handler(bad_event, _ctx())
 
     assert res == {"ok": False, "reason": "malformed_event"}
     assert called is False
 
 
-def test_empty_records_returns_no_send(telegram_ssm: None, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_empty_records_returns_no_send(
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.setattr(urllib.request, "urlopen", lambda *_, **__: _FakeResponse())
 
-    res = handler({"Records": []}, _ctx())
+    res = telegram_handler({"Records": []}, _ctx())
 
     assert res == {"ok": False, "reason": "no_records"}
 
 
 def test_placeholder_bot_token_skips_send(
-    ssm_params: None, monkeypatch: pytest.MonkeyPatch
+    telegram_handler: Any, ssm_params: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     """Pre-deploy stan gdy Terraform stworzył SSM placeholder ale owner
     nie wpisał real tokena. `load_secure_secret` rzuca, handler zwraca
@@ -202,7 +212,7 @@ def test_placeholder_bot_token_skips_send(
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    res = handler(_alarm_event(), _ctx())
+    res = telegram_handler(_alarm_event(), _ctx())
 
     assert res == {"ok": False}
     assert called is False
@@ -210,7 +220,7 @@ def test_placeholder_bot_token_skips_send(
 
 
 def test_telegram_http_error_returns_failure_no_raise(
-    telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fake_urlopen(req: urllib.request.Request, timeout: float | None = None) -> _FakeResponse:
         raise urllib.error.HTTPError(
@@ -220,32 +230,32 @@ def test_telegram_http_error_returns_failure_no_raise(
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
     # Handler nie powinien rzucać — best-effort delivery.
-    res = handler(_alarm_event(), _ctx())
+    res = telegram_handler(_alarm_event(), _ctx())
 
     assert res == {"ok": False}
 
 
 def test_telegram_timeout_returns_failure_no_raise(
-    telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fake_urlopen(*_: Any, **__: Any) -> _FakeResponse:
         raise TimeoutError("connection timed out")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    res = handler(_alarm_event(), _ctx())
+    res = telegram_handler(_alarm_event(), _ctx())
 
     assert res == {"ok": False}
 
 
 def test_telegram_url_error_returns_failure_no_raise(
-    telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
+    telegram_handler: Any, telegram_ssm: None, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     def fake_urlopen(*_: Any, **__: Any) -> _FakeResponse:
         raise urllib.error.URLError("DNS resolution failed")
 
     monkeypatch.setattr(urllib.request, "urlopen", fake_urlopen)
 
-    res = handler(_alarm_event(), _ctx())
+    res = telegram_handler(_alarm_event(), _ctx())
 
     assert res == {"ok": False}
