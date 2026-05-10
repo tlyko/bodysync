@@ -1528,6 +1528,69 @@ body:has(.preview-banner) .login-screen {
   opacity: 0.5;
 }
 
+/* Sprint 10 A10 — WorkoutPlanCard tile (Dashboard overview-right-stack) */
+
+.workout-plan-card {
+  /* dziedziczy section-panel */
+}
+.workout-plan-empty {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  align-items: flex-start;
+}
+.workout-plan-body {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.workout-plan-summary {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.workout-plan-summary strong {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.1rem;
+  color: var(--text);
+  font-weight: 600;
+}
+.workout-plan-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.workout-plan-item {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.workout-plan-icon {
+  font-size: 0.85rem;
+  flex-shrink: 0;
+}
+.workout-plan-name {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.35rem 0.7rem;
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.85rem;
+  font-weight: 500;
+  cursor: pointer;
+  flex: 1;
+  text-align: left;
+  transition: background 0.15s, border-color 0.15s;
+}
+.workout-plan-name:hover {
+  background: rgba(34, 211, 238, 0.05);
+  border-color: var(--cyan);
+}
+
 /* Sprint 10 A5 — EMA legend + trend label pod chartem */
 .weight-chart-wrap {
   display: flex;
