@@ -2,6 +2,7 @@ import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { getActivities, getBiometry, getProfileTargets } from '../api';
 import {
   buildSeries,
+  extractLatestSleepStages,
   latestValue,
   sumSeries,
   trendPct,
@@ -31,6 +32,7 @@ import { PlanScreen } from './dashboard/PlanScreen';
 import { ProfileTargetsForm } from './dashboard/ProfileTargetsForm';
 import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { SidebarNav, type AppTab } from './dashboard/SidebarNav';
+import { SleepStagesCard } from './dashboard/SleepStagesCard';
 import { StatCard } from './dashboard/StatCard';
 import { TDEECalculatorWizard } from './dashboard/TDEECalculatorWizard';
 import { WeightChart } from './dashboard/WeightChart';
@@ -590,6 +592,11 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           trendWindow={trendWindow}
         />
       </div>
+
+      {/* Sprint 10 A11 — sleep stages breakdown z najnowszej nocy z danymi.
+          HAE wysyła deep/rem/core/awake tylko gdy Apple Watch noszony w nocy.
+          Empty state gdy brak żadnego sub-stage. */}
+      <SleepStagesCard stages={extractLatestSleepStages(days)} />
 
       <SectionHeader title="Waga" />
       <WeightChart data={weightSeries.map((p) => ({ date: p.date, weight: p.value }))} />
