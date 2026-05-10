@@ -48,31 +48,58 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Mobile UX (iPhone bottom nav, kcal_in today=0, dashboard symetria, NutritionDonut, Spalone kalorie) | ✅ shipped 2026-05-09 (PRy #109/#110/#114/#115/#128) — bottom navigation pattern dla iPhone 14/17 (Weronika), kcal_in/makro pokazują 0 dla dzisiaj jeśli HAE nie wysłał (zamiast wczoraj), NutritionDonut donut chart 1:1 prototype, Spalone kalorie = active+basal TDEE |
 | Logo pack + preview mock mode | ✅ shipped 2026-05-09 (PRy #108/#118) — bodysync brand pack (favicon + sidebar header + login screen), `VITE_PREVIEW_MODE=true` env w CF Workers Builds → window.fetch override z mock data dla preview branch deployments |
 | Plan Treningowy frontend tab (Sprint 5 PR #3 + follow-upy) | ✅ shipped 2026-05-09 (PRy #116/#117/#120-#124) — sidebar 7-y tab "Plan Treningowy", parser raw 2D rows → Training[] z sekcji Rozgrzewka+Trening, tabs po unique base names (Trening A/B/C), dropdown weeks per group (najnowszy default), STRICT no-guess advisor rule po halucynacji "wykonałeś Trening B zamiast C" |
+| Sprint 10 — TDEE foundation + Insights | ✅ shipped 2026-05-10 (PRy #131-#142, 12 PR-ów spread over 1 dzień) — A0 TDEE calc Mifflin-St Jeor + body profile w Ustawieniach, A0.5 LLM activity level (Anthropic ocenia z 7d Strava), A1 chat history GET + hydrate, A2 comparison vs target Odżywianie z color-coded progress bars, A5 WeightChart smoothed EMA + weekly trend, A10 Plan na dziś tile, A4 suggested prompts chat chips, A8 sport chips + search Aktywności, A9 route map thumbnail (Strava polyline → SVG), A11 sleep stages breakdown bar, A6 greeting Dashboard, A12 NutritionDonut migracja do Odżywianie tab |
 
 ## Open PRs
 
-`gh pr list` — żadnych otwartych w danej chwili (po Sprint 5 + advisor strict + Spalone kalorie).
+- **PR #130** (in-progress od 2026-05-09, PR1/2) — `telegram_notifier` Lambda backend, SNS subscriber dla cost-guard alarmu (backlog #17 — Gmail auto-unsubuje SNS). 9 testów passing, 11KB stdlib zip. Po merge: PR2 z Terraform module + drop email subscription. Owner świadomie nie merged jeszcze.
 
-## Aktywny sprint — żaden (Sprint 4+5+6+7+8+9 zamknięte 2026-05-09)
+## Aktywny sprint — żaden (Sprint 10 zamknięty 2026-05-10)
 
-Sześć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets + 1:1 prototype port (Sprint 9) + **Strava integration** (Sprint 4 zaległy) + **Google Sheets training plan + advisor injekcja** (Sprint 5).
+**Sprint 10 — "TDEE foundation + Insights" — DONE (12 PR-ów #131-#142, ~6h pracy spread over 1 dzień):**
 
-**Aktywne PR-y:**
-- **PR #130** (in-progress, PR1/2) — `telegram_notifier` Lambda backend, SNS subscriber dla cost-guard alarmu (backlog #17 — Gmail auto-unsub'uje SNS, więc owner nigdy nie dostawał alertów). 9 testów passing, 11KB stdlib zip. Po merge: PR2 z Terraform module + drop email subscription.
+Cel sprintu zrealizowany: zmienić Dashboard z passive log viewer w decision tool. Foundation TDEE (A0) + LLM activity assessment (A0.5) + comparison vs target (A2) + workout planning bridge (A10) + lots of UX polish.
 
-**Strategiczny backlog post-Sprint 9 (nocna analiza 2026-05-10):**
+**12 PR-ów shipped:**
+- ✅ **PR #131** — docs: nocna analiza strategiczna + master backlog Sprint 10-13 (4 dokumenty: audit-functional, research-competitive, ux-gaps, backlog)
+- ✅ **PR #132 (A0)** — TDEE calculator (Mifflin-St Jeor formula) + body profile (wzrost/wiek/płeć/activity/goal) w PROFILE row, wizard "Oblicz mój TDEE" w Ustawieniach + auto-fill waga z latest BIOMETRY, suggest_macros (1.8 g/kg protein, 0.9 g/kg fat, rest carbs)
+- ✅ **PR #133 (A0.5)** — LLM-driven activity level suggestion (Anthropic Haiku patrzy na 7d Strava + biometry → ocenia sedentary/light/moderate/heavy/athlete + reasoning PL). Nowa Lambda `activity_suggestion`, prompt cached, Pydantic Literal enforce
+- ✅ **PR #134 (A1)** — `GET /api/advisor/chat/history` + frontend hydrate na mount (refresh strony nie traci kontekstu). Wydzielony `_history_handler.py`, race-safe `setMessages((prev) => prev.length === 0 ? newMsgs : prev)`
+- ✅ **PR #135 (A2)** — Comparison vs target w Odżywianie StatCardach + NutritionDonut. Progress bar z color logic (green <100% / orange 100-110% / red >110% z diagonal stripe overflow), "X/Y unit · zostało Z" / "powyżej +Z"
+- ✅ **PR #136 (A5)** — WeightChart smoothed EMA overlay (α=0.1, ~10-day half-life, MacroFactor "true weight") + weekly trend label "+0,2 kg/tydz." (orange up / green down / muted stable)
+- ✅ **PR #137 (A10)** — "Plan na dziś" tile na Dashboard overview-right-stack (lista treningów A/B/C/D z planu + count Strava 7d + CTA do tab plan). NO smart "wykonaj X" suggestion bez logbook (#23 future)
+- ✅ **PR #138 (A4)** — 6 klikalnych suggested prompts chips w pustym ChatScreen empty state (zamiast pasywnego `<em>` tekstu)
+- ✅ **PR #139 (A8)** — Sport chips + search filter w Aktywności tab (limit 20 → 100, PL labels Bieg/Rower/Spacer/etc., AND logic, Wyczyść button, result count)
+- ✅ **PR #140 (A9)** — Route map thumbnail w ActivityRow (Strava `summary_polyline` decoded → inline SVG bez external map deps). Backend extension StravaActivityMap submodel + fetcher persist + activities_list returns + frontend RoutePreview (Google Encoded Polyline decoder ~30 LOC)
+- ✅ **PR #141 (A11)** — Sleep stages breakdown (Deep purple / REM cyan / Core green / Awake red) horizontal stacked bar + h:min legenda + total label. Pure frontend extractor `extractLatestSleepStages`
+- ✅ **PR #142 (A6+A12)** — Greeting + time-of-day Dashboard subtitle ("Cześć Tomek · poniedziałek, 12 maja") + NutritionDonut migracja Dashboard overview → NutritionView centralnie
+
+**Sprint 10 metryki:**
+- Backend: 1 nowa Lambda (`activity_suggestion`, ~17.9MB zip Anthropic SDK), 1 nowy endpoint `GET /api/advisor/chat/history` w istniejącej advisor_chat Lambdzie, 2 nowe IaC routes
+- Frontend: 4 nowe komponenty (TDEECalculatorWizard, WorkoutPlanCard, RoutePreview, SleepStagesCard), wszystkie tab dashboards rozszerzone
+- Tests: pytest 290 passed + 6 skipped (faiss segfault per #18); vitest 142 passed (zaczęliśmy z 100 po Sprint 9, +42 cases w Sprint 10)
+- DDB schema extensions: `body_profile` attrs (height_cm/age/sex/activity_level/goal) + `summary_polyline` w ACTIVITY rows
+- Bundle: 638→ ~660KB raw / ~158KB gzip (akceptowalne, code-split na backlog #19)
+
+**Strategiczny backlog post-Sprint 9 (nocna analiza 2026-05-10) — zachowany do następnych sprintów:**
 - 📊 [`docs/backlog-2026-05-10.md`](docs/backlog-2026-05-10.md) — master backlog z 45+ feature ideas, priorytetyzowanymi w 4 tier-y (Quick wins / Sprint candidates / Strategic / Parking lot), value/effort scoring
 - 🔍 [`docs/audit-functional-2026-05-10.md`](docs/audit-functional-2026-05-10.md) — current state map per 7 domain (Auth/Biometry/Activities/Plan/Advisor/Profil/Mobile UX)
 - 🌐 [`docs/research-competitive-2026-05-10.md`](docs/research-competitive-2026-05-10.md) — feature gaps vs Whoop/Oura/Strava Premium/MyFitnessPal/Hevy/MacroFactor/Apple Fitness, 10 kategorii, cross-cutting themes
 - 🎨 [`docs/ux-gaps-2026-05-10.md`](docs/ux-gaps-2026-05-10.md) — friction + delight per tab dashboardu, 10 obszarów
 
-**Rekomendowane następne 4 sprinty (z `backlog-2026-05-10.md`):**
-- **Sprint 10 — "TDEE foundation + Insights"** (~12-16h) — A0 TDEE calculator (Mifflin-St Jeor, body profile wzrost/wiek/płeć/activity) + comparison vs target Odżywianie, chat history GET, tenant switcher, suggested prompts, smoothed weight EMA, today's workout hint
-- **Sprint 11 — "Recovery Score + Daily Brief"** (~10-14h) — composite Recovery score Dashboard + cron 07:00 Telegram morning brief (reuse PR #130 infra)
-- **Sprint 12 — "Workout logbook + Weekly recap"** (~12-16h) — pierwszy input UX surface + niedzielny narrative recap przez LLM
-- **Sprint 13 — "Energy balance + Adaptive TDEE"** (~10-14h) — TDEE-aware undereating/overeating alerts (push Telegram gdy 7d kcal_in -500/+300 vs TDEE+treningi) + MacroFactor-style adaptive TDEE rekalkulacja co 14d z waga+kcal_in trend
+**Pozostałe quick wins z Sprint 10 backlogu (niezrealizowane, do przemyślenia czy ship'ować):**
+- **A3** Tenant switcher (V4 E:S/M — wymaga decyzji owner'a, może urość do M effort z backend `/api/me` extension)
+- **A7** Setup checklist post-login (V3 E:S — first-login guided "podłącz Strava / HAE / sheet ID")
+- **A13** STREAK counter (V3 E:S — wymaga backend DDB write `STREAK#daily`, może M)
+- **A14** Haptics + pull-to-refresh (V2 E:S — `navigator.vibrate(10)` + native gestures)
+- **A15** Tooltipy explainers (V2 E:S — "co to HRV / TDEE / Recovery", onboarding pomoc dla Weroniki)
 
-**Strategiczne pytania dla owner'a** (per `backlog-2026-05-10.md` sekcja "Strategiczne decyzje"): formuła Recovery score, Telegram-only vs in-app push, logbook scope (minimal vs Hevy), per-meal logging, PWA inwestycja, couples-emphasis priority.
+**Rekomendowane następne 3 sprinty (per `backlog-2026-05-10.md`):**
+- **Sprint 11 — "Recovery Score + Daily Brief"** (~10-14h) — composite Recovery score Dashboard (Whoop/Oura-style 0-100 z HRV+sen+RHR+body_fat) + cron 07:00 Telegram morning brief (wymaga merge PR #130 dla infra). **Zacznij od PR #130 merge**.
+- **Sprint 12 — "Workout logbook + Weekly recap"** (~12-16h) — pierwszy input UX surface (Hevy-style logger) + niedzielny narrative recap przez LLM, advisor injekcja `<workout_history>`
+- **Sprint 13 — "Energy balance + Adaptive TDEE"** (~10-14h) — TDEE-aware alerts (push Telegram gdy 7d kcal_in -500/+300 vs TDEE+treningi, undereating/LEA warning) + MacroFactor-style adaptive TDEE rekalkulacja co 14d z waga+kcal_in trend
+
+**Strategiczne pytania dla owner'a** (per `backlog-2026-05-10.md` sekcja "Strategiczne decyzje", do dyskusji przed Sprint 11): formuła Recovery score (własna heurystyka vs Whoop algorithm), Telegram-only vs in-app push parity dla Weroniki, logbook scope (minimal RPE-only vs full Hevy per-set), per-meal logging vs HAE-only, PWA inwestycja, couples-emphasis priority.
 
 **Sprint 5 — Google Sheets training plan + advisor injekcja — DONE (11 PRy #107-#128 spread over 1 dzień, ~5h pracy):**
 - ✅ PR #107 — `apps/api/handlers/plan/` service module: Google Sheets API readonly fetch z cred from SSM, jagged row padding, fixed-vocabulary errors (invalid_credentials_json/format, sheet_not_found_or_no_access, permission_denied, sheets_api_error), DDB cache load/save z 15min freshness check
