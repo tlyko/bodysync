@@ -60,7 +60,19 @@ export type ChatMessage =
   | { role: 'user'; content: string; pending: boolean }
   | { role: 'assistant'; content: string; used_recipes: UsedRecipe[]; turn_idx: number };
 
-// ─── Profile targets (Sprint 9, mirror schemas.py) ───
+// ─── Profile targets (Sprint 9, mirror schemas.py — Sprint 10 A0 extended) ───
+
+export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'heavy' | 'athlete';
+export type Sex = 'male' | 'female';
+export type Goal = 'loss' | 'maintain' | 'gain';
+
+export type BodyProfile = {
+  height_cm: number;
+  age: number;
+  sex: Sex;
+  activity_level: ActivityLevel;
+  goal: Goal;
+};
 
 export type ProfileTargets = {
   kcal_target: number;
@@ -68,6 +80,7 @@ export type ProfileTargets = {
   fat_target_g: number;
   carbs_target_g: number;
   is_default: boolean;
+  body_profile: BodyProfile | null;
 };
 
 export type ProfileTargetsUpdate = {
@@ -75,6 +88,24 @@ export type ProfileTargetsUpdate = {
   protein_target_g: number;
   fat_target_g: number;
   carbs_target_g: number;
+  body_profile?: BodyProfile;
+};
+
+// ─── Sprint 10 A0 — TDEE calculator (POST /api/profile/calculate-tdee) ───
+
+export type CalculateTDEERequest = {
+  body_profile?: BodyProfile;
+  weight_kg?: number;
+};
+
+export type CalculateTDEEResponse = {
+  bmr: number;
+  tdee_maintenance: number;
+  target_kcal: number;
+  target_protein_g: number;
+  target_fat_g: number;
+  target_carbs_g: number;
+  weight_kg_used: number;
 };
 
 // ─── Activities (Sprint 4, mirror handlers/activities_list) ───

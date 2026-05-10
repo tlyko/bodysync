@@ -5,6 +5,8 @@ import { API_URL } from './config';
 import type {
   ActivitiesResponse,
   BiometryResponse,
+  CalculateTDEERequest,
+  CalculateTDEEResponse,
   ChatMessageDTO,
   ChatRequest,
   LoginResponse,
@@ -107,6 +109,18 @@ export async function putProfileTargets(t: ProfileTargetsUpdate): Promise<Profil
   return request<ProfileTargets>('/api/profile/targets', {
     method: 'PUT',
     body: JSON.stringify(t),
+  });
+}
+
+// Sprint 10 A0 — TDEE calculator. Backend liczy BMR (Mifflin-St Jeor) + TDEE
+// (× activity multiplier) + goal modifier + suggest macros. Body profile
+// może być pominięty — backend czyta z PROFILE row jeśli zapisany.
+export async function postCalculateTDEE(
+  req: CalculateTDEERequest,
+): Promise<CalculateTDEEResponse> {
+  return request<CalculateTDEEResponse>('/api/profile/calculate-tdee', {
+    method: 'POST',
+    body: JSON.stringify(req),
   });
 }
 
