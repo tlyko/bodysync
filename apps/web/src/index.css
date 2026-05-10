@@ -991,6 +991,98 @@ body:has(.preview-banner) .login-screen {
   text-decoration: underline;
 }
 
+/* Sprint 10 A8 — sport chips + search filter Aktywności tab */
+.activities-filters {
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+  margin-bottom: 0.5rem;
+}
+.activities-sport-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.activities-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--card);
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.8rem;
+  font-family: inherit;
+  font-weight: 500;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    color 0.15s,
+    border-color 0.15s;
+}
+.activities-chip:hover:not(.active) {
+  background: var(--card-hover);
+  color: var(--text);
+}
+.activities-chip.active {
+  background: var(--cyan-dim);
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+.activities-chip-count {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  color: var(--text-dim);
+  font-weight: 600;
+}
+.activities-chip.active .activities-chip-count {
+  color: var(--cyan);
+}
+.activities-search-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+.activities-search-input {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.85rem;
+  font-family: inherit;
+  font-size: 0.85rem;
+  max-width: 360px;
+}
+.activities-search-input:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.activities-search-input::-webkit-search-cancel-button {
+  cursor: pointer;
+  filter: invert(0.8);
+}
+.activities-reset {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 6px;
+  padding: 0.45rem 0.85rem;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+.activities-reset:hover {
+  color: var(--cyan);
+  border-color: var(--cyan);
+}
+.activities-result-count {
+  margin: 0;
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
 .activity-list {
   display: flex;
   flex-direction: column;
