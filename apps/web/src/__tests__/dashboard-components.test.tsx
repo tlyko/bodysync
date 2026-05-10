@@ -73,6 +73,79 @@ describe('StatCard', () => {
     const { container } = render(<StatCard label="X" value="1" accent="muted" />);
     expect(container.querySelector('.stat-card-bottom')).toBeNull();
   });
+
+  // ─── Sprint 10 A2 — target progress bar ─────────────────────────────────
+
+  test('target prop: renders "X / Y" suffix + progress bar + remaining text', () => {
+    const { container, getByText } = render(
+      <StatCard
+        label="Kcal"
+        value="1240"
+        unit="kcal"
+        accent="cyan"
+        target={2000}
+        targetValueRaw={1240}
+      />,
+    );
+    // Suffix "/ 2 000" obok value
+    expect(getByText(/\/ 2.?000/)).toBeInTheDocument();
+    // Progress bar exists
+    const track = container.querySelector('.stat-card-progress-track');
+    expect(track).toBeTruthy();
+    expect(track?.classList.contains('progress-under')).toBe(true);
+    // Pct + remaining text
+    expect(getByText('62%')).toBeInTheDocument();
+    expect(getByText(/zostało 760/)).toBeInTheDocument();
+  });
+
+  test('target progress at 100-110% renders orange (progress-over)', () => {
+    const { container } = render(
+      <StatCard
+        label="Kcal"
+        value="2050"
+        accent="cyan"
+        target={2000}
+        targetValueRaw={2050}
+      />,
+    );
+    const track = container.querySelector('.stat-card-progress-track');
+    expect(track?.classList.contains('progress-over')).toBe(true);
+  });
+
+  test('target progress over 110% renders red (progress-far-over) + overflow stripe', () => {
+    const { container, getByText } = render(
+      <StatCard
+        label="Kcal"
+        value="2400"
+        accent="cyan"
+        target={2000}
+        targetValueRaw={2400}
+      />,
+    );
+    const track = container.querySelector('.stat-card-progress-track');
+    expect(track?.classList.contains('progress-far-over')).toBe(true);
+    // Overflow stripe widoczne dla pct>100
+    expect(container.querySelector('.stat-card-progress-overflow')).toBeTruthy();
+    // "powyżej +400" text
+    expect(getByText(/powyżej \+400/)).toBeInTheDocument();
+  });
+
+  test('target prop replaces sparkline + trend (no double rendering)', () => {
+    const { container } = render(
+      <StatCard
+        label="Kcal"
+        value="1240"
+        accent="cyan"
+        target={2000}
+        targetValueRaw={1240}
+        sparkData={[100, 200, 300]}
+        change={5}
+      />,
+    );
+    // Bottom row NIE renderowany gdy target obecny
+    expect(container.querySelector('.stat-card-bottom')).toBeNull();
+    expect(container.querySelector('.stat-card-trend')).toBeNull();
+  });
 });
 
 describe('RangeToggle', () => {

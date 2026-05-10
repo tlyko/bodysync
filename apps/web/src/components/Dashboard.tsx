@@ -1,5 +1,5 @@
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
-import { getActivities, getBiometry } from '../api';
+import { getActivities, getBiometry, getProfileTargets } from '../api';
 import {
   buildSeries,
   latestValue,
@@ -8,7 +8,7 @@ import {
   valueForDate,
   type SeriesPoint,
 } from '../biometry';
-import type { Activity, BiometryDay, Me } from '../types';
+import type { Activity, BiometryDay, Me, ProfileTargets } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
 import { ActivitiesView } from './dashboard/ActivitiesView';
 import { ActivityRow } from './dashboard/ActivityRow';
@@ -96,6 +96,9 @@ export function Dashboard({ me, onLogout }: Props) {
   const [activeTab, setActiveTab] = useState<AppTab>('overview');
   const [days, setDays] = useState<BiometryDay[] | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // Sprint 10 A2 — targets fetched once na top-level, pass do biometry sections.
+  // Brak fetcha = StatCardy renderują bez progress bar (graceful degradation).
+  const [targets, setTargets] = useState<ProfileTargets | null>(null);
 
   useEffect(() => {
     if (days !== null) return;
@@ -113,6 +116,25 @@ export function Dashboard({ me, onLogout }: Props) {
       .then((res) => setDays(res.days))
       .catch((e) => setError(e instanceof Error ? e.message : 'fetch failed'));
   }, [activeTab, days]);
+
+  // Targets fetch — niezależny od tab, mała payload (~6 fields), best-effort
+  // (404 brak profile = null = StatCardy bez progress bar).
+  useEffect(() => {
+    if (targets !== null) return;
+    if (
+      activeTab === 'recipes' ||
+      activeTab === 'settings' ||
+      activeTab === 'activities' ||
+      activeTab === 'plan'
+    ) {
+      return;
+    }
+    getProfileTargets()
+      .then(setTargets)
+      .catch(() => {
+        // Cicho — bez targets dashboard działa jak Sprint 9.
+      });
+  }, [activeTab, targets]);
 
   const userLabel = me.name ?? me.email;
   const todayLabel = useMemo(() => {
@@ -142,6 +164,7 @@ export function Dashboard({ me, onLogout }: Props) {
               days={days}
               error={error}
               userLabel={userLabel}
+              targets={targets}
               onSelectTab={setActiveTab}
             />
           )}
@@ -194,10 +217,11 @@ type BiometrySectionProps = {
   days: BiometryDay[] | null;
   error: string | null;
   userLabel: string;
+  targets: ProfileTargets | null;
   onSelectTab: (tab: AppTab) => void;
 };
 
-function BiometrySection({ tab, days, error, onSelectTab }: BiometrySectionProps) {
+function BiometrySection({ tab, days, error, targets, onSelectTab }: BiometrySectionProps) {
   const [range, setRange] = useState<Range>('30d');
 
   const sliced = useMemo<BiometryDay[]>(() => {
@@ -228,6 +252,7 @@ function BiometrySection({ tab, days, error, onSelectTab }: BiometrySectionProps
         range={range}
         onRangeChange={setRange}
         trendWindow={trendWindow}
+        targets={targets}
         onSelectTab={onSelectTab}
       />
     );
@@ -243,6 +268,7 @@ function BiometrySection({ tab, days, error, onSelectTab }: BiometrySectionProps
       range={range}
       onRangeChange={setRange}
       trendWindow={trendWindow}
+      targets={targets}
     />
   );
 }
@@ -256,13 +282,17 @@ type ViewProps = {
   trendWindow: number | null;
 };
 
-type OverviewProps = ViewProps & { onSelectTab: (tab: AppTab) => void };
+type OverviewProps = ViewProps & {
+  onSelectTab: (tab: AppTab) => void;
+  targets: ProfileTargets | null;
+};
 
 function DashboardOverview({
   days,
   range,
   onRangeChange,
   trendWindow,
+  targets,
   onSelectTab,
 }: OverviewProps) {
   // "Spalone kalorie" = active + basal (Garmin/Apple Total Daily Energy
@@ -316,6 +346,7 @@ function DashboardOverview({
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
           today={today}
+          target={targets?.kcal_target}
         />
         <WeeklyActivitiesCard />
         <MetricStatCard
@@ -347,6 +378,7 @@ function DashboardOverview({
               proteinG={proteinToday}
               fatG={fatToday}
               carbsG={carbsToday}
+              kcalTarget={targets?.kcal_target ?? null}
             />
           </SectionPanel>
 
@@ -567,7 +599,15 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
 
 // ─── Nutrition tab ──────────────────────────────────────────────────────
 
-function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
+type NutritionProps = ViewProps & { targets: ProfileTargets | null };
+
+function NutritionView({
+  days,
+  range,
+  onRangeChange,
+  trendWindow,
+  targets,
+}: NutritionProps) {
   const kcalInSeries = buildSeries(days, 'kcal_in');
   const proteinSeries = buildSeries(days, 'protein');
   const fatSeries = buildSeries(days, 'fat');
@@ -589,6 +629,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
           today={today}
+          target={targets?.kcal_target}
         />
         <TodayMetricStatCard
           label="Białko"
@@ -599,6 +640,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
           today={today}
+          target={targets?.protein_target_g}
         />
         <TodayMetricStatCard
           label="Tłuszcz"
@@ -609,6 +651,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
           today={today}
+          target={targets?.fat_target_g}
         />
         <TodayMetricStatCard
           label="Węgle"
@@ -619,6 +662,7 @@ function NutritionView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           fmt={(v) => Math.round(v).toString()}
           trendWindow={trendWindow}
           today={today}
+          target={targets?.carbs_target_g}
         />
       </div>
     </>
@@ -706,7 +750,10 @@ function MetricStatCard({
 // wartość TYLKO jeśli mamy entry dla `today`, inaczej 0. Owner: jeśli HAE
 // nie wysłał kcal_in dla dzisiaj, "0 kcal" lepsze niż wczorajsza wartość
 // (która myli — wygląda jak dziś już wpisałeś).
-type TodayMetricStatCardProps = MetricStatCardProps & { today: string };
+type TodayMetricStatCardProps = MetricStatCardProps & {
+  today: string;
+  target?: number;
+};
 
 function TodayMetricStatCard({
   label,
@@ -717,13 +764,18 @@ function TodayMetricStatCard({
   trendWindow,
   icon,
   today,
+  target,
 }: TodayMetricStatCardProps) {
   const todayPoint = valueForDate(series, today);
   const value = todayPoint?.value ?? 0;
   const sparkData = trendWindow === null ? undefined : series.map((p) => p.value);
   // Trend hide gdy brak today data — "spadek do 0" jest mylący semantycznie.
+  // Plus: gdy target podany, progress bar zastępuje sparkline + trend, więc
+  // pomijamy je explicit żeby StatCard renderował clean target layout.
   const trend =
-    todayPoint && trendWindow !== null ? trendPct(series, trendWindow) : null;
+    todayPoint && trendWindow !== null && target === undefined
+      ? trendPct(series, trendWindow)
+      : null;
   return (
     <StatCard
       label={label}
@@ -731,8 +783,10 @@ function TodayMetricStatCard({
       unit={unit}
       accent={accent}
       icon={icon}
-      sparkData={sparkData}
+      sparkData={target === undefined ? sparkData : undefined}
       change={trend}
+      target={target}
+      targetValueRaw={target !== undefined ? value : undefined}
     />
   );
 }

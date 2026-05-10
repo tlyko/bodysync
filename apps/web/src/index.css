@@ -596,6 +596,19 @@ body:has(.preview-banner) .login-screen {
   font-size: 14px;
   fill: var(--text);
 }
+.nutrition-donut-target {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 9px;
+  font-weight: 500;
+  fill: var(--text-muted);
+}
+.nutrition-donut-remaining {
+  margin: 0.4rem 0 0;
+  text-align: center;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
 .nutrition-donut-unit {
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 9px;
@@ -879,6 +892,80 @@ body:has(.preview-banner) .login-screen {
 .stat-card-sparkline-wrap {
   display: inline-flex;
   margin-left: auto;
+}
+
+/* ─── Sprint 10 A2 — target progress bar (Odżywianie StatCardy) ─── */
+
+.stat-card-target-suffix {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  margin-left: 0.3rem;
+  font-weight: 500;
+}
+.stat-card-target-bottom {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: auto;
+}
+.stat-card-progress-track {
+  position: relative;
+  width: 100%;
+  height: 6px;
+  background: rgba(148, 163, 184, 0.15);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.stat-card-progress-fill {
+  height: 100%;
+  border-radius: 4px;
+  transition: width 0.3s ease;
+}
+.stat-card-progress-track.progress-under .stat-card-progress-fill {
+  background: var(--green);
+}
+.stat-card-progress-track.progress-over .stat-card-progress-fill {
+  background: var(--orange);
+}
+.stat-card-progress-track.progress-far-over .stat-card-progress-fill {
+  background: var(--red);
+}
+.stat-card-progress-overflow {
+  position: absolute;
+  top: 0;
+  left: 0;
+  height: 100%;
+  background: repeating-linear-gradient(
+    45deg,
+    rgba(239, 68, 68, 0.4),
+    rgba(239, 68, 68, 0.4) 4px,
+    rgba(239, 68, 68, 0.6) 4px,
+    rgba(239, 68, 68, 0.6) 8px
+  );
+}
+.stat-card-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  font-size: 0.72rem;
+}
+.stat-card-progress-pct {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+}
+.stat-card-progress-pct.progress-under {
+  color: var(--green);
+}
+.stat-card-progress-pct.progress-over {
+  color: var(--orange);
+}
+.stat-card-progress-pct.progress-far-over {
+  color: var(--red);
+}
+.stat-card-progress-remaining {
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
 }
 
 /* ─── Activities (Sprint 4) ─── */
