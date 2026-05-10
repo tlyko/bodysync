@@ -159,6 +159,19 @@ class ChatResponse(BaseModel):
     generated_at: str  # ISO 8601 UTC, np. "2026-05-07T19:23:45+00:00"
 
 
+class ChatHistoryResponse(BaseModel):
+    """Response dla `GET /api/advisor/chat/history` (Sprint 10 A1).
+
+    Zwraca wszystkie tury z dnia (default: today w Europe/Warsaw) — tych
+    samych co LLM widzi w `<conversation_history>` block przy chat call.
+    Frontend hydrate'uje ChatScreen state na mount, refresh page nie traci
+    kontekstu rozmowy w ramach 24h DDB TTL.
+    """
+
+    messages: list[ChatMessage] = Field(default_factory=list)
+    date: str  # ISO YYYY-MM-DD, którego dnia dotyczy history
+
+
 # Sprint 5 PR #4 fix — inline CachedPlan definition (mirror handlers/plan/schemas.py).
 # Cross-handler import `from handlers.plan.schemas import CachedPlan` powodował
 # ImportError w Lambda (build script per-handler zip nie zawiera innych handlerów).

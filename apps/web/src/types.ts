@@ -60,6 +60,20 @@ export type ChatMessage =
   | { role: 'user'; content: string; pending: boolean }
   | { role: 'assistant'; content: string; used_recipes: UsedRecipe[]; turn_idx: number };
 
+// ─── Sprint 10 A1 — chat history GET (mirror handlers/advisor_chat/schemas.py) ───
+
+export type ChatHistoryEntry = {
+  role: 'user' | 'assistant';
+  content: string;
+  turn_idx: number;
+  ts: string;
+};
+
+export type ChatHistoryResponse = {
+  messages: ChatHistoryEntry[];
+  date: string; // YYYY-MM-DD
+};
+
 // ─── Profile targets (Sprint 9, mirror schemas.py — Sprint 10 A0 extended) ───
 
 export type ActivityLevel = 'sedentary' | 'light' | 'moderate' | 'heavy' | 'athlete';

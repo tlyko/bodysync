@@ -1,4 +1,9 @@
-"""AWS Lambda entrypoint dla `POST /api/advisor/chat` (Sprint 6.1 PR1 per ADR-007).
+"""AWS Lambda entrypoint dla `POST /api/advisor/chat` + `GET /api/advisor/chat/history`.
+
+POST flow per ADR-007 (Sprint 6.1 PR1) — multi-turn chat z RAG retrieval.
+GET history flow (Sprint 10 A1) — frontend hydrate na mount, refresh page
+nie traci kontekstu rozmowy. Wspólny handler bo te same DDB CHAT# pattern
++ same JWT auth — separate Lambda by mnożyć cold start ostentacyjnie.
 
 Flow:
 1. JWT cookie verify (`bodysync_session`) → `user_id`.
@@ -34,7 +39,12 @@ from zoneinfo import ZoneInfo
 from pydantic import ValidationError
 
 from handlers.advisor_chat import rag, service
-from handlers.advisor_chat.schemas import ChatRequest, ChatResponse, UsedRecipe
+from handlers.advisor_chat._history_handler import handle_get_history as _handle_get_history
+from handlers.advisor_chat.schemas import (
+    ChatRequest,
+    ChatResponse,
+    UsedRecipe,
+)
 from handlers.advisor_chat.service import (
     AdvisorBackendError,
     AdvisorUnavailableError,
@@ -84,7 +94,7 @@ def _extract_session_cookie(event: dict[str, Any]) -> str | None:
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
-    """Lambda entrypoint dla `POST /api/advisor/chat`.
+    """Lambda entrypoint dla `POST /api/advisor/chat` + `GET /api/advisor/chat/history`.
 
     Handler nie loguje user content (ADR-007 OPEN-4). Każdy structured log
     ma `request_id` + `user_id` (gdy znany).
@@ -105,6 +115,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if not isinstance(user_id, str) or not user_id:
         logger.warning("session_no_user_id", extra={"request_id": request_id})
         return _response(401, {"error": "auth_required"})
+
+    # ── 1.5 Route dispatch — GET history vs POST chat ─────────────────────
+    method = (event.get("requestContext") or {}).get("http", {}).get("method", "")
+    if method == "GET":
+        return _handle_get_history(event, user_id, request_id)
+    # else: POST flow (default; explicit method check w istniejącej logice).
 
     # ── 2. Parse body ──────────────────────────────────────────────────────
     raw_body = event.get("body") or "{}"
