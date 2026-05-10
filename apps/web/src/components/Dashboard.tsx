@@ -140,6 +140,22 @@ export function Dashboard({ me, onLogout }: Props) {
   }, [activeTab, targets]);
 
   const userLabel = me.name ?? me.email;
+  // Sprint 10 A6 — greeting + time-of-day prefix w subtitle.
+  // Time-of-day buckets dopasowane do typowego dnia: rano (5-12), popołudnie
+  // (12-18), wieczór (18-22), późno (22-5). Greeting na imię (z Me.name)
+  // lub fallback email — owner preferuje "Tomek" niż "tlyko94@gmail.com".
+  const greeting = useMemo(() => {
+    const hour = new Date().getHours();
+    let salutation: string;
+    if (hour >= 22 || hour < 5) salutation = 'Dobranoc';
+    else if (hour < 12) salutation = 'Dzień dobry';
+    else if (hour < 18) salutation = 'Cześć';
+    else salutation = 'Dobry wieczór';
+    // me.name z Google OAuth ma format "Imię Nazwisko" — bierzemy first token
+    // żeby dropować nazwisko (greeting bardziej osobiste).
+    const firstName = (me.name ?? me.email).split(/[\s@]/)[0];
+    return `${salutation}, ${firstName}`;
+  }, [me.name, me.email]);
   const todayLabel = useMemo(() => {
     const formatted = PL_DATE.format(new Date());
     return formatted.charAt(0).toUpperCase() + formatted.slice(1);
@@ -157,7 +173,18 @@ export function Dashboard({ me, onLogout }: Props) {
         <header className="app-content-header">
           <div>
             <h1 className="app-content-title">{TAB_TITLES[activeTab]}</h1>
-            <p className="app-content-subtitle">{todayLabel}</p>
+            <p className="app-content-subtitle">
+              {/* Sprint 10 A6 — greeting tylko na overview tab (główny ekran).
+                  Inne taby skupione na konkretnym widoku, greeting by się
+                  powtarzał i robił szum. */}
+              {activeTab === 'overview' && (
+                <>
+                  <span className="app-content-greeting">{greeting}</span>
+                  <span className="app-content-subtitle-sep"> · </span>
+                </>
+              )}
+              {todayLabel}
+            </p>
           </div>
         </header>
         <div className="app-content-body">
@@ -310,19 +337,8 @@ function DashboardOverview({
   const sleepSeries = buildSeries(days, 'sleep');
   const restingHrSeries = buildSeries(days, 'resting_hr');
   const bodyFatSeries = buildSeries(days, 'body_fat');
-  const proteinSeries = buildSeries(days, 'protein');
-  const fatSeries = buildSeries(days, 'fat');
-  const carbsSeries = buildSeries(days, 'carbs');
 
-  // Manualne metryki (kcal_in + makro) — pokazujemy wartość TYLKO jeśli
-  // mamy entry dla today. Inaczej "0 kcal/0g" zamiast wczoraj — owner
-  // chce widzieć "nic dziś nie spożyłem" (HAE webhook może nie być
-  // wysłany jeśli user nie zaktualizował Fitatu/MyFitnessPal).
   const today = localTodayIso();
-  const kcalInToday = valueForDate(kcalIn, today)?.value ?? 0;
-  const proteinToday = valueForDate(proteinSeries, today)?.value ?? 0;
-  const fatToday = valueForDate(fatSeries, today)?.value ?? 0;
-  const carbsToday = valueForDate(carbsSeries, today)?.value ?? 0;
 
   return (
     <>
@@ -377,15 +393,10 @@ function DashboardOverview({
         <div className="overview-right-stack">
           <WorkoutPlanCard onSeePlan={() => onSelectTab('plan')} />
 
-          <SectionPanel title="Makroskładniki">
-            <NutritionDonut
-              kcal={kcalInToday}
-              proteinG={proteinToday}
-              fatG={fatToday}
-              carbsG={carbsToday}
-              kcalTarget={targets?.kcal_target ?? null}
-            />
-          </SectionPanel>
+          {/* Sprint 10 A12 — NutritionDonut przeniesiony do NutritionView
+              tab (semantic location: makro = Odżywianie). Overview pokazuje
+              WorkoutPlanCard + Recovery — bardziej "co teraz" focus zamiast
+              "co już zjadłem". */}
 
           <SectionPanel title="Recovery">
             <div className="mini-stat-grid">
@@ -624,11 +635,29 @@ function NutritionView({
   const carbsSeries = buildSeries(days, 'carbs');
   const today = localTodayIso();
 
+  // Sprint 10 A12 — NutritionDonut centralnie u góry tab Odżywianie
+  // (semantic location, owner widzi visual makro split przed numerami).
+  const kcalInToday = valueForDate(kcalInSeries, today)?.value ?? 0;
+  const proteinToday = valueForDate(proteinSeries, today)?.value ?? 0;
+  const fatToday = valueForDate(fatSeries, today)?.value ?? 0;
+  const carbsToday = valueForDate(carbsSeries, today)?.value ?? 0;
+
   return (
     <>
       <SectionHeader title={`Makroskładniki · ${rangeLabel(range, latestDate(days))}`}>
         <RangeToggle value={range} onChange={onRangeChange} />
       </SectionHeader>
+
+      <section className="section-panel nutrition-donut-panel">
+        <NutritionDonut
+          kcal={kcalInToday}
+          proteinG={proteinToday}
+          fatG={fatToday}
+          carbsG={carbsToday}
+          kcalTarget={targets?.kcal_target ?? null}
+        />
+      </section>
+
       <div className="stat-grid">
         <TodayMetricStatCard
           label="Kcal spożyte"

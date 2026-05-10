@@ -225,6 +225,14 @@ code {
   color: var(--text-muted);
   font-size: 0.9rem;
 }
+/* Sprint 10 A6 — greeting wyróżniony jasnym tekstem (vs muted reszta) */
+.app-content-greeting {
+  color: var(--text);
+  font-weight: 600;
+}
+.app-content-subtitle-sep {
+  color: var(--text-dim);
+}
 .app-content-body {
   display: flex;
   flex-direction: column;
@@ -513,6 +521,12 @@ body:has(.preview-banner) .login-screen {
   border: 1px solid var(--border);
   border-radius: 16px;
   padding: 1.5rem;
+}
+/* Sprint 10 A12 — NutritionDonut centralnie w panel na Odżywianie tab */
+.nutrition-donut-panel {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 .section-panel-title {
   margin: 0 0 1rem;
