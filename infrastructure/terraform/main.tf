@@ -151,12 +151,13 @@ module "profile_targets" {
 
   extra_iam_statements = [
     {
-      # Read + Write PROFILE row — LeadingKeys USER#* defense in depth (handler
-      # i tak zawsze pisze pod {user_id z JWT}, ale gdyby kiedy się wjebała
-      # PK injection w kodzie, IAM zatrzyma write na non-USER prefix).
+      # Read + Write PROFILE row + Query BIOMETRY (calculate-tdee — `get_latest_weight_kg`).
+      # LeadingKeys USER#* defense in depth (handler i tak zawsze operuje pod
+      # {user_id z JWT}, ale gdyby kiedy się wjebała PK injection w kodzie,
+      # IAM zatrzyma operację na non-USER prefix).
       Sid      = "DDBProfileRW"
       Effect   = "Allow"
-      Action   = ["dynamodb:GetItem", "dynamodb:PutItem"]
+      Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query"]
       Resource = aws_dynamodb_table.data.arn
       Condition = {
         "ForAllValues:StringLike" = {
@@ -191,6 +192,15 @@ resource "aws_apigatewayv2_route" "profile_targets_get" {
 resource "aws_apigatewayv2_route" "profile_targets_put" {
   api_id    = module.api_gateway.api_id
   route_key = "PUT /api/profile/targets"
+  target    = "integrations/${aws_apigatewayv2_integration.profile_targets.id}"
+}
+
+# Sprint 10 A0 — TDEE calculator. Reuse profile_targets Lambda (read PROFILE
+# + read latest weight z BIOMETRY, no DDB write). Handler dispatchuje per
+# rawPath substring "calculate-tdee".
+resource "aws_apigatewayv2_route" "profile_calculate_tdee" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/profile/calculate-tdee"
   target    = "integrations/${aws_apigatewayv2_integration.profile_targets.id}"
 }
 

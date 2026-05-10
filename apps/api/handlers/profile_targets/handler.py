@@ -1,11 +1,12 @@
 """AWS Lambda dispatcher dla profile targets endpointów.
 
 Routes:
-  GET /api/profile/targets   — bieżące cele kcal/makro (fallback defaults
-                                gdy brak ustawionych)
-  PUT /api/profile/targets   — body {kcal_target, protein_target_g,
-                                fat_target_g, carbs_target_g} → merge do
-                                PROFILE row
+  GET  /api/profile/targets        — bieżące cele kcal/makro + opcjonalny body_profile
+  PUT  /api/profile/targets        — body {kcal, protein, fat, carbs, body_profile?}
+                                      → merge do PROFILE row
+  POST /api/profile/calculate-tdee — input body_profile + opcjonalny weight_kg,
+                                      output proposed targets (NIE persisted —
+                                      frontend pokazuje user, on PUT-uje)
 
 Auth: JWT cookie `bodysync_session`. Mirror api_read pattern.
 """
@@ -17,10 +18,21 @@ from typing import Any
 
 from pydantic import ValidationError
 
-from handlers.profile_targets.schemas import TargetsPayload, TargetsResponse
+from handlers.profile_targets.schemas import (
+    CalculateTDEERequest,
+    CalculateTDEEResponse,
+    TargetsPayload,
+    TargetsResponse,
+)
 from handlers.profile_targets.service import (
     ProfileNotFoundError,
+    WeightNotFoundError,
+    calculate_bmr,
+    calculate_target_kcal,
+    calculate_tdee,
+    get_latest_weight_kg,
     get_targets,
+    suggest_macros,
     update_targets,
 )
 from shared.auth import AuthError, verify_jwt
@@ -59,7 +71,21 @@ def _route_key(event: dict[str, Any]) -> str:
 
 
 def _http_method(event: dict[str, Any]) -> str:
-    return (event.get("requestContext") or {}).get("http", {}).get("method", "")
+    method = (event.get("requestContext") or {}).get("http", {}).get("method", "")
+    return str(method)
+
+
+def _parse_json_body(event: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
+    """Return (parsed, error_msg). error_msg None gdy parse OK."""
+    raw_body = event.get("body") or "{}"
+    if event.get("isBase64Encoded"):
+        import base64
+
+        raw_body = base64.b64decode(raw_body).decode("utf-8")
+    try:
+        return json.loads(raw_body), None
+    except json.JSONDecodeError:
+        return None, "invalid json body"
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
@@ -85,69 +111,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
     method = _http_method(event)
     route = _route_key(event)
+    raw_path = event.get("rawPath") or ""
 
     try:
+        # Route dispatch — calculate-tdee jest specyficzny path, separate od targets.
+        if method == "POST" and "calculate-tdee" in raw_path:
+            return _handle_calculate_tdee(event, user_id, request_id)
+
         if method == "GET":
-            kcal, protein, fat, carbs, is_default = get_targets(user_id)
-            body = TargetsResponse(
-                kcal_target=kcal,
-                protein_target_g=protein,
-                fat_target_g=fat,
-                carbs_target_g=carbs,
-                is_default=is_default,
-            )
-            logger.info(
-                "targets_get",
-                extra={
-                    "request_id": request_id,
-                    "user_id": user_id,
-                    "is_default": is_default,
-                },
-            )
-            return _response(200, body.model_dump())
+            return _handle_get_targets(user_id, request_id)
 
         if method == "PUT":
-            raw_body = event.get("body") or "{}"
-            if event.get("isBase64Encoded"):
-                import base64
-
-                raw_body = base64.b64decode(raw_body).decode("utf-8")
-            try:
-                parsed = json.loads(raw_body)
-            except json.JSONDecodeError:
-                return _response(400, {"error": "invalid json body"})
-
-            try:
-                payload_obj = TargetsPayload.model_validate(parsed)
-            except ValidationError as e:
-                # Sanityzowane error details (loc + type, no input echo).
-                sanitized = [{"loc": err["loc"], "type": err["type"]} for err in e.errors()]
-                return _response(400, {"error": "invalid payload", "details": sanitized})
-
-            update_targets(
-                user_id,
-                payload_obj.kcal_target,
-                payload_obj.protein_target_g,
-                payload_obj.fat_target_g,
-                payload_obj.carbs_target_g,
-            )
-            response = TargetsResponse(
-                kcal_target=payload_obj.kcal_target,
-                protein_target_g=payload_obj.protein_target_g,
-                fat_target_g=payload_obj.fat_target_g,
-                carbs_target_g=payload_obj.carbs_target_g,
-                is_default=False,
-            )
-            logger.info(
-                "targets_put",
-                extra={
-                    "request_id": request_id,
-                    "user_id": user_id,
-                    "kcal_target": payload_obj.kcal_target,
-                    "protein_target_g": payload_obj.protein_target_g,
-                },
-            )
-            return _response(200, response.model_dump())
+            return _handle_put_targets(event, user_id, request_id)
 
         logger.warning(
             "method_not_allowed",
@@ -161,6 +136,145 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             extra={"request_id": request_id, "user_id": user_id},
         )
         return _response(404, {"error": "profile not found"})
+    except WeightNotFoundError:
+        logger.warning(
+            "weight_not_found",
+            extra={"request_id": request_id, "user_id": user_id},
+        )
+        return _response(
+            400,
+            {
+                "error": "weight_not_found",
+                "details": "no weight in BIOMETRY (last 100 items); pass weight_kg in payload",
+            },
+        )
     except Exception:
         logger.exception("internal_error", extra={"request_id": request_id})
         return _response(500, {"error": "internal"})
+
+
+def _handle_get_targets(user_id: str, request_id: str) -> dict[str, Any]:
+    kcal, protein, fat, carbs, is_default, body_profile = get_targets(user_id)
+    body = TargetsResponse(
+        kcal_target=kcal,
+        protein_target_g=protein,
+        fat_target_g=fat,
+        carbs_target_g=carbs,
+        is_default=is_default,
+        body_profile=body_profile,
+    )
+    logger.info(
+        "targets_get",
+        extra={
+            "request_id": request_id,
+            "user_id": user_id,
+            "is_default": is_default,
+        },
+    )
+    return _response(200, body.model_dump())
+
+
+def _handle_put_targets(event: dict[str, Any], user_id: str, request_id: str) -> dict[str, Any]:
+    parsed, err = _parse_json_body(event)
+    if err is not None:
+        return _response(400, {"error": err})
+
+    try:
+        payload_obj = TargetsPayload.model_validate(parsed)
+    except ValidationError as e:
+        sanitized = [{"loc": err["loc"], "type": err["type"]} for err in e.errors()]
+        return _response(400, {"error": "invalid payload", "details": sanitized})
+
+    update_targets(
+        user_id,
+        payload_obj.kcal_target,
+        payload_obj.protein_target_g,
+        payload_obj.fat_target_g,
+        payload_obj.carbs_target_g,
+        body_profile=payload_obj.body_profile,
+    )
+    response = TargetsResponse(
+        kcal_target=payload_obj.kcal_target,
+        protein_target_g=payload_obj.protein_target_g,
+        fat_target_g=payload_obj.fat_target_g,
+        carbs_target_g=payload_obj.carbs_target_g,
+        is_default=False,
+        body_profile=payload_obj.body_profile,
+    )
+    logger.info(
+        "targets_put",
+        extra={
+            "request_id": request_id,
+            "user_id": user_id,
+            "kcal_target": payload_obj.kcal_target,
+            "protein_target_g": payload_obj.protein_target_g,
+            "has_body_profile": payload_obj.body_profile is not None,
+        },
+    )
+    return _response(200, response.model_dump())
+
+
+def _handle_calculate_tdee(event: dict[str, Any], user_id: str, request_id: str) -> dict[str, Any]:
+    """Input BodyProfile (lub czyta z PROFILE) + waga (lub latest z BIOMETRY)
+    → output proposed targets. NIE persistuje — frontend pokazuje user, on
+    PUT-uje TargetsPayload z body_profile + 4 makro.
+    """
+    parsed, err = _parse_json_body(event)
+    if err is not None:
+        return _response(400, {"error": err})
+
+    try:
+        req = CalculateTDEERequest.model_validate(parsed)
+    except ValidationError as e:
+        sanitized = [{"loc": err["loc"], "type": err["type"]} for err in e.errors()]
+        return _response(400, {"error": "invalid payload", "details": sanitized})
+
+    # Body profile: payload override > zapisany w PROFILE > 400.
+    body_profile = req.body_profile
+    if body_profile is None:
+        try:
+            _, _, _, _, _, stored = get_targets(user_id)
+        except ProfileNotFoundError:
+            return _response(404, {"error": "profile not found"})
+        if stored is None:
+            return _response(
+                400,
+                {
+                    "error": "body_profile_required",
+                    "details": "body_profile must be provided when not yet saved",
+                },
+            )
+        body_profile = stored
+
+    # Waga: payload override > latest z BIOMETRY > 400.
+    weight_kg = req.weight_kg
+    if weight_kg is None:
+        weight_kg = get_latest_weight_kg(user_id)
+        if weight_kg is None:
+            raise WeightNotFoundError(user_id)
+
+    bmr = calculate_bmr(weight_kg, body_profile.height_cm, body_profile.age, body_profile.sex)
+    tdee = calculate_tdee(bmr, body_profile.activity_level)
+    target_kcal = calculate_target_kcal(tdee, body_profile.goal)
+    protein_g, fat_g, carbs_g = suggest_macros(weight_kg, target_kcal)
+
+    response = CalculateTDEEResponse(
+        bmr=int(round(bmr)),
+        tdee_maintenance=int(round(tdee)),
+        target_kcal=target_kcal,
+        target_protein_g=protein_g,
+        target_fat_g=fat_g,
+        target_carbs_g=carbs_g,
+        weight_kg_used=round(weight_kg, 1),
+    )
+    logger.info(
+        "tdee_calculated",
+        extra={
+            "request_id": request_id,
+            "user_id": user_id,
+            "bmr": int(round(bmr)),
+            "tdee_maintenance": int(round(tdee)),
+            "target_kcal": target_kcal,
+        },
+    )
+    return _response(200, response.model_dump())

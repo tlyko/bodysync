@@ -1132,6 +1132,217 @@ body:has(.preview-banner) .login-screen {
   cursor: not-allowed;
 }
 
+/* ─── TDEE calculator wizard (Sprint 10 A0) ─── */
+
+.tdee-wizard {
+  max-width: 720px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  margin-bottom: 1.5rem;
+}
+.tdee-wizard-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.tdee-wizard-title {
+  margin: 0;
+  font-size: 1.1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.tdee-wizard-subtitle {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.tdee-wizard-form {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.tdee-wizard-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 1rem;
+}
+.tdee-wizard-field {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.tdee-wizard-field-wide {
+  grid-column: 1 / -1;
+}
+.tdee-wizard-field > span:first-child {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.tdee-wizard-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+}
+.tdee-wizard-field input[type='number'],
+.tdee-wizard-field select {
+  flex: 1;
+  background: var(--bg);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 0.55rem 0.75rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.05rem;
+  font-weight: 500;
+  width: 100%;
+}
+.tdee-wizard-field select {
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 0.9rem;
+}
+.tdee-wizard-field input[type='number']:focus,
+.tdee-wizard-field select:focus {
+  outline: none;
+  border-color: var(--cyan);
+}
+.tdee-wizard-field input:disabled,
+.tdee-wizard-field select:disabled {
+  opacity: 0.5;
+}
+.tdee-wizard-unit {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+.tdee-wizard-actions {
+  display: flex;
+  justify-content: flex-end;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+}
+.tdee-wizard-calc-button {
+  background: var(--cyan);
+  color: #0a0e17;
+  border: 1px solid var(--cyan);
+  border-radius: 6px;
+  padding: 0.55rem 1.4rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.tdee-wizard-calc-button:hover:not(:disabled) {
+  background: #67e8f9;
+  border-color: #67e8f9;
+}
+.tdee-wizard-calc-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.tdee-wizard-result {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding-top: 1rem;
+  border-top: 1px solid var(--border);
+}
+.tdee-wizard-result-stats {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+.tdee-wizard-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+.tdee-wizard-stat-accent {
+  border-color: var(--cyan);
+  background: rgba(34, 211, 238, 0.08);
+}
+.tdee-wizard-stat-label {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.tdee-wizard-stat-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.4rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.tdee-wizard-stat-unit {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  font-weight: 400;
+}
+.tdee-wizard-stat-hint {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+}
+.tdee-wizard-result-macros {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.5rem;
+}
+.tdee-wizard-macro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.6rem 0.85rem;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+}
+.tdee-wizard-macro-label {
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.tdee-wizard-macro-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.tdee-wizard-apply-button {
+  background: var(--green);
+  color: #0a0e17;
+  border: 1px solid var(--green);
+  border-radius: 6px;
+  padding: 0.55rem 1.4rem;
+  font-weight: 600;
+  cursor: pointer;
+  font-size: 0.9rem;
+}
+.tdee-wizard-apply-button:hover:not(:disabled) {
+  filter: brightness(1.1);
+}
+.tdee-wizard-apply-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.tdee-wizard-success {
+  margin: 0;
+  color: var(--green);
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+
 /* ─── Weight chart (Sprint 8) ─── */
 
 .weight-chart {

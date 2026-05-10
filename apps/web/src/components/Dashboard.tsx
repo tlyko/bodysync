@@ -32,6 +32,7 @@ import { ProfileTargetsForm } from './dashboard/ProfileTargetsForm';
 import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { SidebarNav, type AppTab } from './dashboard/SidebarNav';
 import { StatCard } from './dashboard/StatCard';
+import { TDEECalculatorWizard } from './dashboard/TDEECalculatorWizard';
 import { WeightChart } from './dashboard/WeightChart';
 
 type Props = {
@@ -148,19 +149,7 @@ export function Dashboard({ me, onLogout }: Props) {
           {activeTab === 'plan' && <PlanScreen />}
           {activeTab === 'recipes' && <ChatScreen />}
           {activeTab === 'settings' && (
-            <>
-              <ProfileTargetsForm />
-              {/* Mobile fallback — sidebar foot z "Wyloguj" jest hidden na mobile
-                  (bottom nav nie ma miejsca). Settings tab to logiczne miejsce
-                  na konto/account actions. */}
-              <button
-                type="button"
-                className="settings-logout-button"
-                onClick={onLogout}
-              >
-                Wyloguj
-              </button>
-            </>
+            <SettingsView onLogout={onLogout} />
           )}
         </div>
       </main>
@@ -177,6 +166,26 @@ const TAB_TITLES: Record<AppTab, string> = {
   recipes: 'Przepisy AI',
   settings: 'Ustawienia',
 };
+
+// ─── Settings view — TDEE wizard + targets form + logout (mobile) ──────
+
+function SettingsView({ onLogout }: { onLogout: () => void }) {
+  // refreshKey przycina ProfileTargetsForm po success w wizardzie — wymusza
+  // re-fetch celów (wizard PUT-uje, form pokazuje fresh values bez F5).
+  const [refreshKey, setRefreshKey] = useState(0);
+  return (
+    <>
+      <TDEECalculatorWizard onTargetsUpdated={() => setRefreshKey((k) => k + 1)} />
+      <ProfileTargetsForm key={refreshKey} />
+      {/* Mobile fallback — sidebar foot z "Wyloguj" jest hidden na mobile
+          (bottom nav nie ma miejsca). Settings tab to logiczne miejsce
+          na konto/account actions. */}
+      <button type="button" className="settings-logout-button" onClick={onLogout}>
+        Wyloguj
+      </button>
+    </>
+  );
+}
 
 // ─── Biometry section dispatcher ────────────────────────────────────────
 

@@ -34,6 +34,7 @@ describe('ProfileTargetsForm', () => {
       fat_target_g: 70,
       carbs_target_g: 200,
       is_default: true,
+      body_profile: null,
     });
     render(<ProfileTargetsForm />);
     await waitFor(() => {
@@ -50,6 +51,7 @@ describe('ProfileTargetsForm', () => {
       fat_target_g: 80,
       carbs_target_g: 260,
       is_default: false,
+      body_profile: null,
     });
     render(<ProfileTargetsForm />);
     await waitFor(() => {
@@ -65,6 +67,7 @@ describe('ProfileTargetsForm', () => {
       fat_target_g: 70,
       carbs_target_g: 200,
       is_default: true,
+      body_profile: null,
     });
     mockPut.mockResolvedValueOnce({
       kcal_target: 2400,
@@ -72,6 +75,7 @@ describe('ProfileTargetsForm', () => {
       fat_target_g: 80,
       carbs_target_g: 260,
       is_default: false,
+      body_profile: null,
     });
     render(<ProfileTargetsForm />);
     await waitFor(() => screen.getByDisplayValue('2000'));
@@ -101,6 +105,7 @@ describe('ProfileTargetsForm', () => {
       fat_target_g: 70,
       carbs_target_g: 200,
       is_default: true,
+      body_profile: null,
     });
     render(<ProfileTargetsForm />);
     await waitFor(() => screen.getByDisplayValue('2000'));
@@ -119,6 +124,7 @@ describe('ProfileTargetsForm', () => {
       fat_target_g: 70,
       carbs_target_g: 200,
       is_default: true,
+      body_profile: null,
     });
     mockPut.mockRejectedValueOnce(new ApiError(400, 'invalid payload'));
     render(<ProfileTargetsForm />);
