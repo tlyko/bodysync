@@ -61,7 +61,12 @@ async function request<T>(path: string, init?: RequestInit, signal?: AbortSignal
     if (e instanceof DOMException && e.name === 'AbortError') {
       throw new ApiError(0, 'aborted');
     }
-    throw e;
+    // Network / CORS error — fetch rzuca `TypeError: Failed to fetch` gdy
+    // browser blokuje response (DNS down, CORS mismatch, missing route
+    // bez CORS headers w 404 response). Bez tego wrap'a `chatErrorMessage`
+    // dostawał surowy TypeError → fallback "Nieoczekiwany błąd". Status -1
+    // (poza HTTP range) żeby odróżnić od abort (0) i HTTP responses (2xx-5xx).
+    throw new ApiError(-1, 'network');
   }
   if (!res.ok) {
     const body = await res.text();
@@ -173,12 +178,16 @@ export function stravaOAuthStartUrl(): string {
 
 // PL message dla UI banner — mapuje status code na czytelny komunikat.
 // Status 0 = aborted (component unmount), caller powinien ignorować.
+// Status -1 = network / CORS / browser-blocked (np. preflight fail, DNS down).
 export function chatErrorMessage(e: unknown): string {
   if (!(e instanceof ApiError)) {
     return 'Nieoczekiwany błąd';
   }
   if (e.status === 0) {
     return ''; // aborted — UI nie powinno tego pokazywać
+  }
+  if (e.status === -1) {
+    return 'Brak połączenia z serwerem — spróbuj za chwilę.';
   }
   if (e.status === 429) {
     return 'Wykorzystałeś dzienny limit (30 wiadomości). Wróć jutro.';

@@ -134,6 +134,23 @@ describe('ChatScreen', () => {
     });
   });
 
+  test('network error (status -1): error banner "Brak połączenia"', async () => {
+    // Scenariusz: API GW route nie istnieje (Terraform apply in progress)
+    // → browser blokuje 404 bez CORS headers → fetch rzuca TypeError →
+    // request() opakowuje w ApiError(-1).
+    mockPostAdvisorChat.mockRejectedValueOnce(new ApiError(-1, 'network'));
+    render(<ChatScreen />);
+
+    fireEvent.change(screen.getByPlaceholderText(/Napisz/), { target: { value: 'pytanie' } });
+    fireEvent.click(screen.getByRole('button', { name: /Wyślij/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Brak połączenia/i)).toBeInTheDocument();
+    });
+    // Sanity: NIE pokazujemy generic "Nieoczekiwany błąd" dla znanego case.
+    expect(screen.queryByText(/Nieoczekiwany/i)).not.toBeInTheDocument();
+  });
+
   test('pending: input + button disabled podczas request', async () => {
     // Promise nigdy się nie resolve'uje — observujemy pending state.
     // Po teście ChatScreen unmount → useEffect cleanup wywoła
@@ -298,6 +315,39 @@ describe('ChatScreen', () => {
 
     expect(mockDeleteChatHistory).not.toHaveBeenCalled();
     expect(screen.getByText('pytanie X')).toBeInTheDocument();
+
+    confirmSpy.mockRestore();
+  });
+
+  test('Wyczyść: network error → banner "Brak połączenia" (nie generic fallback)', async () => {
+    // Regression: PR #145 z dnia 2026-05-10 — owner zgłosił "nieoczekiwany
+    // błąd" gdy DELETE route nie był jeszcze deployed (Terraform apply in
+    // progress, 404 bez CORS headers, fetch rzuca TypeError). Fix: request()
+    // owrap w ApiError(-1) → konkretny message "Brak połączenia".
+    mockGetChatHistory.mockResolvedValueOnce({
+      messages: [
+        { role: 'user', content: 'wiadomość', turn_idx: 0, ts: '2026-05-10T10:00:00+00:00' },
+      ],
+      date: '2026-05-10',
+    });
+    mockDeleteChatHistory.mockRejectedValueOnce(new ApiError(-1, 'network'));
+    const confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+
+    render(<ChatScreen />);
+
+    await waitFor(() => {
+      expect(screen.getByText('wiadomość')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: /Wyczyść rozmowę/i }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/Brak połączenia/i)).toBeInTheDocument();
+    });
+    // Thread nietknięty (DELETE failed, lokalny state nie resetowany).
+    expect(screen.getByText('wiadomość')).toBeInTheDocument();
+    // Sanity: nie pokazujemy generic fallback dla znanego scenariusza.
+    expect(screen.queryByText(/Nieoczekiwany/i)).not.toBeInTheDocument();
 
     confirmSpy.mockRestore();
   });
