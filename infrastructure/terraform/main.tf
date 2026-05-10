@@ -212,6 +212,82 @@ resource "aws_lambda_permission" "profile_targets_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
+# Sprint 10 A0.5 — LLM-driven activity level suggestion dla TDEE wizard.
+# Anthropic Haiku ocenia poziom aktywności na bazie ostatnich 7d Strava +
+# biometry. Memory 1024MB / timeout 15s — Anthropic SDK cold start ~500ms +
+# DDB query ~50ms + LLM call 2-4s + JSON parse. Cost: ~$0.001 per call
+# (system prompt cached). Cost-guard alarm shared z advisor_chat (log shape
+# `anthropic_call` matchuje cloudwatch.tf metric filter).
+module "activity_suggestion" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "activity-suggestion"
+  source_zip    = "${path.module}/../../apps/api/dist/activity_suggestion.zip"
+  handler       = "handlers.activity_suggestion.handler.handler"
+  memory_size   = 1024
+  timeout       = 15
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Read ACTIVITY + BIOMETRY rows pod USER#{id} — gather_activity_context.
+      # NO write. LeadingKeys USER#* defense in depth — handler i tak query
+      # zawsze pod {user_id z JWT}, IAM zatrzymuje cross-PK leak przy bug'u.
+      Sid      = "DDBReadActivityBiometry"
+      Effect   = "Allow"
+      Action   = ["dynamodb:Query"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTSecret"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+    {
+      Sid    = "ReadAnthropicKey"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/anthropic/api_key",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "activity_suggestion" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.activity_suggestion.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "activity_suggestion" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/profile/suggest-activity-level"
+  target    = "integrations/${aws_apigatewayv2_integration.activity_suggestion.id}"
+}
+
+resource "aws_lambda_permission" "activity_suggestion_apigw" {
+  statement_id  = "AllowAPIGWInvokeActivitySuggestion"
+  action        = "lambda:InvokeFunction"
+  function_name = module.activity_suggestion.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
 # Sprint 5 — Google Sheets training plan. GET /api/plan, JWT cookie auth,
 # 15min DDB cache w PLAN#current, force-refresh przez ?refresh=1.
 # google-api-python-client + google-auth — większy bundle (~10MB) ale w limicie
