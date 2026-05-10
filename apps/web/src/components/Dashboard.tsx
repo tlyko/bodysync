@@ -34,6 +34,7 @@ import { SidebarNav, type AppTab } from './dashboard/SidebarNav';
 import { StatCard } from './dashboard/StatCard';
 import { TDEECalculatorWizard } from './dashboard/TDEECalculatorWizard';
 import { WeightChart } from './dashboard/WeightChart';
+import { WorkoutPlanCard } from './dashboard/WorkoutPlanCard';
 
 type Props = {
   me: Me;
@@ -372,6 +373,8 @@ function DashboardOverview({
         <RecentActivitiesPanel onSeeAll={() => onSelectTab('activities')} />
 
         <div className="overview-right-stack">
+          <WorkoutPlanCard onSeePlan={() => onSelectTab('plan')} />
+
           <SectionPanel title="Makroskładniki">
             <NutritionDonut
               kcal={kcalInToday}
