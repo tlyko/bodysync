@@ -202,3 +202,152 @@ describe('events flow — fireEvent placeholder', () => {
     // że click nie crashuje React
   });
 });
+
+// ─── Sprint 10 A8 — sport chips + search filter ───────────────────────────
+
+describe('A8 filters', () => {
+  function buildActivity(overrides: Partial<Activity>): Activity {
+    return {
+      strava_id: Math.floor(Math.random() * 1e9),
+      name: 'Activity',
+      sport_type: 'Run',
+      type: 'Run',
+      distance_m: 5000,
+      moving_time_s: 1800,
+      elapsed_time_s: 1800,
+      elevation_gain_m: 0,
+      start_date: '2026-05-09T10:00:00Z',
+      start_date_local: '2026-05-09T12:00:00',
+      calories: 300,
+      average_heartrate: 145,
+      max_heartrate: 165,
+      ...overrides,
+    };
+  }
+
+  test('chips: lista unique sport_type z PL labels + count badge', async () => {
+    mockGetActivities.mockResolvedValueOnce({
+      items: [
+        buildActivity({ sport_type: 'Run' }),
+        buildActivity({ sport_type: 'Run' }),
+        buildActivity({ sport_type: 'Run' }),
+        buildActivity({ sport_type: 'Ride' }),
+        buildActivity({ sport_type: 'Walk' }),
+      ],
+    });
+    render(<ActivitiesView />);
+
+    await waitFor(() => screen.getByText('Wszystkie'));
+    // Count w "Wszystkie" chip
+    expect(screen.getByRole('button', { name: /Wszystkie\s*5/ })).toBeInTheDocument();
+    // PL labels + counts (sortowane po count desc — Bieg first)
+    expect(screen.getByRole('button', { name: /Bieg\s*3/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Rower\s*1/ })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Spacer\s*1/ })).toBeInTheDocument();
+  });
+
+  test('chip click filtruje listę', async () => {
+    mockGetActivities.mockResolvedValueOnce({
+      items: [
+        buildActivity({ name: 'Poranny bieg', sport_type: 'Run' }),
+        buildActivity({ name: 'Wieczorny rower', sport_type: 'Ride' }),
+      ],
+    });
+    render(<ActivitiesView />);
+
+    await waitFor(() => screen.getByText('Poranny bieg'));
+    fireEvent.click(screen.getByRole('button', { name: /Rower/ }));
+
+    expect(screen.queryByText('Poranny bieg')).not.toBeInTheDocument();
+    expect(screen.getByText('Wieczorny rower')).toBeInTheDocument();
+    expect(screen.getByText(/Znaleziono 1 aktywność/)).toBeInTheDocument();
+  });
+
+  test('chip drugi click resetuje filter', async () => {
+    mockGetActivities.mockResolvedValueOnce({
+      items: [
+        buildActivity({ name: 'Bieg A', sport_type: 'Run' }),
+        buildActivity({ name: 'Rower B', sport_type: 'Ride' }),
+      ],
+    });
+    render(<ActivitiesView />);
+
+    await waitFor(() => screen.getByText('Bieg A'));
+    const biegChip = screen.getByRole('button', { name: /Bieg/ });
+    fireEvent.click(biegChip);
+    expect(screen.queryByText('Rower B')).not.toBeInTheDocument();
+    fireEvent.click(biegChip); // toggle off
+    expect(screen.getByText('Rower B')).toBeInTheDocument();
+  });
+
+  test('search po nazwie (case-insensitive)', async () => {
+    mockGetActivities.mockResolvedValueOnce({
+      items: [
+        buildActivity({ name: 'Poranny bieg po lesie' }),
+        buildActivity({ name: 'Wieczorny trening siłowy' }),
+      ],
+    });
+    render(<ActivitiesView />);
+
+    await waitFor(() => screen.getByText('Poranny bieg po lesie'));
+    fireEvent.change(screen.getByPlaceholderText(/Szukaj po nazwie/), {
+      target: { value: 'WIECZORNY' },
+    });
+    expect(screen.queryByText('Poranny bieg po lesie')).not.toBeInTheDocument();
+    expect(screen.getByText('Wieczorny trening siłowy')).toBeInTheDocument();
+  });
+
+  test('sport + search łącznie (AND)', async () => {
+    mockGetActivities.mockResolvedValueOnce({
+      items: [
+        buildActivity({ name: 'Poranny bieg', sport_type: 'Run' }),
+        buildActivity({ name: 'Trening interwał', sport_type: 'Run' }),
+        buildActivity({ name: 'Trening rowerowy', sport_type: 'Ride' }),
+      ],
+    });
+    render(<ActivitiesView />);
+
+    await waitFor(() => screen.getByText('Poranny bieg'));
+    fireEvent.click(screen.getByRole('button', { name: /Bieg/ }));
+    fireEvent.change(screen.getByPlaceholderText(/Szukaj/), {
+      target: { value: 'trening' },
+    });
+    // Tylko "Trening interwał" matche'uje sport=Run AND name contains "trening"
+    expect(screen.getByText('Trening interwał')).toBeInTheDocument();
+    expect(screen.queryByText('Poranny bieg')).not.toBeInTheDocument();
+    expect(screen.queryByText('Trening rowerowy')).not.toBeInTheDocument();
+  });
+
+  test('Wyczyść button resetuje sport + search', async () => {
+    mockGetActivities.mockResolvedValueOnce({
+      items: [
+        buildActivity({ name: 'Bieg A', sport_type: 'Run' }),
+        buildActivity({ name: 'Rower B', sport_type: 'Ride' }),
+      ],
+    });
+    render(<ActivitiesView />);
+
+    await waitFor(() => screen.getByText('Bieg A'));
+    fireEvent.click(screen.getByRole('button', { name: /Bieg/ }));
+    fireEvent.change(screen.getByPlaceholderText(/Szukaj/), { target: { value: 'A' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Wyczyść' }));
+
+    // Both visible po reset
+    expect(screen.getByText('Bieg A')).toBeInTheDocument();
+    expect(screen.getByText('Rower B')).toBeInTheDocument();
+  });
+
+  test('brak wyników → empty state z hintem', async () => {
+    mockGetActivities.mockResolvedValueOnce({
+      items: [buildActivity({ name: 'Bieg A', sport_type: 'Run' })],
+    });
+    render(<ActivitiesView />);
+
+    await waitFor(() => screen.getByText('Bieg A'));
+    fireEvent.change(screen.getByPlaceholderText(/Szukaj/), {
+      target: { value: 'xyzzy' },
+    });
+    expect(screen.getByText(/Brak wyników dla filtrów/)).toBeInTheDocument();
+    expect(screen.getByText(/Spróbuj innego filtra/)).toBeInTheDocument();
+  });
+});
