@@ -95,6 +95,42 @@ export function sumSeries(a: SeriesPoint[], b: SeriesPoint[]): SeriesPoint[] {
   }));
 }
 
+// Sprint 10 A5 — exponential moving average dla "true weight" smoothing
+// (MacroFactor-style). Eliminuje noise z hydratacji/sodu/glikogenu z raw
+// daily weight (±0.5 kg dnia na dzień typowo). α=0.1 daje ~10-day half-life
+// (waga 10 dni temu wciąż waży ~37% w EMA, 30 dni temu ~4%).
+//
+// EMA[0] = data[0]
+// EMA[i] = α × data[i] + (1-α) × EMA[i-1]
+export function weightEMA(points: SeriesPoint[], alpha = 0.1): SeriesPoint[] {
+  if (alpha <= 0 || alpha > 1) {
+    throw new Error(`alpha must be in (0, 1], got ${alpha}`);
+  }
+  if (points.length === 0) return [];
+  const sorted = [...points].sort((a, b) => a.date.localeCompare(b.date));
+  const out: SeriesPoint[] = [{ date: sorted[0].date, value: sorted[0].value }];
+  for (let i = 1; i < sorted.length; i++) {
+    const prev = out[i - 1].value;
+    const smoothed = alpha * sorted[i].value + (1 - alpha) * prev;
+    out.push({ date: sorted[i].date, value: smoothed });
+  }
+  return out;
+}
+
+// Tygodniowa zmiana wagi w kg na bazie EMA (zwraca null gdy <7 punktów).
+// Liczone jako delta między najnowszym (idx -1) a punktem 7 dni wstecz
+// (idx -8 dla daily granularity, lub punkt 0 gdy mamy <8 dni). Trend
+// kierunkowy: dodatni = przyrost, ujemny = redukcja, ~0 = utrzymanie.
+export function weeklyTrendKg(emaPoints: SeriesPoint[]): number | null {
+  if (emaPoints.length < 7) return null;
+  const last = emaPoints[emaPoints.length - 1].value;
+  // 7 dni temu = idx -8 (przy 8+ punktach), albo idx 0 (przy 7 punktach,
+  // gdzie last to idx 6 i "7 dni temu" wykracza poza dane → bierzemy first).
+  const weekAgoIdx = Math.max(0, emaPoints.length - 8);
+  const weekAgo = emaPoints[weekAgoIdx].value;
+  return last - weekAgo;
+}
+
 // % zmiana avg ostatnie N vs poprzednie N.
 // Zwraca null gdy brak danych w którymkolwiek oknie. Domyślnie 7d vs 7-14d ago.
 export function trendPct(series: SeriesPoint[], windowDays = 7): number | null {
