@@ -82,7 +82,12 @@ def fetcher_ssm(ssm_params: None) -> None:
     _ssm.clear_cache()
 
 
-def _activity_response(activity_id: int = 12345, sport_type: str = "Run") -> httpx.Response:
+def _activity_response(
+    activity_id: int = 12345,
+    sport_type: str = "Run",
+    *,
+    summary_polyline: str | None = "u_p~Fvfbb@aBpHaCnSmDl[",
+) -> httpx.Response:
     return httpx.Response(
         200,
         json={
@@ -101,6 +106,15 @@ def _activity_response(activity_id: int = 12345, sport_type: str = "Run") -> htt
             "average_heartrate": 145.0,
             "max_heartrate": 168.0,
             "has_heartrate": True,
+            # Sprint 10 A9 — encoded polyline. Test używa krótkiego stringu;
+            # Strava real zwraca ~50-200 chars dla biegu 5km.
+            "map": {
+                "id": f"a{activity_id}",
+                "summary_polyline": summary_polyline,
+                "polyline": "full-res-not-used",
+            }
+            if summary_polyline is not None
+            else None,
             # extra fields → ignored
             "kudos_count": 0,
         },
@@ -206,6 +220,8 @@ def test_fetcher_persists_activity_to_ddb_and_streams_to_s3(
     assert int(item["strava_id"]) == 12345
     assert item["sport_type"] == "Run"
     assert item["streams_s3_key"] == "strava/streams/tomek/12345.json"
+    # Sprint 10 A9 — polyline persisted dla mapy thumbnail
+    assert item["summary_polyline"] == "u_p~Fvfbb@aBpHaCnSmDl["
 
     # S3 object exists
     obj = s3_bucket.get_object(
@@ -234,6 +250,30 @@ def test_fetcher_persists_activity_when_streams_fail(dynamodb_table: Any, s3_buc
     assert result == {"processed": 1, "skipped": 0, "errors": 0}
     item = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "ACTIVITY#12345"})["Item"]
     assert "streams_s3_key" not in item
+
+
+@pytest.mark.usefixtures("fetcher_ssm")
+def test_fetcher_skips_polyline_for_no_gps_sport(
+    dynamodb_table: Any, s3_bucket: Any
+) -> None:
+    """Sprint 10 A9 — sport bez GPS (np. WeightTraining) Strava zwraca
+    map=null lub map.summary_polyline=null. Fetcher NIE zapisuje attr."""
+    from handlers.strava_fetcher import handler as h
+
+    record = _ddb_record()
+
+    def _get_route(*args: Any, **kwargs: Any) -> httpx.Response:
+        url = args[0] if args else kwargs.get("url", "")
+        if "streams" in url:
+            return httpx.Response(500)  # don't care for streams here
+        return _activity_response(summary_polyline=None)  # no GPS
+
+    with patch("handlers.strava_fetcher.service.httpx.Client.get", side_effect=_get_route):
+        result = h.handler({"Records": [record]}, _Ctx())
+
+    assert result["processed"] == 1
+    item = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "ACTIVITY#12345"})["Item"]
+    assert "summary_polyline" not in item
 
 
 @pytest.mark.usefixtures("fetcher_ssm")

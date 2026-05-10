@@ -108,6 +108,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "calories": _decimal_safe(r.get("calories")),
                 "average_heartrate": _decimal_safe(r.get("average_heartrate")),
                 "max_heartrate": _decimal_safe(r.get("max_heartrate")),
+                # Sprint 10 A9 — Strava encoded summary_polyline. Null gdy
+                # sport bez GPS (WeightTraining, Yoga) lub aktywność pre-A9
+                # (fetcher do Sprint 10 A9 ignorował map field).
+                "summary_polyline": r.get("summary_polyline"),
             }
         )
 

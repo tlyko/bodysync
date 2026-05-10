@@ -120,6 +120,7 @@ const sampleActivity: Activity = {
   calories: 380,
   average_heartrate: 145,
   max_heartrate: 168,
+  summary_polyline: null,
 };
 
 describe('ActivitiesView', () => {
@@ -221,6 +222,7 @@ describe('A8 filters', () => {
       calories: 300,
       average_heartrate: 145,
       max_heartrate: 165,
+      summary_polyline: null,
       ...overrides,
     };
   }

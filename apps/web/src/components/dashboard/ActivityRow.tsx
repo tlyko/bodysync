@@ -7,6 +7,7 @@ import {
   sportIcon,
   sportLabel,
 } from './activities';
+import { RoutePreview } from './RoutePreview';
 
 type Props = { activity: Activity };
 
@@ -18,9 +19,17 @@ export function ActivityRow({ activity }: Props) {
 
   return (
     <div className="activity-row">
-      <span className="activity-row-icon" aria-hidden>
-        {sportIcon(activity.sport_type)}
-      </span>
+      {/* Sprint 10 A9 — gdy mamy polyline, thumbnail mapy zastępuje sport
+          emoji icon. Sport bez GPS / pre-A9 activity → fallback emoji. */}
+      {activity.summary_polyline ? (
+        <span className="activity-row-thumb">
+          <RoutePreview encoded={activity.summary_polyline} size={48} />
+        </span>
+      ) : (
+        <span className="activity-row-icon" aria-hidden>
+          {sportIcon(activity.sport_type)}
+        </span>
+      )}
       <div className="activity-row-main">
         <div className="activity-row-name">{activity.name}</div>
         <div className="activity-row-meta">
