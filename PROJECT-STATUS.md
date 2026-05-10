@@ -55,7 +55,24 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 
 ## Aktywny sprint — żaden (Sprint 4+5+6+7+8+9 zamknięte 2026-05-09)
 
-Sześć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets + 1:1 prototype port (Sprint 9) + **Strava integration** (Sprint 4 zaległy) + **Google Sheets training plan + advisor injekcja** (Sprint 5). Następny ruch z backlogu — Sprint 4.5 Garmin Connect, lub backlog items (#17 Telegram bot, #18 Restore test_rag.py, #19 frontend bundle code-split, #20 PDF hosting, #21 chat history GET endpoint).
+Sześć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets + 1:1 prototype port (Sprint 9) + **Strava integration** (Sprint 4 zaległy) + **Google Sheets training plan + advisor injekcja** (Sprint 5).
+
+**Aktywne PR-y:**
+- **PR #130** (in-progress, PR1/2) — `telegram_notifier` Lambda backend, SNS subscriber dla cost-guard alarmu (backlog #17 — Gmail auto-unsub'uje SNS, więc owner nigdy nie dostawał alertów). 9 testów passing, 11KB stdlib zip. Po merge: PR2 z Terraform module + drop email subscription.
+
+**Strategiczny backlog post-Sprint 9 (nocna analiza 2026-05-10):**
+- 📊 [`docs/backlog-2026-05-10.md`](docs/backlog-2026-05-10.md) — master backlog z 45+ feature ideas, priorytetyzowanymi w 4 tier-y (Quick wins / Sprint candidates / Strategic / Parking lot), value/effort scoring
+- 🔍 [`docs/audit-functional-2026-05-10.md`](docs/audit-functional-2026-05-10.md) — current state map per 7 domain (Auth/Biometry/Activities/Plan/Advisor/Profil/Mobile UX)
+- 🌐 [`docs/research-competitive-2026-05-10.md`](docs/research-competitive-2026-05-10.md) — feature gaps vs Whoop/Oura/Strava Premium/MyFitnessPal/Hevy/MacroFactor/Apple Fitness, 10 kategorii, cross-cutting themes
+- 🎨 [`docs/ux-gaps-2026-05-10.md`](docs/ux-gaps-2026-05-10.md) — friction + delight per tab dashboardu, 10 obszarów
+
+**Rekomendowane następne 4 sprinty (z `backlog-2026-05-10.md`):**
+- **Sprint 10 — "TDEE foundation + Insights"** (~12-16h) — A0 TDEE calculator (Mifflin-St Jeor, body profile wzrost/wiek/płeć/activity) + comparison vs target Odżywianie, chat history GET, tenant switcher, suggested prompts, smoothed weight EMA, today's workout hint
+- **Sprint 11 — "Recovery Score + Daily Brief"** (~10-14h) — composite Recovery score Dashboard + cron 07:00 Telegram morning brief (reuse PR #130 infra)
+- **Sprint 12 — "Workout logbook + Weekly recap"** (~12-16h) — pierwszy input UX surface + niedzielny narrative recap przez LLM
+- **Sprint 13 — "Energy balance + Adaptive TDEE"** (~10-14h) — TDEE-aware undereating/overeating alerts (push Telegram gdy 7d kcal_in -500/+300 vs TDEE+treningi) + MacroFactor-style adaptive TDEE rekalkulacja co 14d z waga+kcal_in trend
+
+**Strategiczne pytania dla owner'a** (per `backlog-2026-05-10.md` sekcja "Strategiczne decyzje"): formuła Recovery score, Telegram-only vs in-app push, logbook scope (minimal vs Hevy), per-meal logging, PWA inwestycja, couples-emphasis priority.
 
 **Sprint 5 — Google Sheets training plan + advisor injekcja — DONE (11 PRy #107-#128 spread over 1 dzień, ~5h pracy):**
 - ✅ PR #107 — `apps/api/handlers/plan/` service module: Google Sheets API readonly fetch z cred from SSM, jagged row padding, fixed-vocabulary errors (invalid_credentials_json/format, sheet_not_found_or_no_access, permission_denied, sheets_api_error), DDB cache load/save z 15min freshness check
