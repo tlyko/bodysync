@@ -182,6 +182,32 @@ describe('ChatScreen', () => {
     });
   });
 
+  test('A4 suggested prompts: chip click → wysyła wiadomość przez handleSend', async () => {
+    mockPostAdvisorChat.mockResolvedValueOnce(makeDto({ content: 'Polecam jajecznicę' }));
+    render(<ChatScreen />);
+
+    await waitFor(() => screen.getByText(/Spróbuj zapytać/));
+
+    // 6 chip suggestions widocznych
+    const chip = screen.getByRole('button', { name: 'Zaproponuj śniadanie wysokoproteinowe' });
+    expect(chip).toBeInTheDocument();
+
+    fireEvent.click(chip);
+
+    // User bubble z chip text appears
+    expect(screen.getByText('Zaproponuj śniadanie wysokoproteinowe')).toBeInTheDocument();
+    // postAdvisorChat wywołane z tym samym tekstem
+    expect(mockPostAdvisorChat).toHaveBeenCalledWith(
+      { message: 'Zaproponuj śniadanie wysokoproteinowe' },
+      expect.any(AbortSignal),
+    );
+    // Po response: assistant message renderuje, empty-state CTA znika
+    await waitFor(() => {
+      expect(screen.getByText(/jajecznicę/)).toBeInTheDocument();
+    });
+    expect(screen.queryByText(/Spróbuj zapytać/)).not.toBeInTheDocument();
+  });
+
   test('recipe card click: otwiera modal z full RecipeFull', async () => {
     mockPostAdvisorChat.mockResolvedValueOnce(makeDto());
     render(<ChatScreen />);

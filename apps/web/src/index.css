@@ -1619,6 +1619,41 @@ body:has(.preview-banner) .login-screen {
   font-size: 0.95rem;
   max-width: 32em;
 }
+/* Sprint 10 A4 — suggested prompts chips dla onboarding new user */
+.chat-suggestions-intro {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+.chat-suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: center;
+}
+.chat-suggestion-chip {
+  background: var(--card);
+  color: var(--text);
+  border: 1px solid var(--border);
+  border-radius: 18px;
+  padding: 0.5rem 1rem;
+  font-size: 0.82rem;
+  font-family: inherit;
+  cursor: pointer;
+  transition:
+    background 0.15s,
+    border-color 0.15s,
+    transform 0.1s;
+}
+.chat-suggestion-chip:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.08);
+  border-color: var(--cyan);
+  color: var(--text);
+  transform: translateY(-1px);
+}
+.chat-suggestion-chip:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
 .chat-error {
   padding: 0.75rem 1.25rem;
   background: rgba(239, 68, 68, 0.1);

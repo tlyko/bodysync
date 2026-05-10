@@ -10,6 +10,20 @@ import { ChatInput } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
 import { RecipeModal } from './RecipeModal';
 
+// Sprint 10 A4 — suggested prompts dla new user / fresh day. Pokazane
+// tylko gdy thread pusty (po hydrate). Owner klika chip → ten tekst leci
+// jako pierwszy user message przez handleSend. Treść celuje na typowe
+// pytania których owner mógłby się dopytywać (śniadanie po treningu,
+// makro coverage, lekka kolacja).
+const SUGGESTED_PROMPTS: string[] = [
+  'Co lekkiego na kolację z białkiem?',
+  'Mam zostawione 600 kcal i 30g białka, co zjeść?',
+  'Zaproponuj śniadanie wysokoproteinowe',
+  'Co po treningu na regenerację?',
+  'Szybki obiad do 30 minut',
+  'Kolacja na deficyt 500 kcal',
+];
+
 // Sprint 10 A1 — backend ChatHistoryEntry → frontend UI state. used_recipes
 // brak w DDB historii (LLM-call-time only), więc po hydrate recipe karty
 // NIE są klikalne. Owner widzi treść rozmowy; przez nową wiadomość dostaje
@@ -136,13 +150,20 @@ export function ChatScreen() {
         )}
         {!hydrating && messages.length === 0 && (
           <div className="chat-thread-empty">
-            <p>
-              Spróbuj zapytać:
-              <br />
-              <em>"Co lekkiego na kolację z białkiem?"</em>
-              <br />
-              <em>"Mam zostawione 600 kcal i 30g białka, co zjeść?"</em>
-            </p>
+            <p className="chat-suggestions-intro">Spróbuj zapytać:</p>
+            <div className="chat-suggestions">
+              {SUGGESTED_PROMPTS.map((prompt) => (
+                <button
+                  key={prompt}
+                  type="button"
+                  className="chat-suggestion-chip"
+                  onClick={() => handleSend(prompt)}
+                  disabled={pending}
+                >
+                  {prompt}
+                </button>
+              ))}
+            </div>
           </div>
         )}
         {messages.map((m, i) => (
