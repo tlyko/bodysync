@@ -39,6 +39,9 @@ from zoneinfo import ZoneInfo
 from pydantic import ValidationError
 
 from handlers.advisor_chat import rag, service
+from handlers.advisor_chat._history_handler import (
+    handle_delete_history as _handle_delete_history,
+)
 from handlers.advisor_chat._history_handler import handle_get_history as _handle_get_history
 from handlers.advisor_chat.schemas import (
     ChatRequest,
@@ -116,10 +119,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.warning("session_no_user_id", extra={"request_id": request_id})
         return _response(401, {"error": "auth_required"})
 
-    # ── 1.5 Route dispatch — GET history vs POST chat ─────────────────────
+    # ── 1.5 Route dispatch — GET/DELETE history vs POST chat ──────────────
     method = (event.get("requestContext") or {}).get("http", {}).get("method", "")
     if method == "GET":
         return _handle_get_history(event, user_id, request_id)
+    if method == "DELETE":
+        return _handle_delete_history(event, user_id, request_id)
     # else: POST flow (default; explicit method check w istniejącej logice).
 
     # ── 2. Parse body ──────────────────────────────────────────────────────
