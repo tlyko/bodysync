@@ -356,6 +356,248 @@ def test_build_chat_messages_empty_retrieved_skipped() -> None:
     assert len(blocks) == 2  # base + user_message; brak retrieved block
 
 
+# ─── load_recent_activities ───────────────────────────────────────────────
+
+
+def _put_activity(
+    dynamodb_table: Any,
+    *,
+    user_id: str = "user_a",
+    strava_id: int,
+    start_date: str,
+    sport_type: str = "Run",
+    name: str | None = None,
+    distance_m: float | None = None,
+    moving_time_s: int | None = None,
+    average_heartrate: float | None = None,
+    max_heartrate: float | None = None,
+    calories: float | None = None,
+) -> None:
+    """Helper — seed ACTIVITY row z minimal required fields."""
+    item: dict[str, Any] = {
+        "PK": f"USER#{user_id}",
+        "SK": f"ACTIVITY#{strava_id}",
+        "strava_id": strava_id,
+        "start_date": start_date,
+        "sport_type": sport_type,
+    }
+    if name is not None:
+        item["name"] = name
+    if distance_m is not None:
+        item["distance_m"] = distance_m
+    if moving_time_s is not None:
+        item["moving_time_s"] = moving_time_s
+    if average_heartrate is not None:
+        item["average_heartrate"] = average_heartrate
+    if max_heartrate is not None:
+        item["max_heartrate"] = max_heartrate
+    if calories is not None:
+        item["calories"] = calories
+    dynamodb_table.put_item(Item=item)
+
+
+def test_load_recent_activities_filters_to_window(dynamodb_table: Any) -> None:
+    """7d window: rows ze `start_date < today-6d` są odrzucone."""
+    from datetime import timedelta
+
+    from handlers.advisor_chat.service import load_recent_activities
+
+    today = datetime.now(WARSAW_TZ).date()
+    inside_a = today - timedelta(days=2)
+    inside_b = today - timedelta(days=6)
+    outside = today - timedelta(days=10)
+
+    _put_activity(dynamodb_table, strava_id=1, start_date=f"{inside_a}T07:00:00Z")
+    _put_activity(dynamodb_table, strava_id=2, start_date=f"{inside_b}T07:00:00Z")
+    _put_activity(dynamodb_table, strava_id=3, start_date=f"{outside}T07:00:00Z")
+
+    result = load_recent_activities("user_a", today=today)
+
+    assert len(result) == 2
+    assert {a.date for a in result} == {inside_a.isoformat(), inside_b.isoformat()}
+
+
+def test_load_recent_activities_sorted_desc_by_date(dynamodb_table: Any) -> None:
+    """Najnowsze pierwsze (LLM oczekuje recent na górze)."""
+    from datetime import timedelta
+
+    from handlers.advisor_chat.service import load_recent_activities
+
+    today = datetime.now(WARSAW_TZ).date()
+    _put_activity(dynamodb_table, strava_id=1, start_date=f"{today - timedelta(days=5)}T07:00:00Z")
+    _put_activity(dynamodb_table, strava_id=2, start_date=f"{today - timedelta(days=1)}T07:00:00Z")
+    _put_activity(dynamodb_table, strava_id=3, start_date=f"{today - timedelta(days=3)}T07:00:00Z")
+
+    result = load_recent_activities("user_a", today=today)
+    dates = [a.date for a in result]
+    assert dates == sorted(dates, reverse=True)
+
+
+def test_load_recent_activities_caps_at_max(dynamodb_table: Any) -> None:
+    """Aktywny tydzień (>15 treningów) → cap RECENT_ACTIVITIES_MAX."""
+    from datetime import timedelta
+
+    from handlers.advisor_chat.service import RECENT_ACTIVITIES_MAX, load_recent_activities
+
+    today = datetime.now(WARSAW_TZ).date()
+    # 20 aktywności w 7d window — 2-3 per dzień (np. siłka + bieg + spacer).
+    for i in range(20):
+        day_offset = i % 7  # rozłóż na 7 dni
+        _put_activity(
+            dynamodb_table,
+            strava_id=1000 + i,
+            start_date=f"{today - timedelta(days=day_offset)}T{(7 + i % 12):02d}:00:00Z",
+        )
+
+    result = load_recent_activities("user_a", today=today)
+    assert len(result) == RECENT_ACTIVITIES_MAX
+
+
+def test_load_recent_activities_empty_when_no_rows(dynamodb_table: Any) -> None:
+    """Brak ACTIVITY rows → [], advisor pomija block w prompt."""
+    from handlers.advisor_chat.service import load_recent_activities
+
+    today = datetime.now(WARSAW_TZ).date()
+    result = load_recent_activities("ghost_user", today=today)
+    assert result == []
+
+
+def test_load_recent_activities_decimal_conversion(dynamodb_table: Any) -> None:
+    """DDB zwraca `Decimal` dla numerycznych pól → Pydantic potrzebuje float/int.
+    Sprawdzamy że konwersja distance/HR/kcal działa bez crash."""
+    from decimal import Decimal
+
+    from handlers.advisor_chat.service import load_recent_activities
+
+    today = datetime.now(WARSAW_TZ).date()
+    # Boto3 DDB zwraca numbers jako Decimal; symulujemy bezpośrednio.
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#user_a",
+            "SK": "ACTIVITY#42",
+            "strava_id": 42,
+            "start_date": f"{today.isoformat()}T07:00:00Z",
+            "sport_type": "Run",
+            "name": "Poranny bieg",
+            "distance_m": Decimal("8234.5"),
+            "moving_time_s": Decimal("2700"),
+            "average_heartrate": Decimal("152.4"),
+            "max_heartrate": Decimal("178"),
+            "calories": Decimal("581.2"),
+        }
+    )
+
+    result = load_recent_activities("user_a", today=today)
+    assert len(result) == 1
+    a = result[0]
+    assert a.sport_type == "Run"
+    assert a.name == "Poranny bieg"
+    assert a.distance_km == 8.23
+    assert a.duration_min == 45
+    assert a.avg_hr == 152
+    assert a.max_hr == 178
+    assert a.kcal == 581
+
+
+def test_load_recent_activities_truncates_long_name(dynamodb_table: Any) -> None:
+    """Strava name max ~256 chars; truncate do RECENT_ACTIVITIES_NAME_MAX_LEN
+    chroni przed token bombs."""
+    from handlers.advisor_chat.service import (
+        RECENT_ACTIVITIES_NAME_MAX_LEN,
+        load_recent_activities,
+    )
+
+    today = datetime.now(WARSAW_TZ).date()
+    long_name = "X" * 500
+    _put_activity(
+        dynamodb_table,
+        strava_id=1,
+        start_date=f"{today.isoformat()}T07:00:00Z",
+        name=long_name,
+    )
+
+    result = load_recent_activities("user_a", today=today)
+    assert len(result) == 1
+    assert result[0].name is not None
+    assert len(result[0].name) == RECENT_ACTIVITIES_NAME_MAX_LEN
+
+
+def test_load_recent_activities_pk_isolation(dynamodb_table: Any) -> None:
+    """user_a query NIE zwraca ACTIVITY rows user_b (CLAUDE.md PK isolation)."""
+    from handlers.advisor_chat.service import load_recent_activities
+
+    today = datetime.now(WARSAW_TZ).date()
+    _put_activity(
+        dynamodb_table,
+        user_id="user_b",
+        strava_id=99,
+        start_date=f"{today.isoformat()}T07:00:00Z",
+    )
+
+    result = load_recent_activities("user_a", today=today)
+    assert result == []
+
+
+# ─── build_chat_messages with recent_activities ───────────────────────────
+
+
+def test_build_chat_messages_with_recent_activities() -> None:
+    """recent_activities truthy ⇒ dodatkowy block `<recent_activities>`
+    z cache_control marker + 1-liniowy format per activity."""
+    from handlers.advisor_chat.schemas import RecentActivity
+    from handlers.advisor_chat.service import build_chat_messages
+
+    state = _make_today_state()
+    activities = [
+        RecentActivity(
+            date="2026-05-09",
+            sport_type="Run",
+            name="Poranny bieg",
+            distance_km=8.2,
+            duration_min=45,
+            avg_hr=152,
+            max_hr=175,
+            kcal=580,
+        ),
+        RecentActivity(
+            date="2026-05-08",
+            sport_type="Walk",
+            distance_km=3.5,
+            duration_min=50,
+        ),
+    ]
+    messages = build_chat_messages([], state, "co o moim biegu", recent_activities=activities)
+
+    blocks = messages[0]["content"]
+    assert isinstance(blocks, list)
+    composed = _flatten_blocks(blocks)
+    assert "<recent_activities>" in composed
+    assert "</recent_activities>" in composed
+    assert "Run" in composed
+    assert "Poranny bieg" in composed
+    assert "8.2km" in composed
+    assert "HR avg 152/max 175" in composed
+    assert "580 kcal" in composed
+    # Activity z brak HR/kcal — nie powinno mieć tych pól
+    assert "Walk" in composed
+    assert "3.5km" in composed
+
+    # Cache marker — recent_activities block musi być oddzielnie cached.
+    cache_blocks = [b for b in blocks if b.get("cache_control") == {"type": "ephemeral"}]
+    activities_cache = [b for b in cache_blocks if "<recent_activities>" in b["text"]]
+    assert len(activities_cache) == 1
+
+
+def test_build_chat_messages_empty_activities_skipped() -> None:
+    """recent_activities=[] traktowane jak None — block pominięty."""
+    from handlers.advisor_chat.service import build_chat_messages
+
+    state = _make_today_state()
+    messages = build_chat_messages([], state, "halo", recent_activities=[])
+    composed = _flatten_blocks(messages[0]["content"])
+    assert "<recent_activities>" not in composed
+
+
 # ─── call_chat (Anthropic) ────────────────────────────────────────────────
 
 

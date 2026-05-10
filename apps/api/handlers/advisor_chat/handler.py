@@ -244,6 +244,24 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 },
             )
 
+        # ── 6.7 Recent activities injection ────────────────────────────────
+        # 7-day window Strava activities z DDB (ACTIVITY#{strava_id} rows
+        # zapisane przez strava_fetcher). Bez tego LLM widzi tylko zsumowane
+        # step_count + kcal_active z HAE — brak konkretnego sport_type/dystans/
+        # tempa/HR per trening. Best-effort: błąd DDB nie crashuje chatu.
+        recent_activities: list = []
+        try:
+            recent_activities = service.load_recent_activities(user_id, today=today)
+        except Exception as exc:  # noqa: BLE001 — DDB nie crashuje chatu
+            logger.warning(
+                "recent_activities_load_failed",
+                extra={
+                    "request_id": request_id,
+                    "user_id": user_id,
+                    "exc_type": type(exc).__name__,
+                },
+            )
+
         # `history` to snapshot SPRZED appendu user turn — `build_chat_messages`
         # samo wrapuje `request.message` w `<user_message>` block, więc nie
         # duplikujemy (gdybyśmy wzięli post-append history, mielibyśmy bieżącą
@@ -254,6 +272,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             request.message,
             retrieved_recipes=retrieved,
             training_plan=training_plan,
+            recent_activities=recent_activities,
         )
 
         # ── 7. Anthropic call ──────────────────────────────────────────────
