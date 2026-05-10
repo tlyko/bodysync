@@ -253,9 +253,7 @@ def test_fetcher_persists_activity_when_streams_fail(dynamodb_table: Any, s3_buc
 
 
 @pytest.mark.usefixtures("fetcher_ssm")
-def test_fetcher_skips_polyline_for_no_gps_sport(
-    dynamodb_table: Any, s3_bucket: Any
-) -> None:
+def test_fetcher_skips_polyline_for_no_gps_sport(dynamodb_table: Any, s3_bucket: Any) -> None:
     """Sprint 10 A9 — sport bez GPS (np. WeightTraining) Strava zwraca
     map=null lub map.summary_polyline=null. Fetcher NIE zapisuje attr."""
     from handlers.strava_fetcher import handler as h

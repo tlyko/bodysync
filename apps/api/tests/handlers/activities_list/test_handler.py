@@ -170,9 +170,7 @@ def test_activities_returns_polyline_when_persisted(dynamodb_table: Any) -> None
     """Sprint 10 A9 — summary_polyline w response gdy obecny w DDB row."""
     from handlers.activities_list import handler as h
 
-    _seed_activity(
-        dynamodb_table, "tomek", 1, summary_polyline="u_p~Fvfbb@aBpHaCnSmDl["
-    )
+    _seed_activity(dynamodb_table, "tomek", 1, summary_polyline="u_p~Fvfbb@aBpHaCnSmDl[")
     _seed_activity(dynamodb_table, "tomek", 2)  # bez polyline (pre-A9 row)
 
     cookie = f"bodysync_session={_mint_jwt('tomek')}"
