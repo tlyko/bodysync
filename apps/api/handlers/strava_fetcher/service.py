@@ -206,6 +206,11 @@ def persist_activity(
         attrs["suffer_score"] = activity.suffer_score
     if streams_key:
         attrs["streams_s3_key"] = streams_key
+    # Sprint 10 A9 — encoded summary_polyline dla mapy thumbnail w UI.
+    # Strava może zwrócić `map` z None polyline (np. zapisany WeightTraining
+    # bez GPS) — tylko zapisujemy gdy faktycznie jest niepusta string.
+    if activity.map is not None and activity.map.summary_polyline:
+        attrs["summary_polyline"] = activity.map.summary_polyline
 
     put_item(
         pk=f"USER#{user_id}",

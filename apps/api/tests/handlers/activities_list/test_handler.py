@@ -41,24 +41,26 @@ def _seed_activity(
     sport_type: str = "Run",
     start_date: str = "2026-05-08T06:30:00Z",
     distance_m: float = 5000.0,
+    summary_polyline: str | None = None,
 ) -> None:
-    table.put_item(
-        Item={
-            "PK": f"USER#{user_id}",
-            "SK": f"ACTIVITY#{strava_id}",
-            "strava_id": strava_id,
-            "name": f"Activity {strava_id}",
-            "sport_type": sport_type,
-            "type": sport_type,
-            "distance_m": Decimal(str(distance_m)),
-            "moving_time_s": 1800,
-            "elapsed_time_s": 1900,
-            "elevation_gain_m": Decimal("10.5"),
-            "start_date": start_date,
-            "start_date_local": start_date.replace("Z", ""),
-            "timezone": "Europe/Warsaw",
-        }
-    )
+    item: dict[str, Any] = {
+        "PK": f"USER#{user_id}",
+        "SK": f"ACTIVITY#{strava_id}",
+        "strava_id": strava_id,
+        "name": f"Activity {strava_id}",
+        "sport_type": sport_type,
+        "type": sport_type,
+        "distance_m": Decimal(str(distance_m)),
+        "moving_time_s": 1800,
+        "elapsed_time_s": 1900,
+        "elevation_gain_m": Decimal("10.5"),
+        "start_date": start_date,
+        "start_date_local": start_date.replace("Z", ""),
+        "timezone": "Europe/Warsaw",
+    }
+    if summary_polyline is not None:
+        item["summary_polyline"] = summary_polyline
+    table.put_item(Item=item)
 
 
 @pytest.mark.usefixtures("ssm_params", "dynamodb_table")
@@ -161,3 +163,21 @@ def test_activities_decimal_serialized_as_number(dynamodb_table: Any) -> None:
     body = json.loads(result["body"])
     assert body["items"][0]["distance_m"] == 5234.5
     assert isinstance(body["items"][0]["moving_time_s"], int)
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_activities_returns_polyline_when_persisted(dynamodb_table: Any) -> None:
+    """Sprint 10 A9 — summary_polyline w response gdy obecny w DDB row."""
+    from handlers.activities_list import handler as h
+
+    _seed_activity(dynamodb_table, "tomek", 1, summary_polyline="u_p~Fvfbb@aBpHaCnSmDl[")
+    _seed_activity(dynamodb_table, "tomek", 2)  # bez polyline (pre-A9 row)
+
+    cookie = f"bodysync_session={_mint_jwt('tomek')}"
+    result = h.handler(_event(cookie), _Ctx())
+    body = json.loads(result["body"])
+
+    items_by_id = {item["strava_id"]: item for item in body["items"]}
+    assert items_by_id[1]["summary_polyline"] == "u_p~Fvfbb@aBpHaCnSmDl["
+    # No-GPS / pre-A9: zwracamy null (NIE klucz brak)
+    assert items_by_id[2]["summary_polyline"] is None

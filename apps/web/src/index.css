@@ -1113,6 +1113,22 @@ body:has(.preview-banner) .login-screen {
   border-radius: 10px;
   flex-shrink: 0;
 }
+/* Sprint 10 A9 — route map thumbnail (replace sport emoji gdy GPS dostępny) */
+.activity-row-thumb {
+  width: 3rem;
+  height: 3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  flex-shrink: 0;
+  overflow: hidden;
+}
+.route-preview {
+  display: block;
+}
 .activity-row-main {
   flex: 1;
   min-width: 0;

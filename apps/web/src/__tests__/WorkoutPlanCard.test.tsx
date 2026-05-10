@@ -67,6 +67,7 @@ function buildActivities(daysAgoList: number[]) {
       calories: 300,
       average_heartrate: 145,
       max_heartrate: 165,
+      summary_polyline: null,
     })),
   };
 }

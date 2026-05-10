@@ -63,6 +63,24 @@ class StravaWebhookEvent(BaseModel):
     updates: dict[str, Any] = Field(default_factory=dict)
 
 
+class StravaActivityMap(BaseModel):
+    """Strava activity `map` field — zawiera encoded polyline trasy.
+
+    Sprint 10 A9 — używamy `summary_polyline` (low-resolution, ~50-200
+    points) dla thumbnail render. `polyline` (full resolution) dostępne
+    przy /activities/{id} ze szczegółowym fetcher state ale waży 5-10x
+    więcej i nie jest potrzebne dla thumbnail.
+
+    Może być None dla sport_type bez GPS (WeightTraining, Yoga, Workout).
+    """
+
+    model_config = ConfigDict(extra="ignore")
+
+    id: str | None = None
+    summary_polyline: str | None = None
+    polyline: str | None = None  # full-res, fetcher pomija (zbyt duży)
+
+
 class StravaActivity(BaseModel):
     """Subset Strava activity response który nas interesuje.
 
@@ -90,3 +108,5 @@ class StravaActivity(BaseModel):
     has_heartrate: bool = False
     suffer_score: float | None = None
     perceived_exertion: float | None = None
+    # Sprint 10 A9 — opcjonalne, brak dla sport_type bez GPS.
+    map: StravaActivityMap | None = None

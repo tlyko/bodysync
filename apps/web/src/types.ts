@@ -148,6 +148,10 @@ export type Activity = {
   calories: number | null;
   average_heartrate: number | null;
   max_heartrate: number | null;
+  // Sprint 10 A9 — Google Encoded Polyline (low-resolution summary).
+  // Null gdy sport bez GPS (WeightTraining, Yoga) lub aktywność pre-A9
+  // (fetcher zaczął zapisywać dopiero w PR #140).
+  summary_polyline: string | null;
 };
 
 export type ActivitiesResponse = {
