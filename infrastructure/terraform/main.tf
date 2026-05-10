@@ -634,6 +634,14 @@ resource "aws_apigatewayv2_route" "advisor_chat" {
   target    = "integrations/${aws_apigatewayv2_integration.advisor_chat.id}"
 }
 
+# Sprint 10 A1 — chat history GET dla frontend hydrate na mount.
+# Reuse advisor_chat Lambda — same handler dispatchuje per HTTP method.
+resource "aws_apigatewayv2_route" "advisor_chat_history" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/advisor/chat/history"
+  target    = "integrations/${aws_apigatewayv2_integration.advisor_chat.id}"
+}
+
 resource "aws_lambda_permission" "advisor_chat_apigw" {
   statement_id  = "AllowAPIGWInvoke"
   action        = "lambda:InvokeFunction"

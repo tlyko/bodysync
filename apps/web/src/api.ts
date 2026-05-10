@@ -8,6 +8,7 @@ import type {
   BiometryResponse,
   CalculateTDEERequest,
   CalculateTDEEResponse,
+  ChatHistoryResponse,
   ChatMessageDTO,
   ChatRequest,
   LoginResponse,
@@ -100,6 +101,14 @@ export async function postAdvisorChat(
 
 export async function postLogout(): Promise<void> {
   await request<{ ok: true }>('/api/auth/logout', { method: 'POST' });
+}
+
+// Sprint 10 A1 — chat history GET dla frontend hydrate na mount.
+// Backend zwraca wszystkie tury z dziś (24h DDB TTL). Refresh page nie traci
+// kontekstu rozmowy w ramach dnia. `?date` opcjonalny override (default today).
+export async function getChatHistory(date?: string): Promise<ChatHistoryResponse> {
+  const qs = date ? `?date=${encodeURIComponent(date)}` : '';
+  return request<ChatHistoryResponse>(`/api/advisor/chat/history${qs}`);
 }
 
 export async function getProfileTargets(): Promise<ProfileTargets> {

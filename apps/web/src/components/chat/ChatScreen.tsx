@@ -1,14 +1,35 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { ApiError, chatErrorMessage, postAdvisorChat } from '../../api';
+import { ApiError, chatErrorMessage, getChatHistory, postAdvisorChat } from '../../api';
 import { getRecipeBySlug, type RecipeFull } from '../../recipes';
-import type { ChatMessage as ChatMessageT, UsedRecipe } from '../../types';
+import type {
+  ChatHistoryEntry,
+  ChatMessage as ChatMessageT,
+  UsedRecipe,
+} from '../../types';
 import { ChatInput } from './ChatInput';
 import { ChatMessage } from './ChatMessage';
 import { RecipeModal } from './RecipeModal';
 
+// Sprint 10 A1 — backend ChatHistoryEntry → frontend UI state. used_recipes
+// brak w DDB historii (LLM-call-time only), więc po hydrate recipe karty
+// NIE są klikalne. Owner widzi treść rozmowy; przez nową wiadomość dostaje
+// świeże recipes z RAG retrieval w response.
+function entryToMessage(entry: ChatHistoryEntry): ChatMessageT {
+  if (entry.role === 'user') {
+    return { role: 'user', content: entry.content, pending: false };
+  }
+  return {
+    role: 'assistant',
+    content: entry.content,
+    used_recipes: [],
+    turn_idx: entry.turn_idx,
+  };
+}
+
 export function ChatScreen() {
   const [messages, setMessages] = useState<ChatMessageT[]>([]);
   const [pending, setPending] = useState(false);
+  const [hydrating, setHydrating] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedRecipe, setSelectedRecipe] = useState<RecipeFull | null>(null);
 
@@ -20,6 +41,32 @@ export function ChatScreen() {
   useEffect(() => {
     return () => {
       controllerRef.current?.abort();
+    };
+  }, []);
+
+  // Hydrate na mount — restore today's chat z DDB (24h TTL). Bez tego
+  // refresh strony = pusty thread mimo że backend wciąż pamięta historię.
+  // Race-safe: jeśli user zdąży wpisać wiadomość zanim hydrate zwróci
+  // (typowo <300ms ale możliwe), NIE nadpisujemy local state — funkcyjny
+  // setMessages sprawdza prev.length === 0.
+  useEffect(() => {
+    let cancelled = false;
+    getChatHistory()
+      .then((res) => {
+        if (cancelled) return;
+        setMessages((prev) => (prev.length === 0 ? res.messages.map(entryToMessage) : prev));
+      })
+      .catch(() => {
+        // 401/sieć — UI nie blokuje, owner zacznie nową rozmowę.
+        // Jawnego błędu nie pokazujemy żeby nie straszyć (history fetch
+        // jest "best effort restore", brak go = empty thread fallback OK).
+      })
+      .finally(() => {
+        if (cancelled) return;
+        setHydrating(false);
+      });
+    return () => {
+      cancelled = true;
     };
   }, []);
 
@@ -82,7 +129,12 @@ export function ChatScreen() {
   return (
     <div className="chat-screen">
       <div className="chat-thread">
-        {messages.length === 0 && (
+        {hydrating && (
+          <div className="chat-thread-empty">
+            <p>Wczytywanie rozmowy…</p>
+          </div>
+        )}
+        {!hydrating && messages.length === 0 && (
           <div className="chat-thread-empty">
             <p>
               Spróbuj zapytać:
