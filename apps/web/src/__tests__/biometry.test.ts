@@ -5,6 +5,8 @@ import {
   sumSeries,
   trendPct,
   valueForDate,
+  weeklyTrendKg,
+  weightEMA,
   type SeriesPoint,
 } from '../biometry';
 import type { BiometryDay } from '../types';
@@ -190,5 +192,99 @@ describe('sumSeries', () => {
 
   test('empty + empty → []', () => {
     expect(sumSeries([], [])).toEqual([]);
+  });
+});
+
+// ─── Sprint 10 A5 — EMA + weeklyTrendKg ────────────────────────────────────
+
+describe('weightEMA', () => {
+  test('first point passes through unchanged', () => {
+    const out = weightEMA([{ date: '2026-05-01', value: 80 }]);
+    expect(out).toEqual([{ date: '2026-05-01', value: 80 }]);
+  });
+
+  test('α=0.1 smooths spike: single big jump barely moves EMA', () => {
+    const points: SeriesPoint[] = [
+      { date: '2026-05-01', value: 80 },
+      { date: '2026-05-02', value: 80 },
+      { date: '2026-05-03', value: 90 }, // glikogen spike +10
+    ];
+    const out = weightEMA(points, 0.1);
+    expect(out[0].value).toBe(80);
+    expect(out[1].value).toBe(80); // 0.1×80 + 0.9×80
+    // 0.1×90 + 0.9×80 = 81 — spike "wziął" tylko 1 kg
+    expect(out[2].value).toBeCloseTo(81, 5);
+  });
+
+  test('α=1.0 = no smoothing (each point passes through)', () => {
+    const points: SeriesPoint[] = [
+      { date: '2026-05-01', value: 80 },
+      { date: '2026-05-02', value: 90 },
+    ];
+    const out = weightEMA(points, 1.0);
+    expect(out.map((p) => p.value)).toEqual([80, 90]);
+  });
+
+  test('rejects α=0 lub α>1', () => {
+    expect(() => weightEMA([], 0)).toThrow();
+    expect(() => weightEMA([], 1.5)).toThrow();
+    expect(() => weightEMA([], -0.1)).toThrow();
+  });
+
+  test('empty array → []', () => {
+    expect(weightEMA([])).toEqual([]);
+  });
+
+  test('sortuje po dacie nawet gdy input shuffled', () => {
+    const points: SeriesPoint[] = [
+      { date: '2026-05-03', value: 82 },
+      { date: '2026-05-01', value: 80 },
+      { date: '2026-05-02', value: 81 },
+    ];
+    const out = weightEMA(points, 0.1);
+    expect(out.map((p) => p.date)).toEqual(['2026-05-01', '2026-05-02', '2026-05-03']);
+    expect(out[0].value).toBe(80);
+  });
+});
+
+describe('weeklyTrendKg', () => {
+  test('null gdy <7 punktów', () => {
+    const ema: SeriesPoint[] = Array.from({ length: 6 }, (_, i) => ({
+      date: `2026-05-0${i + 1}`,
+      value: 80,
+    }));
+    expect(weeklyTrendKg(ema)).toBeNull();
+  });
+
+  test('zwraca delta last vs 7d ago (positive = przyrost)', () => {
+    const ema: SeriesPoint[] = [
+      { date: '2026-05-01', value: 80.0 },
+      { date: '2026-05-02', value: 80.1 },
+      { date: '2026-05-03', value: 80.2 },
+      { date: '2026-05-04', value: 80.3 },
+      { date: '2026-05-05', value: 80.4 },
+      { date: '2026-05-06', value: 80.5 },
+      { date: '2026-05-07', value: 80.6 },
+      { date: '2026-05-08', value: 80.7 },
+    ];
+    // last (80.7) - 7d ago (80.0 = idx -7 from end) = 0.7 kg/tydz
+    expect(weeklyTrendKg(ema)).toBeCloseTo(0.7, 5);
+  });
+
+  test('negative delta dla redukcji', () => {
+    const values = [82, 81.9, 81.8, 81.7, 81.6, 81.5, 81.4, 81.3];
+    const ema: SeriesPoint[] = values.map((v, i) => ({
+      date: `2026-05-0${i + 1}`,
+      value: v,
+    }));
+    expect(weeklyTrendKg(ema)).toBeCloseTo(-0.7, 5);
+  });
+
+  test('exactly 7 punktów: liczy last vs first', () => {
+    const ema: SeriesPoint[] = Array.from({ length: 7 }, (_, i) => ({
+      date: `2026-05-0${i + 1}`,
+      value: 80 + i * 0.1,
+    }));
+    expect(weeklyTrendKg(ema)).toBeCloseTo(0.6, 5);
   });
 });

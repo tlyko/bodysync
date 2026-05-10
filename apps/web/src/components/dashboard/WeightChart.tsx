@@ -1,3 +1,5 @@
+import { weeklyTrendKg, weightEMA } from '../../biometry';
+
 type WeightPoint = {
   date: string; // YYYY-MM-DD
   weight: number; // kg
@@ -13,6 +15,11 @@ const PAD_TOP = 16;
 const PAD_BOTTOM = 24; // miejsce na first/last date label
 const PAD_LEFT = 36; // miejsce na axis labels (kg range)
 const PAD_RIGHT = 8;
+
+// Sprint 10 A5 — EMA smoothing α. 0.1 daje ~10-day half-life (waga 10 dni
+// temu w EMA = ~37%, 30 dni temu ~4%). Empirycznie dopasowane do raw HAE
+// signal (~±0.5 kg dnia-na-dzień noise z hydratacji).
+const EMA_ALPHA = 0.1;
 
 // Line chart wagi 30 dni. Empty state gdy `data.length === 0` lub `data.length === 1`
 // (jeden punkt = brak skali). Y-axis ma min/max range padded o 0.5 kg każdy
@@ -35,8 +42,18 @@ export function WeightChart({ data, width = 600, height = 220 }: Props) {
   }
 
   const sorted = [...data].sort((a, b) => a.date.localeCompare(b.date));
-  const minW = Math.min(...sorted.map((d) => d.weight));
-  const maxW = Math.max(...sorted.map((d) => d.weight));
+  // EMA overlay (Sprint 10 A5) — używa SeriesPoint shape z biometry.ts
+  // (date+value), więc map weight→value przed wywołaniem.
+  const emaPoints = weightEMA(
+    sorted.map((d) => ({ date: d.date, value: d.weight })),
+    EMA_ALPHA,
+  );
+  const trendKgPerWeek = weeklyTrendKg(emaPoints);
+  // Y-axis scale obejmuje raw + EMA (zwykle EMA jest w środku raw, ale
+  // przy strong trend może wystawać na granicy → bezpieczniej liczyć max).
+  const allValues = [...sorted.map((d) => d.weight), ...emaPoints.map((p) => p.value)];
+  const minW = Math.min(...allValues);
+  const maxW = Math.max(...allValues);
   // Padding range — zapobiega "płaskiej" linii gdy waga się nie zmienia.
   const yMin = Math.floor((minW - 0.5) * 2) / 2;
   const yMax = Math.ceil((maxW + 0.5) * 2) / 2;
@@ -50,12 +67,26 @@ export function WeightChart({ data, width = 600, height = 220 }: Props) {
   const yFor = (w: number) => PAD_TOP + plotH - ((w - yMin) / yRange) * plotH;
 
   const linePoints = sorted.map((d, i) => `${xFor(i)},${yFor(d.weight)}`).join(' ');
+  // EMA polyline — same X positions co raw (lock-step), inne Y.
+  const emaLinePoints = emaPoints
+    .map((p, i) => `${xFor(i)},${yFor(p.value)}`)
+    .join(' ');
 
   const firstDate = sorted[0].date;
   const lastDate = sorted[sorted.length - 1].date;
   const lastWeight = sorted[sorted.length - 1].weight;
+  const lastEMA = emaPoints[emaPoints.length - 1]?.value;
+  // Trend label format: "+0,2 kg/tydz." / "−0,3 kg/tydz." / "stabilna" gdy |Δ|<0.05.
+  // pl-PL używa przecinka jako separatora dziesiętnego.
+  const trendLabel =
+    trendKgPerWeek === null
+      ? null
+      : Math.abs(trendKgPerWeek) < 0.05
+        ? 'stabilna (±0,0 kg/tydz.)'
+        : `${trendKgPerWeek > 0 ? '+' : ''}${trendKgPerWeek.toFixed(1).replace('.', ',')} kg/tydz.`;
 
   return (
+    <div className="weight-chart-wrap">
     <svg
       className="weight-chart"
       viewBox={`0 0 ${width} ${height}`}
@@ -63,7 +94,7 @@ export function WeightChart({ data, width = 600, height = 220 }: Props) {
       height={height}
       preserveAspectRatio="none"
       role="img"
-      aria-label={`Wykres wagi ${firstDate} — ${lastDate}, aktualnie ${lastWeight.toFixed(1)} kg`}
+      aria-label={`Wykres wagi ${firstDate} — ${lastDate}, aktualnie ${lastWeight.toFixed(1)} kg, smoothed trend ${trendLabel ?? 'brak'}`}
     >
       <defs>
         <linearGradient id="weight-chart-grad" x1="0" y1="0" x2="0" y2="1">
@@ -95,7 +126,7 @@ export function WeightChart({ data, width = 600, height = 220 }: Props) {
         fill="url(#weight-chart-grad)"
       />
 
-      {/* Main line */}
+      {/* Main line — raw daily weight */}
       <polyline
         points={linePoints}
         fill="none"
@@ -104,6 +135,22 @@ export function WeightChart({ data, width = 600, height = 220 }: Props) {
         strokeLinecap="round"
         strokeLinejoin="round"
       />
+
+      {/* Sprint 10 A5 — EMA smoothed line ("true weight") overlay.
+          Cieńszy stroke + dashed pattern wizualnie rozdziela od raw line.
+          Cyan accent — różny od raw green żeby user nie mylił. */}
+      {emaPoints.length >= 2 && (
+        <polyline
+          points={emaLinePoints}
+          fill="none"
+          stroke="#22d3ee"
+          strokeWidth="1.5"
+          strokeDasharray="4 3"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          opacity="0.85"
+        />
+      )}
 
       {/* Last point dot */}
       <circle
@@ -123,5 +170,35 @@ export function WeightChart({ data, width = 600, height = 220 }: Props) {
         {lastDate}
       </text>
     </svg>
+    {/* Sprint 10 A5 — trend summary pod chartem. EMA smoothed line legenda
+        + trend tygodniowy gdy ≥7 punktów. Bez tego user widzi 2 linie ale
+        nie wie która jest "true weight". */}
+    <div className="weight-chart-footer">
+      <span className="weight-chart-legend">
+        <span className="weight-chart-legend-item">
+          <span className="weight-chart-legend-dot raw" /> Codzienna
+        </span>
+        {emaPoints.length >= 2 && (
+          <span className="weight-chart-legend-item">
+            <span className="weight-chart-legend-dot ema" /> Wygładzona
+            {lastEMA !== undefined && ` (${lastEMA.toFixed(1)} kg)`}
+          </span>
+        )}
+      </span>
+      {trendLabel && (
+        <span
+          className={
+            trendKgPerWeek === null || Math.abs(trendKgPerWeek) < 0.05
+              ? 'weight-chart-trend stable'
+              : trendKgPerWeek > 0
+                ? 'weight-chart-trend up'
+                : 'weight-chart-trend down'
+          }
+        >
+          Trend 7d: {trendLabel}
+        </span>
+      )}
+    </div>
+    </div>
   );
 }

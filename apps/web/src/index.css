@@ -1528,6 +1528,70 @@ body:has(.preview-banner) .login-screen {
   opacity: 0.5;
 }
 
+/* Sprint 10 A5 — EMA legend + trend label pod chartem */
+.weight-chart-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+.weight-chart-footer {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0 0.5rem;
+  font-size: 0.75rem;
+  color: var(--text-muted);
+}
+.weight-chart-legend {
+  display: flex;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.weight-chart-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.weight-chart-legend-dot {
+  display: inline-block;
+  width: 14px;
+  height: 2px;
+  border-radius: 2px;
+}
+.weight-chart-legend-dot.raw {
+  background: #10b981;
+  height: 2px;
+}
+.weight-chart-legend-dot.ema {
+  background: linear-gradient(
+    to right,
+    #22d3ee 0,
+    #22d3ee 4px,
+    transparent 4px,
+    transparent 7px,
+    #22d3ee 7px,
+    #22d3ee 11px,
+    transparent 11px
+  );
+  height: 2px;
+}
+.weight-chart-trend {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-weight: 600;
+}
+.weight-chart-trend.up {
+  color: var(--orange);
+}
+.weight-chart-trend.down {
+  color: var(--green);
+}
+.weight-chart-trend.stable {
+  color: var(--text-muted);
+}
+
 /* ─── Chat (Sprint 7) ─── */
 
 .chat-screen {
