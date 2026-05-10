@@ -108,6 +108,16 @@ export type CalculateTDEEResponse = {
   weight_kg_used: number;
 };
 
+// ─── Sprint 10 A0.5 — LLM-driven activity level suggestion ───
+
+export type ActivitySuggestionResponse = {
+  level: ActivityLevel;
+  reasoning: string;
+  activities_count: number;
+  avg_steps: number | null;
+  avg_kcal_active: number | null;
+};
+
 // ─── Activities (Sprint 4, mirror handlers/activities_list) ───
 
 export type Activity = {

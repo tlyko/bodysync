@@ -4,6 +4,7 @@
 import { API_URL } from './config';
 import type {
   ActivitiesResponse,
+  ActivitySuggestionResponse,
   BiometryResponse,
   CalculateTDEERequest,
   CalculateTDEEResponse,
@@ -121,6 +122,17 @@ export async function postCalculateTDEE(
   return request<CalculateTDEEResponse>('/api/profile/calculate-tdee', {
     method: 'POST',
     body: JSON.stringify(req),
+  });
+}
+
+// Sprint 10 A0.5 — LLM-driven activity level detection. Anthropic Haiku
+// patrzy na ostatnie 7d Strava activities + biometry, ocenia poziom
+// aktywności (sedentary/light/moderate/heavy/athlete) + zwraca polskie
+// reasoning. Frontend pre-selectuje dropdown w wizardzie + pokazuje text.
+export async function postSuggestActivityLevel(): Promise<ActivitySuggestionResponse> {
+  return request<ActivitySuggestionResponse>('/api/profile/suggest-activity-level', {
+    method: 'POST',
+    body: JSON.stringify({}),
   });
 }
 

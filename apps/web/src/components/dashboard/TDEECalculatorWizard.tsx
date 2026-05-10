@@ -8,10 +8,12 @@ import {
   ApiError,
   getProfileTargets,
   postCalculateTDEE,
+  postSuggestActivityLevel,
   putProfileTargets,
 } from '../../api';
 import type {
   ActivityLevel,
+  ActivitySuggestionResponse,
   BodyProfile,
   CalculateTDEEResponse,
   Goal,
@@ -94,6 +96,11 @@ export function TDEECalculatorWizard({ onTargetsUpdated }: Props) {
   const [apiError, setApiError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
   const [hasStoredProfile, setHasStoredProfile] = useState(false);
+  // Sprint 10 A0.5 — LLM suggestion state. `suggestion` widoczne pod selectem
+  // gdy user kliknie "Sugestia z mojej aktywności". Owner może override wybór.
+  const [suggestion, setSuggestion] = useState<ActivitySuggestionResponse | null>(null);
+  const [suggestPending, setSuggestPending] = useState(false);
+  const [suggestError, setSuggestError] = useState<string | null>(null);
 
   // Pre-fill z zapisanego body_profile (jeśli jest) — owner wraca do wizardu
   // żeby przeliczyć ponownie po zmianie waga / activity level.
@@ -141,6 +148,29 @@ export function TDEECalculatorWizard({ onTargetsUpdated }: Props) {
       }
     } finally {
       setCalcPending(false);
+    }
+  };
+
+  const handleSuggestActivity = async () => {
+    setSuggestError(null);
+    setSuggestPending(true);
+    try {
+      const res = await postSuggestActivityLevel();
+      setSuggestion(res);
+      // Auto-apply LLM-suggested level do dropdown — owner może zmienić ręcznie.
+      setForm((prev) => ({ ...prev, activity_level: res.level }));
+    } catch (e) {
+      if (e instanceof ApiError && e.status === 503) {
+        setSuggestError('Asystent niedostępny (Anthropic key nieskonfigurowany).');
+      } else if (e instanceof ApiError && e.status === 502) {
+        setSuggestError('Asystent zwrócił niepoprawny output. Spróbuj ponownie.');
+      } else {
+        setSuggestError(
+          e instanceof ApiError ? `Błąd ${e.status}: ${e.message}` : 'Nie udało się ocenić',
+        );
+      }
+    } finally {
+      setSuggestPending(false);
     }
   };
 
@@ -245,17 +275,43 @@ export function TDEECalculatorWizard({ onTargetsUpdated }: Props) {
 
           <label className="tdee-wizard-field tdee-wizard-field-wide">
             <span>Aktywność dzienna</span>
-            <select
-              value={form.activity_level}
-              onChange={(e) => handleField('activity_level', e.target.value as ActivityLevel)}
-              disabled={calcPending}
-            >
-              {ACTIVITY_OPTIONS.map((o) => (
-                <option key={o.value} value={o.value}>
-                  {o.label} — {o.hint}
-                </option>
-              ))}
-            </select>
+            <span className="tdee-wizard-activity-row">
+              <select
+                value={form.activity_level}
+                onChange={(e) => handleField('activity_level', e.target.value as ActivityLevel)}
+                disabled={calcPending || suggestPending}
+              >
+                {ACTIVITY_OPTIONS.map((o) => (
+                  <option key={o.value} value={o.value}>
+                    {o.label} — {o.hint}
+                  </option>
+                ))}
+              </select>
+              <button
+                type="button"
+                className="tdee-wizard-suggest-button"
+                onClick={handleSuggestActivity}
+                disabled={suggestPending || calcPending}
+                title="Asystent (Haiku) oceni Twój poziom na bazie ostatnich 7 dni Strava + Apple Health"
+              >
+                {suggestPending ? 'Oceniam…' : suggestion ? 'Przelicz sugestię' : 'Sugestia z mojej aktywności'}
+              </button>
+            </span>
+            {suggestion && (
+              <span className="tdee-wizard-suggestion-panel">
+                <span className="tdee-wizard-suggestion-icon">🤖</span>
+                <span className="tdee-wizard-suggestion-text">
+                  <strong>Sugestia: {ACTIVITY_OPTIONS.find((o) => o.value === suggestion.level)?.label ?? suggestion.level}</strong>
+                  {suggestion.reasoning && <> — {suggestion.reasoning}</>}
+                  <span className="tdee-wizard-suggestion-meta">
+                    Dane: {suggestion.activities_count} treningów
+                    {suggestion.avg_steps !== null && `, ${suggestion.avg_steps} kroków/dzień`}
+                    {suggestion.avg_kcal_active !== null && `, ${suggestion.avg_kcal_active} kcal aktywnych/dzień`}
+                  </span>
+                </span>
+              </span>
+            )}
+            {suggestError && <span className="error">{suggestError}</span>}
           </label>
 
           <label className="tdee-wizard-field tdee-wizard-field-wide">

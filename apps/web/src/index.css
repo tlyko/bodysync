@@ -1343,6 +1343,67 @@ body:has(.preview-banner) .login-screen {
   line-height: 1.5;
 }
 
+/* ─── A0.5 LLM activity suggestion (button + reasoning panel) ─── */
+
+.tdee-wizard-activity-row {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+}
+.tdee-wizard-activity-row select {
+  flex: 1;
+  min-width: 200px;
+}
+.tdee-wizard-suggest-button {
+  background: transparent;
+  color: var(--cyan);
+  border: 1px solid var(--cyan);
+  border-radius: 6px;
+  padding: 0.45rem 0.9rem;
+  font-size: 0.8rem;
+  font-weight: 500;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tdee-wizard-suggest-button:hover:not(:disabled) {
+  background: rgba(34, 211, 238, 0.08);
+}
+.tdee-wizard-suggest-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.tdee-wizard-suggestion-panel {
+  display: flex;
+  gap: 0.6rem;
+  padding: 0.7rem 0.85rem;
+  background: rgba(167, 139, 250, 0.08);
+  border: 1px solid rgba(167, 139, 250, 0.3);
+  border-radius: 8px;
+  margin-top: 0.5rem;
+  font-size: 0.82rem;
+  line-height: 1.5;
+  color: var(--text);
+}
+.tdee-wizard-suggestion-icon {
+  font-size: 1rem;
+  flex-shrink: 0;
+}
+.tdee-wizard-suggestion-text {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.tdee-wizard-suggestion-text strong {
+  color: var(--purple);
+  font-weight: 600;
+}
+.tdee-wizard-suggestion-meta {
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+
 /* ─── Weight chart (Sprint 8) ─── */
 
 .weight-chart {

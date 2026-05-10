@@ -8,19 +8,27 @@ vi.mock('../api', async () => {
     ...actual,
     getProfileTargets: vi.fn(),
     postCalculateTDEE: vi.fn(),
+    postSuggestActivityLevel: vi.fn(),
     putProfileTargets: vi.fn(),
   };
 });
 
-import { getProfileTargets, postCalculateTDEE, putProfileTargets } from '../api';
+import {
+  getProfileTargets,
+  postCalculateTDEE,
+  postSuggestActivityLevel,
+  putProfileTargets,
+} from '../api';
 
 const mockGet = vi.mocked(getProfileTargets);
 const mockCalc = vi.mocked(postCalculateTDEE);
+const mockSuggest = vi.mocked(postSuggestActivityLevel);
 const mockPut = vi.mocked(putProfileTargets);
 
 beforeEach(() => {
   mockGet.mockReset();
   mockCalc.mockReset();
+  mockSuggest.mockReset();
   mockPut.mockReset();
   // Default: brak zapisanego body_profile (fresh setup)
   mockGet.mockResolvedValue({
@@ -176,5 +184,73 @@ describe('TDEECalculatorWizard', () => {
     await waitFor(() =>
       expect(screen.getByText(/Brak waga w bazie/)).toBeInTheDocument(),
     );
+  });
+
+  // ─── Sprint 10 A0.5 — LLM activity level suggestion ─────────────────────
+
+  test('suggest activity level: button click → call API → reasoning visible + select pre-filled', async () => {
+    mockSuggest.mockResolvedValueOnce({
+      level: 'moderate',
+      reasoning: '4 treningi w tym tygodniu (3× bieg, 1× rower), avg 8200 kroków.',
+      activities_count: 4,
+      avg_steps: 8200,
+      avg_kcal_active: 580,
+    });
+    render(<TDEECalculatorWizard />);
+    await waitFor(() => screen.getByText(/Kalkulator TDEE/));
+
+    fireEvent.click(screen.getByRole('button', { name: /Sugestia z mojej aktywności/ }));
+
+    await waitFor(() => {
+      expect(screen.getByText(/4 treningi/)).toBeInTheDocument();
+    });
+    expect(screen.getByText(/Sugestia: Umiarkowana/)).toBeInTheDocument();
+    expect(screen.getByText(/4 treningów, 8200 kroków\/dzień, 580 kcal aktywnych\/dzień/)).toBeInTheDocument();
+    // Dropdown pre-filled — moderate value selected
+    const select = screen.getByRole('combobox', { name: /Aktywność dzienna/ });
+    expect((select as HTMLSelectElement).value).toBe('moderate');
+  });
+
+  test('suggest 503 (Anthropic key missing) shows friendly error', async () => {
+    const { ApiError } = await import('../api');
+    mockSuggest.mockRejectedValueOnce(new ApiError(503, 'advisor_unavailable'));
+    render(<TDEECalculatorWizard />);
+    await waitFor(() => screen.getByText(/Kalkulator TDEE/));
+
+    fireEvent.click(screen.getByRole('button', { name: /Sugestia z mojej aktywności/ }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/Asystent niedostępny/)).toBeInTheDocument(),
+    );
+  });
+
+  test('suggest 502 (LLM JSON malformed) shows retry-friendly error', async () => {
+    const { ApiError } = await import('../api');
+    mockSuggest.mockRejectedValueOnce(new ApiError(502, 'json_parse_failed'));
+    render(<TDEECalculatorWizard />);
+    await waitFor(() => screen.getByText(/Kalkulator TDEE/));
+
+    fireEvent.click(screen.getByRole('button', { name: /Sugestia z mojej aktywności/ }));
+
+    await waitFor(() =>
+      expect(screen.getByText(/niepoprawny output/)).toBeInTheDocument(),
+    );
+  });
+
+  test('suggest button label changes to "Przelicz sugestię" after first call', async () => {
+    mockSuggest.mockResolvedValueOnce({
+      level: 'light',
+      reasoning: 'Mało aktywności w tym tygodniu.',
+      activities_count: 1,
+      avg_steps: 5500,
+      avg_kcal_active: 250,
+    });
+    render(<TDEECalculatorWizard />);
+    await waitFor(() => screen.getByText(/Kalkulator TDEE/));
+
+    fireEvent.click(screen.getByRole('button', { name: /Sugestia z mojej aktywności/ }));
+    await waitFor(() => screen.getByText(/Sugestia: Lekka aktywność/));
+
+    expect(screen.getByRole('button', { name: /Przelicz sugestię/ })).toBeInTheDocument();
   });
 });
