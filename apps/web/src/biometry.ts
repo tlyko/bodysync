@@ -95,6 +95,55 @@ export function sumSeries(a: SeriesPoint[], b: SeriesPoint[]): SeriesPoint[] {
   }));
 }
 
+// Sprint 10 A11 — sleep stages extractor.
+// HAE wysyła sleep z fields {asleep, inBed, core, rem, deep, awake, ...}.
+// `singleNumber` w EXTRACTORS zwraca tylko `asleep` jako sumaryczny float.
+// Tu wyciągamy strukturę 4 stages (deep/rem/core/awake) dla
+// SleepStagesCard z horizontal stacked bar.
+//
+// Returns null gdy brak dnia / brak sleep / brak żadnego sub-stage.
+// Stage values w godzinach (jak w DDB; HAE convertuje minuty→hours).
+export type SleepStages = {
+  asleep: number; // total asleep (suma 3 sub-stages w typowym payloadzie)
+  inBed: number | null;
+  deep: number;
+  rem: number;
+  core: number;
+  awake: number;
+  date: string; // YYYY-MM-DD którego dnia
+};
+
+export function extractLatestSleepStages(days: BiometryDay[]): SleepStages | null {
+  if (days.length === 0) return null;
+  // Iteruj po datach desc, znajdź pierwszy dzień z non-zero stages.
+  const sorted = [...days].sort((a, b) => b.date.localeCompare(a.date));
+  for (const day of sorted) {
+    const raw = day.metrics.sleep;
+    if (!raw || Array.isArray(raw)) continue;
+    const deep = numberOr(raw.deep, 0);
+    const rem = numberOr(raw.rem, 0);
+    const core = numberOr(raw.core, 0);
+    const awake = numberOr(raw.awake, 0);
+    const sumStages = deep + rem + core;
+    if (sumStages === 0) continue; // payload bez stages — skip
+    const asleep = numberOr(raw.asleep, sumStages);
+    return {
+      asleep,
+      inBed: typeof raw.inBed === 'number' ? raw.inBed : null,
+      deep,
+      rem,
+      core,
+      awake,
+      date: day.date,
+    };
+  }
+  return null;
+}
+
+function numberOr(value: number | string | null | undefined, fallback: number): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
+}
+
 // Sprint 10 A5 — exponential moving average dla "true weight" smoothing
 // (MacroFactor-style). Eliminuje noise z hydratacji/sodu/glikogenu z raw
 // daily weight (±0.5 kg dnia na dzień typowo). α=0.1 daje ~10-day half-life
