@@ -12,6 +12,7 @@ activity multiplier (TDEE) i goal modifier (deficit/surplus).
 from __future__ import annotations
 
 from datetime import date
+from decimal import Decimal
 from typing import Any, cast
 
 from handlers.profile_targets.schemas import (
@@ -193,12 +194,31 @@ def _body_profile_differs(old: BodyProfile, new: BodyProfile) -> bool:
     )
 
 
+def _decimal_to_native(value: Any) -> Any:
+    """Rekursywna konwersja Decimal → int/float dla JSON serialization.
+
+    DDB zwraca Number jako Decimal; `json.dumps` nie umie. Pydantic
+    `dict[str, Any]` field nie konwertuje passthrough. Stosujemy przed
+    zwróceniem `tdee_history`/`tdee_last_recalc` z `get_tdee_state`.
+    """
+    if isinstance(value, Decimal):
+        return int(value) if value % 1 == 0 else float(value)
+    if isinstance(value, dict):
+        return {k: _decimal_to_native(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_decimal_to_native(v) for v in value]
+    return value
+
+
 def get_tdee_state(user_id: str) -> dict[str, Any]:
     """Read-only TDEE state z PROFILE — `tdee_baseline`/`adaptive`/`last_recalc`/`history`.
 
     Wszystkie pola opcjonalne (None / []) gdy owner jeszcze nie przeszedł
     przez body_profile init (PR4) ani manual recalc (PR2). Handler składa
     z `get_targets()` w pełną `TargetsResponse`.
+
+    Decimal recursive coercion — DDB Number type wraca jako Decimal,
+    `json.dumps` w handlerze nie umie. Konwertujemy przed return.
     """
     profile = get_item(f"USER#{user_id}", "PROFILE")
     if profile is None:
@@ -208,6 +228,7 @@ def get_tdee_state(user_id: str) -> dict[str, Any]:
             "tdee_last_recalc": None,
             "tdee_history": [],
         }
+    last_recalc = profile.get("tdee_last_recalc")
     return {
         "tdee_baseline": int(profile["tdee_baseline"])
         if profile.get("tdee_baseline") is not None
@@ -215,10 +236,8 @@ def get_tdee_state(user_id: str) -> dict[str, Any]:
         "tdee_adaptive": int(profile["tdee_adaptive"])
         if profile.get("tdee_adaptive") is not None
         else None,
-        "tdee_last_recalc": dict(profile["tdee_last_recalc"])
-        if profile.get("tdee_last_recalc")
-        else None,
-        "tdee_history": list(profile.get("tdee_history") or []),
+        "tdee_last_recalc": _decimal_to_native(dict(last_recalc)) if last_recalc else None,
+        "tdee_history": _decimal_to_native(list(profile.get("tdee_history") or [])),
     }
 
 

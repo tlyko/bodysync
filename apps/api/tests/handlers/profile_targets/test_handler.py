@@ -91,6 +91,55 @@ def test_get_returns_defaults_when_targets_unset(dynamodb_table: Any) -> None:
 
 
 @pytest.mark.usefixtures("ssm_params")
+def test_get_serializes_tdee_state_with_decimal_history(dynamodb_table: Any) -> None:
+    """Regression: DDB stored tdee_history z Decimal (waga_delta_kg, before/after)
+    musi się serializować do JSON. Pre-fix #152: TypeError Decimal not JSON
+    serializable → 500 internal_error w UI Settings tab.
+    """
+    from decimal import Decimal
+
+    from handlers.profile_targets import handler as h
+
+    history_with_decimals = [
+        {
+            "date": "2026-04-27",
+            "event": "recalc",
+            "before": Decimal("2280"),
+            "after": Decimal("2330"),
+            "kcal_in_avg": Decimal("2150"),
+            "waga_delta_kg": Decimal("-0.4"),
+            "adjustment": Decimal("50"),
+            "capped": False,
+            "reason": None,
+        }
+    ]
+    last_recalc = history_with_decimals[0]
+    _seed_profile(
+        dynamodb_table,
+        "tomek",
+        kcal_target=2330,
+        protein_target_g=145,
+        fat_target_g=70,
+        carbs_target_g=350,
+        tdee_baseline=Decimal("2280"),
+        tdee_adaptive=Decimal("2330"),
+        tdee_last_recalc=last_recalc,
+        tdee_history=history_with_decimals,
+    )
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handler(_event("GET", cookie), _FakeContext())
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["tdee_baseline"] == 2280
+    assert body["tdee_adaptive"] == 2330
+    assert body["tdee_last_recalc"]["after"] == 2330
+    assert body["tdee_last_recalc"]["waga_delta_kg"] == -0.4
+    assert body["tdee_history"][0]["adjustment"] == 50
+
+
+@pytest.mark.usefixtures("ssm_params")
 def test_get_returns_owner_values_when_set(dynamodb_table: Any) -> None:
     from handlers.profile_targets import handler as h
 
