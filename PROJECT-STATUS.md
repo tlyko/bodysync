@@ -72,7 +72,7 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 
 End-to-end pipeline: `CloudWatch alarm → SNS → Lambda → Telegram POST → chat`. Cost-guard alarm reaguje, Sprint 11 Daily Brief odblokowany (ten sam bot_token reusable).
 
-**Audyt 2026-05-11 (auditor agent, post-sesja):**
+**Audyt 2026-05-11 (auditor agent, post-sesja, raport pełny:** [`docs/audit-2026-05-11.md`](docs/audit-2026-05-11.md)**):**
 
 3 najpilniejsze rzeczy (po dzisiejszych 5 PR):
 1. **Extract `_post_handler.py`** z `advisor_chat/handler.py` (369 LOC, asymetria z `_history_handler.py` 113 LOC) → `@architect` + `@implementer`. Przed Sprint 11.
