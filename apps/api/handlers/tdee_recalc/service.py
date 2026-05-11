@@ -22,7 +22,7 @@ from __future__ import annotations
 from datetime import date, timedelta
 from typing import Literal
 
-from handlers.tdee_recalc.schemas import BiometryWindow, RecalcResult
+from handlers.tdee_recalc.schemas import BiometryWindow, RecalcHistoryEntry, RecalcResult
 
 SkipReason = Literal[
     "insufficient_kcal_data",
@@ -30,6 +30,7 @@ SkipReason = Literal[
     "weight_anchor_missing",
     "weight_now_missing",
     "kcal_in_avg_unrealistic",
+    "baseline_not_initialized",
 ]
 
 # Minimum dni z danym typem biometrii w window — poniżej skip.
@@ -241,3 +242,32 @@ def recalculate_tdee(
         adjustment=adjustment_int,
         capped=capped,
     )
+
+
+def build_history_entry(*, today: date, result: RecalcResult) -> RecalcHistoryEntry:
+    """Z `RecalcResult` zbuduj entry do append w `tdee_history` list.
+
+    Event = `"skipped"` jeśli `result.skipped`, w przeciwnym razie `"recalc"`.
+    Event `"body_profile_change"` i `"initial"` są emitowane z PR4
+    `profile_targets.update_targets()` (cross-handler), nie tu.
+    """
+    return RecalcHistoryEntry(
+        date=today,
+        event="skipped" if result.skipped else "recalc",
+        before=result.tdee_before,
+        after=result.tdee_after,
+        kcal_in_avg=result.kcal_in_avg,
+        waga_delta_kg=result.waga_delta_kg,
+        adjustment=result.adjustment,
+        capped=result.capped,
+        reason=result.reason,
+    )
+
+
+def cap_history(
+    history: list[RecalcHistoryEntry], cap: int = HISTORY_CAP
+) -> list[RecalcHistoryEntry]:
+    """FIFO cap — drop oldest gdy len > cap. Idempotent dla short list."""
+    if len(history) <= cap:
+        return history
+    return history[-cap:]

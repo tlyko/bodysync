@@ -46,6 +46,7 @@ class RecalcResult(BaseModel):
             "weight_anchor_missing",
             "weight_now_missing",
             "kcal_in_avg_unrealistic",
+            "baseline_not_initialized",
         ]
         | None
     )
