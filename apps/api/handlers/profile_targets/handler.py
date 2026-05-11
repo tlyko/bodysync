@@ -32,6 +32,7 @@ from handlers.profile_targets.service import (
     calculate_tdee,
     get_latest_weight_kg,
     get_targets,
+    get_tdee_state,
     suggest_macros,
     update_targets,
 )
@@ -155,6 +156,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def _handle_get_targets(user_id: str, request_id: str) -> dict[str, Any]:
     kcal, protein, fat, carbs, is_default, body_profile = get_targets(user_id)
+    tdee_state = get_tdee_state(user_id)
     body = TargetsResponse(
         kcal_target=kcal,
         protein_target_g=protein,
@@ -162,6 +164,10 @@ def _handle_get_targets(user_id: str, request_id: str) -> dict[str, Any]:
         carbs_target_g=carbs,
         is_default=is_default,
         body_profile=body_profile,
+        tdee_baseline=tdee_state["tdee_baseline"],
+        tdee_adaptive=tdee_state["tdee_adaptive"],
+        tdee_last_recalc=tdee_state["tdee_last_recalc"],
+        tdee_history=tdee_state["tdee_history"],
     )
     logger.info(
         "targets_get",
@@ -193,13 +199,22 @@ def _handle_put_targets(event: dict[str, Any], user_id: str, request_id: str) ->
         payload_obj.carbs_target_g,
         body_profile=payload_obj.body_profile,
     )
+    # Re-read po update — body_profile init/change w `update_targets` może
+    # override user-provided makro (auto-sync z nowego TDEE baseline). Response
+    # musi reflect actual saved values, nie request payload.
+    kcal, protein, fat, carbs, _is_default, body_profile_saved = get_targets(user_id)
+    tdee_state = get_tdee_state(user_id)
     response = TargetsResponse(
-        kcal_target=payload_obj.kcal_target,
-        protein_target_g=payload_obj.protein_target_g,
-        fat_target_g=payload_obj.fat_target_g,
-        carbs_target_g=payload_obj.carbs_target_g,
+        kcal_target=kcal,
+        protein_target_g=protein,
+        fat_target_g=fat,
+        carbs_target_g=carbs,
         is_default=False,
-        body_profile=payload_obj.body_profile,
+        body_profile=body_profile_saved,
+        tdee_baseline=tdee_state["tdee_baseline"],
+        tdee_adaptive=tdee_state["tdee_adaptive"],
+        tdee_last_recalc=tdee_state["tdee_last_recalc"],
+        tdee_history=tdee_state["tdee_history"],
     )
     logger.info(
         "targets_put",

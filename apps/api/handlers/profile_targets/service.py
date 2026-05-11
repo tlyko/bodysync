@@ -11,6 +11,7 @@ activity multiplier (TDEE) i goal modifier (deficit/surplus).
 
 from __future__ import annotations
 
+from datetime import date
 from typing import Any, cast
 
 from handlers.profile_targets.schemas import (
@@ -19,6 +20,11 @@ from handlers.profile_targets.schemas import (
     BodyProfile,
 )
 from shared.dynamo import _table, get_item, put_item
+
+# Sprint 11 PR4 — TDEE history cap mirror handlers/tdee_recalc/service.HISTORY_CAP.
+# Cross-handler structural contract (per-handler zip per ADR-002, brak shared
+# import) — owner zmienia tę liczbę → musi też w drugim miejscu.
+TDEE_HISTORY_CAP = 20
 
 # Te same defaulty co `advisor_chat.service` — żeby chat i UI byli spójne.
 # Owner zauważył 2026-05-08 że LLM używa kcal_target=2000 mimo że nigdy
@@ -85,6 +91,19 @@ def update_targets(
 ) -> None:
     """Merge 4 target attrs (+ optional 5 body_profile attrs) do PROFILE row.
 
+    Sprint 11 PR4 — gdy `body_profile` initial save lub change (5 fields
+    diff vs poprzedni), automatycznie:
+    - Reset `tdee_baseline = tdee_adaptive = Mifflin × multiplier`
+    - Append `tdee_history` z event marker (`initial` / `body_profile_change`),
+      cap 20 FIFO
+    - Auto-sync `kcal_target` + 3 makro do nowego baseline (override
+      user-provided values w request body — body_profile change ma
+      priorytet nad manual makro)
+
+    Wymaga waga w BIOMETRY (last 100 items lookup). Brak waga + body_profile
+    change → no TDEE init, manual makro preserved (owner doda waga + retry
+    save body_profile albo czeka na PR5 button "Przelicz teraz").
+
     Read-modify-write — race window mały (single-user UI form). Gdy PROFILE
     brak → ProfileNotFoundError (login flow tworzy PROFILE, brak = anomalia).
     """
@@ -93,21 +112,114 @@ def update_targets(
         raise ProfileNotFoundError(user_id)
 
     merged: dict[str, Any] = {**profile}
-    merged["kcal_target"] = kcal
-    merged["protein_target_g"] = protein_g
-    merged["fat_target_g"] = fat_g
-    merged["carbs_target_g"] = carbs_g
+
+    body_profile_initial = False
+    body_profile_changed = False
     if body_profile is not None:
+        old_profile = _extract_body_profile(profile)
+        if old_profile is None:
+            body_profile_initial = True
+        elif _body_profile_differs(old_profile, body_profile):
+            body_profile_changed = True
+
         merged["height_cm"] = body_profile.height_cm
         merged["age"] = body_profile.age
         merged["sex"] = body_profile.sex
         merged["activity_level"] = body_profile.activity_level
         merged["goal"] = body_profile.goal
-    # PK/SK są w item ale put_item nakłada własne — wyciągamy:
+
+    weight_kg: float | None = None
+    if (body_profile_initial or body_profile_changed) and body_profile is not None:
+        weight_kg = get_latest_weight_kg(user_id)
+
+    if (
+        weight_kg is not None
+        and body_profile is not None
+        and (body_profile_initial or body_profile_changed)
+    ):
+        bmr = calculate_bmr(weight_kg, body_profile.height_cm, body_profile.age, body_profile.sex)
+        new_baseline = int(round(calculate_tdee(bmr, body_profile.activity_level)))
+        new_kcal_target = calculate_target_kcal(new_baseline, body_profile.goal)
+        new_protein, new_fat, new_carbs = suggest_macros(weight_kg, new_kcal_target)
+
+        # History entry — structural mirror handlers/tdee_recalc/schemas.RecalcHistoryEntry.
+        # Cross-handler import zawodzi (per-handler zip per ADR-002), więc plain
+        # dict z dokładną shape. Owner add'uje field tam → mirror tu.
+        old_baseline_raw = profile.get("tdee_baseline")
+        history_entry: dict[str, Any] = {
+            "date": date.today().isoformat(),
+            "event": "initial" if body_profile_initial else "body_profile_change",
+            "before": int(old_baseline_raw) if old_baseline_raw is not None else None,
+            "after": new_baseline,
+            "kcal_in_avg": None,
+            "waga_delta_kg": None,
+            "adjustment": None,
+            "capped": False,
+            "reason": None,
+        }
+        history = list(profile.get("tdee_history") or [])
+        history.append(history_entry)
+        if len(history) > TDEE_HISTORY_CAP:
+            history = history[-TDEE_HISTORY_CAP:]
+
+        merged["tdee_baseline"] = new_baseline
+        merged["tdee_adaptive"] = new_baseline  # restart pętli adaptive
+        merged["tdee_last_recalc"] = None
+        merged["tdee_history"] = history
+        merged["kcal_target"] = new_kcal_target
+        merged["protein_target_g"] = new_protein
+        merged["fat_target_g"] = new_fat
+        merged["carbs_target_g"] = new_carbs
+    else:
+        # No body_profile change (lub brak waga) → user-provided values preserved.
+        merged["kcal_target"] = kcal
+        merged["protein_target_g"] = protein_g
+        merged["fat_target_g"] = fat_g
+        merged["carbs_target_g"] = carbs_g
+
     merged.pop("PK", None)
     merged.pop("SK", None)
-
     put_item(f"USER#{user_id}", "PROFILE", merged)
+
+
+def _body_profile_differs(old: BodyProfile, new: BodyProfile) -> bool:
+    """5-field strict diff (Pydantic equality jest też OK, ale explicit jaśniejsze)."""
+    return (
+        old.height_cm != new.height_cm
+        or old.age != new.age
+        or old.sex != new.sex
+        or old.activity_level != new.activity_level
+        or old.goal != new.goal
+    )
+
+
+def get_tdee_state(user_id: str) -> dict[str, Any]:
+    """Read-only TDEE state z PROFILE — `tdee_baseline`/`adaptive`/`last_recalc`/`history`.
+
+    Wszystkie pola opcjonalne (None / []) gdy owner jeszcze nie przeszedł
+    przez body_profile init (PR4) ani manual recalc (PR2). Handler składa
+    z `get_targets()` w pełną `TargetsResponse`.
+    """
+    profile = get_item(f"USER#{user_id}", "PROFILE")
+    if profile is None:
+        return {
+            "tdee_baseline": None,
+            "tdee_adaptive": None,
+            "tdee_last_recalc": None,
+            "tdee_history": [],
+        }
+    return {
+        "tdee_baseline": int(profile["tdee_baseline"])
+        if profile.get("tdee_baseline") is not None
+        else None,
+        "tdee_adaptive": int(profile["tdee_adaptive"])
+        if profile.get("tdee_adaptive") is not None
+        else None,
+        "tdee_last_recalc": dict(profile["tdee_last_recalc"])
+        if profile.get("tdee_last_recalc")
+        else None,
+        "tdee_history": list(profile.get("tdee_history") or []),
+    }
 
 
 def get_latest_weight_kg(user_id: str, *, lookback_items: int = 100) -> float | None:

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel, Field
 
@@ -63,6 +63,10 @@ class TargetsResponse(BaseModel):
 
     `is_default` flag pozwala UI pokazać "to jest fallback, ustaw swoje" CTA.
     `body_profile` None gdy owner jeszcze nie przeszedł przez wizard TDEE.
+
+    Sprint 11 PR4 — read-only TDEE state (init przy body_profile save,
+    update przez `tdee_recalc` Lambda). Frontend wyświetla badge
+    `tdee_adaptive` vs `tdee_baseline` w Settings tab (PR5).
     """
 
     kcal_target: int
@@ -71,6 +75,10 @@ class TargetsResponse(BaseModel):
     carbs_target_g: int
     is_default: bool
     body_profile: BodyProfile | None = None
+    tdee_baseline: int | None = None
+    tdee_adaptive: int | None = None
+    tdee_last_recalc: dict[str, Any] | None = None
+    tdee_history: list[dict[str, Any]] = Field(default_factory=list)
 
 
 class CalculateTDEERequest(BaseModel):
