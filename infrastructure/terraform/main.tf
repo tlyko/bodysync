@@ -212,6 +212,75 @@ resource "aws_lambda_permission" "profile_targets_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
+# Sprint 11 PR2 — Adaptive TDEE recalc (per ADR-008). Read PROFILE +
+# Query BIOMETRY 14d window → recalculate_tdee → UpdateItem PROFILE z
+# `tdee_adaptive`/`tdee_last_recalc`/`tdee_history` (cap 20 FIFO).
+# Handler dispatchuje HTTP (POST /api/tdee/recalc) i EventBridge cron
+# (event.users list — PR3 wpina `rate(14 days)`). Macros sync (kcal_target
+# auto-update) odłożony do PR4 — cross-handler change w profile_targets.
+module "tdee_recalc" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "tdee-recalc"
+  source_zip    = "${path.module}/../../apps/api/dist/tdee_recalc.zip"
+  handler       = "handlers.tdee_recalc.handler.handler"
+  memory_size   = 512
+  timeout       = 30
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Read PROFILE + Query BIOMETRY (14d window: weights snapshots +
+      # kcal_in cumulative buckets) + UpdateItem PROFILE z nowymi tdee_*.
+      # `put_item` shared.dynamo robi PutItem (read-modify-write merge),
+      # więc PutItem zamiast UpdateItem na liście Action.
+      Sid      = "DDBProfileRecalc"
+      Effect   = "Allow"
+      Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTSecret"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "tdee_recalc" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.tdee_recalc.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "tdee_recalc_post" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/tdee/recalc"
+  target    = "integrations/${aws_apigatewayv2_integration.tdee_recalc.id}"
+}
+
+resource "aws_lambda_permission" "tdee_recalc_apigw" {
+  statement_id  = "AllowAPIGWInvokeTdeeRecalc"
+  action        = "lambda:InvokeFunction"
+  function_name = module.tdee_recalc.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
 # Sprint 10 A0.5 — LLM-driven activity level suggestion dla TDEE wizard.
 # Anthropic Haiku ocenia poziom aktywności na bazie ostatnich 7d Strava +
 # biometry. Memory 1024MB / timeout 15s — Anthropic SDK cold start ~500ms +

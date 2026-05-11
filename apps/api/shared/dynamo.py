@@ -140,6 +140,27 @@ def sum_metric_today(user_id: str, metric_short: str, *, value_attr: str, today:
     return total
 
 
+def query_weights_in_range(user_id: str, start: date, end: date) -> list[tuple[date, float]]:
+    """Lista (date, kg) snapshot wag w `[start..end]` (inclusive).
+
+    Per-day GetItem na `BIOMETRY#{date}#weight` (snapshot, brak timestamp
+    suffix — last-writer-wins). 14d = max 14 RCU. Pomija dni bez pomiaru.
+    Sprint 11 PR2 (adaptive TDEE recalc) wzorzec.
+    """
+    if start > end:
+        raise ValueError(f"start {start} > end {end}")
+    out: list[tuple[date, float]] = []
+    cursor = start
+    while cursor <= end:
+        item = get_item(f"USER#{user_id}", f"BIOMETRY#{cursor.isoformat()}#weight")
+        if item is not None:
+            kg = item.get("kg")
+            if kg is not None:
+                out.append((cursor, float(str(kg))))
+        cursor += timedelta(days=1)
+    return out
+
+
 def sum_metric_in_range(
     user_id: str,
     metric_short: str,
