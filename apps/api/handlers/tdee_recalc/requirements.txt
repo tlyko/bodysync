@@ -1,3 +1,4 @@
 pydantic==2.10.*
 PyJWT==2.9.*
 boto3==1.35.*
+anthropic==0.100.*

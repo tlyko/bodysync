@@ -106,6 +106,21 @@ def freeze_today(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr(h, "_today_factory", lambda: FIXED_TODAY)
 
 
+@pytest.fixture
+def mock_llm(monkeypatch: pytest.MonkeyPatch) -> dict[str, Any]:
+    """Mock generate_narrative — domyślnie zwraca stub PL text. Test override
+    przez setting `state["return_value"]` przed call (None = degradation)."""
+    from handlers.tdee_recalc import handler as h
+
+    state: dict[str, Any] = {"return_value": "Świetna robota — schudłeś zgodnie z planem."}
+
+    def fake_generate(_result: Any) -> str | None:
+        return state["return_value"]
+
+    monkeypatch.setattr(h, "generate_narrative", fake_generate)
+    return state
+
+
 # ─── HTTP auth ─────────────────────────────────────────────────────────────
 
 
@@ -138,11 +153,11 @@ def test_http_profile_not_found_404(dynamodb_table: Any) -> None:
 # ─── Happy path + persist ─────────────────────────────────────────────────
 
 
-@pytest.mark.usefixtures("ssm_params", "freeze_today")
-def test_http_returns_diet_check_result_and_persists_history(
+@pytest.mark.usefixtures("ssm_params", "freeze_today", "mock_llm")
+def test_http_returns_diet_check_result_with_narrative_and_persists(
     dynamodb_table: Any,
 ) -> None:
-    """Owner z kcal_target=2250 + 14d danych → 200 z DietCheckResult, persist."""
+    """Owner z kcal_target=2250 + 14d danych → 200 z DietCheckResult + narrative."""
     from handlers.tdee_recalc import handler as h
 
     _seed_profile(dynamodb_table, "tomek", kcal_target=2250)
@@ -157,14 +172,44 @@ def test_http_returns_diet_check_result_and_persists_history(
     assert body["status"] == "on_track"
     assert body["goal_kcal"] == 2250
     assert body["kcal_in_avg"] == 2050
-    assert body["narrative"] is None  # PR2 wypełni
+    assert body["narrative"] == "Świetna robota — schudłeś zgodnie z planem."
     assert body["narrative_unavailable"] is False
 
     profile = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "PROFILE"})["Item"]
     assert "diet_check_history" in profile
     assert len(profile["diet_check_history"]) == 1
     assert profile["diet_check_history"][0]["status"] == "on_track"
+    assert profile["diet_check_history"][0]["narrative"] == (
+        "Świetna robota — schudłeś zgodnie z planem."
+    )
     assert profile["diet_check_last"]["status"] == "on_track"
+
+
+@pytest.mark.usefixtures("ssm_params", "freeze_today")
+def test_http_llm_unavailable_falls_back_to_deterministic_narrative_unavailable_true(
+    dynamodb_table: Any, mock_llm: dict[str, Any]
+) -> None:
+    """LLM zwraca None (graceful degradation) → narrative=None,
+    narrative_unavailable=True, persist mimo to (history zachowuje stats)."""
+    from handlers.tdee_recalc import handler as h
+
+    mock_llm["return_value"] = None  # Symuluj LLM unavailable.
+
+    _seed_profile(dynamodb_table, "tomek", kcal_target=2250)
+    _seed_window(dynamodb_table, "tomek", kg_start=80.0, kg_end=79.6, kcal=2050)
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handler(_http_event("POST", cookie), _FakeContext())
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["skipped"] is False
+    assert body["narrative"] is None
+    assert body["narrative_unavailable"] is True
+    assert body["status"] == "on_track"  # deterministic stats nadal są
+
+    profile = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "PROFILE"})["Item"]
+    assert profile["diet_check_history"][0]["narrative"] is None
 
 
 # ─── Skip scenarios ────────────────────────────────────────────────────────
@@ -212,7 +257,7 @@ def test_http_insufficient_data_returns_skipped_200(dynamodb_table: Any) -> None
 # ─── PK isolation + history cap ────────────────────────────────────────────
 
 
-@pytest.mark.usefixtures("ssm_params", "freeze_today")
+@pytest.mark.usefixtures("ssm_params", "freeze_today", "mock_llm")
 def test_http_pk_isolation_user_a_does_not_touch_user_b(
     dynamodb_table: Any,
 ) -> None:
@@ -233,7 +278,7 @@ def test_http_pk_isolation_user_a_does_not_touch_user_b(
     assert "diet_check_last" not in weronika
 
 
-@pytest.mark.usefixtures("ssm_params", "freeze_today")
+@pytest.mark.usefixtures("ssm_params", "freeze_today", "mock_llm")
 def test_http_history_cap_10_fifo(dynamodb_table: Any) -> None:
     """10 history entries → next eval → drop oldest, append new = nadal 10."""
     from handlers.tdee_recalc import handler as h
@@ -274,7 +319,7 @@ def test_http_history_cap_10_fifo(dynamodb_table: Any) -> None:
 # ─── Cron path ─────────────────────────────────────────────────────────────
 
 
-@pytest.mark.usefixtures("ssm_params", "freeze_today")
+@pytest.mark.usefixtures("ssm_params", "freeze_today", "mock_llm")
 def test_cron_iterates_user_list(dynamodb_table: Any) -> None:
     from handlers.tdee_recalc import handler as h
 
@@ -293,7 +338,7 @@ def test_cron_iterates_user_list(dynamodb_table: Any) -> None:
     }
 
 
-@pytest.mark.usefixtures("ssm_params", "freeze_today")
+@pytest.mark.usefixtures("ssm_params", "freeze_today", "mock_llm")
 def test_cron_per_user_error_isolation(dynamodb_table: Any) -> None:
     """user_a missing PROFILE → user_b nadal processed."""
     from handlers.tdee_recalc import handler as h
