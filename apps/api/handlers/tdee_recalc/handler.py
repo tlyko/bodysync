@@ -1,17 +1,18 @@
-"""AWS Lambda dispatcher dla adaptive TDEE recalc (Sprint 11 PR2/5).
+"""AWS Lambda dispatcher dla diet check / progress narrative (Sprint 11.5 ADR-009).
 
 Routes:
-  POST /api/tdee/recalc — manual button (JWT). Recalc dla user_id z JWT,
-                          persist tdee_adaptive + tdee_last_recalc + tdee_history.
+  POST /api/tdee/recalc — manual button "Sprawdź teraz" (JWT). Reuse path
+                          z PR2 Sprint 11 — frontend types refactored w PR2
+                          Sprint 11.5 (drop RecalcResult, use DietCheckResult).
 
-EventBridge cron (PR3, `rate(14 days)`):
-  Event shape: `{"users": ["tomek", "weronika"]}`. Iterate per user,
-  per-user try/catch (error w jednym user nie blokuje drugiego).
+EventBridge cron `rate(14 days)`:
+  Event shape: `{"users": ["tomek", "weronika"]}`. Iterate per user.
+  Per ADR-009 sec 6 — log only (no Telegram push, defer enable).
 
-Algorithm w `service.recalculate_tdee` (PR1, pure). Handler robi DDB I/O
-+ JWT auth. Macros sync (kcal_target + protein/fat/carbs auto-update z
-nowego TDEE) odłożony do PR4 — cross-handler change w
-`profile_targets.update_targets()`.
+Algorithm w `service.evaluate_diet_check` (pure). Handler robi DDB I/O +
+JWT auth + persist `diet_check_history` (cap 10 FIFO). LLM narrative call
+wyłączony w PR1 — `narrative` zawsze None, frontend pokazuje raw status
++ "Szczegóły" expansion. PR2 dorzuci LLM Haiku.
 """
 
 from __future__ import annotations
@@ -20,12 +21,16 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
-from handlers.tdee_recalc.schemas import BiometryWindow, RecalcResult
+from handlers.tdee_recalc.schemas import (
+    BiometryWindow,
+    DietCheckHistoryEntry,
+    DietCheckResult,
+)
 from handlers.tdee_recalc.service import (
     WINDOW_DAYS,
-    build_history_entry,
-    cap_history,
-    recalculate_tdee,
+    build_diet_check_history_entry,
+    cap_diet_check_history,
+    evaluate_diet_check,
 )
 from shared.auth import AuthError, verify_jwt
 from shared.dynamo import (
@@ -79,11 +84,7 @@ def _is_cron_event(event: dict[str, Any]) -> bool:
 
 
 def _load_window(user_id: str, today: date) -> BiometryWindow:
-    """Zbierz raw weights + per-day kcal_in totals z last `WINDOW_DAYS`.
-
-    `kcal_in` przez `sum_metric_in_range` (cumulative bucket'y per godzinę,
-    sumowane per dzień). `weight` przez per-day GetItem (snapshot, no ts).
-    """
+    """Zbierz raw weights + per-day kcal_in totals z last `WINDOW_DAYS`."""
     start = today - timedelta(days=WINDOW_DAYS)
 
     weights = query_weights_in_range(user_id, start, today)
@@ -98,34 +99,33 @@ def _load_window(user_id: str, today: date) -> BiometryWindow:
     return BiometryWindow(weights=weights, kcals=kcals)
 
 
-def _persist_recalc(
+def _persist_diet_check(
     user_id: str,
     profile: dict[str, Any],
-    result: RecalcResult,
+    result: DietCheckResult,
     today: date,
 ) -> None:
-    """Update PROFILE row z nowymi tdee_* attrs.
+    """Update PROFILE row z nowym `diet_check_history` entry (FIFO 10).
 
-    PR2 minimal scope: `tdee_adaptive` (jeśli not skipped) +
-    `tdee_last_recalc` (zawsze) + `tdee_history` (append + cap 20 FIFO).
-    PR4 dodaje macro sync (kcal_target + 3 makro + body_profile_change reset).
+    PR1 minimal: tylko append history + last entry pointer. PR2 dorzuci
+    LLM narrative (już wstrzykuje się przez `result.narrative` jeśli LLM
+    został wywołany przed persist).
+
+    Stare attrs (`tdee_baseline`, `tdee_adaptive`, `tdee_last_recalc`,
+    `tdee_history`) zostają w PROFILE jako dead weight per ADR-009 sec 9
+    (no migration). Pydantic ignoruje extra fields.
     """
-    history_raw = profile.get("tdee_history") or []
-    history = [
-        entry if hasattr(entry, "model_validate") else _parse_history_entry(entry)
-        for entry in history_raw
-    ]
-    new_entry = build_history_entry(today=today, result=result)
+    history_raw = profile.get("diet_check_history") or []
+    history: list[DietCheckHistoryEntry] = [_parse_history_entry(e) for e in history_raw]
+    new_entry = build_diet_check_history_entry(today=today, result=result)
     history.append(new_entry)
-    history = cap_history(history)
+    history = cap_diet_check_history(history)
 
-    last_recalc_dump = new_entry.model_dump(mode="json")
+    last_entry_dump = new_entry.model_dump(mode="json")
 
     merged: dict[str, Any] = {**profile}
-    if not result.skipped:
-        merged["tdee_adaptive"] = result.tdee_after
-    merged["tdee_last_recalc"] = last_recalc_dump
-    merged["tdee_history"] = [h.model_dump(mode="json") for h in history]
+    merged["diet_check_last"] = last_entry_dump
+    merged["diet_check_history"] = [h.model_dump(mode="json") for h in history]
 
     merged.pop("PK", None)
     merged.pop("SK", None)
@@ -133,58 +133,34 @@ def _persist_recalc(
     put_item(f"USER#{user_id}", "PROFILE", merged)
 
 
-def _parse_history_entry(raw: Any) -> Any:
-    """DDB stored history entries to dict (po deserializacji boto3).
-    Validujemy z powrotem do RecalcHistoryEntry żeby cap_history dostała
-    spójny typ. Lazy import w runtime — unika circular."""
-    from handlers.tdee_recalc.schemas import RecalcHistoryEntry
-
-    return RecalcHistoryEntry.model_validate(raw)
+def _parse_history_entry(raw: Any) -> DietCheckHistoryEntry:
+    """DDB stored history entries → Pydantic. Lazy import unika circular."""
+    return DietCheckHistoryEntry.model_validate(raw)
 
 
-def _process_user(user_id: str, today: date) -> RecalcResult:
-    """Read PROFILE → load window → recalculate → persist. Return result."""
+def _process_user(user_id: str, today: date) -> DietCheckResult:
+    """Read PROFILE → load window → evaluate → persist. Return result."""
     profile = get_item(f"USER#{user_id}", "PROFILE")
     if profile is None:
         raise ProfileNotFoundError(user_id)
 
-    baseline_raw = profile.get("tdee_baseline")
-    if baseline_raw is None:
-        # Owner nie przeszedł przez TDEE wizard (PR4 inicjalizuje przy
-        # first body_profile save). Skip + log + persist last_recalc
-        # żeby UI mógł pokazać "wait, init body profile first".
-        skipped = RecalcResult(
-            ok=True,
-            skipped=True,
-            reason="baseline_not_initialized",
-            tdee_before=0,
-            tdee_after=0,
-            kcal_in_avg=None,
-            waga_delta_kg=None,
-            adjustment=None,
-            capped=False,
-        )
-        _persist_recalc(user_id, profile, skipped, today)
-        return skipped
-
-    baseline = int(baseline_raw)
-    current_raw = profile.get("tdee_adaptive")
-    current = int(current_raw) if current_raw is not None else baseline
+    kcal_target_raw = profile.get("kcal_target")
+    kcal_target = int(kcal_target_raw) if kcal_target_raw is not None else None
 
     window = _load_window(user_id, today)
-    result = recalculate_tdee(today=today, baseline=baseline, current=current, window=window)
-    _persist_recalc(user_id, profile, result, today)
+    result = evaluate_diet_check(today=today, kcal_target=kcal_target, window=window)
+    _persist_diet_check(user_id, profile, result, today)
     return result
 
 
 def _handle_cron(event: dict[str, Any], request_id: str, today: date) -> dict[str, Any]:
-    """EventBridge cron — iterate per user z `event["users"]`.
+    """EventBridge cron — iterate per user, per-user try/catch.
 
-    Per-user try/catch — error w jednym nie blokuje drugiego. Aggregate
-    log line `tdee_recalc_cron_complete` dla CloudWatch metric/alarm.
+    Per ADR-009 sec 6 — log only. Aggregate `diet_check_cron_complete`
+    line dla CloudWatch metric.
     """
     users: list[str] = list(event["users"])
-    recalculated = 0
+    evaluated = 0
     skipped = 0
     errored = 0
 
@@ -194,22 +170,22 @@ def _handle_cron(event: dict[str, Any], request_id: str, today: date) -> dict[st
             if result.skipped:
                 skipped += 1
             else:
-                recalculated += 1
+                evaluated += 1
         except Exception:
             logger.exception(
-                "tdee_recalc_user_failed",
+                "diet_check_user_failed",
                 extra={"request_id": request_id, "user_id": user_id},
             )
             errored += 1
 
     summary = {
         "users": len(users),
-        "recalculated": recalculated,
+        "evaluated": evaluated,
         "skipped": skipped,
         "errored": errored,
     }
     logger.info(
-        "tdee_recalc_cron_complete",
+        "diet_check_cron_complete",
         extra={"request_id": request_id, **summary},
     )
     return summary
@@ -255,21 +231,19 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         return _response(404, {"error": "profile not found"})
     except Exception:
         logger.exception(
-            "tdee_recalc_failed",
+            "diet_check_failed",
             extra={"request_id": request_id, "user_id": user_id},
         )
         return _response(500, {"error": "internal"})
 
     logger.info(
-        "tdee_recalc_complete",
+        "diet_check_complete",
         extra={
             "request_id": request_id,
             "user_id": user_id,
             "skipped": result.skipped,
-            "reason": result.reason,
-            "tdee_before": result.tdee_before,
-            "tdee_after": result.tdee_after,
-            "adjustment": result.adjustment,
+            "reason": result.skip_reason,
+            "status": result.status,
         },
     )
     return _response(200, result.model_dump(mode="json"))

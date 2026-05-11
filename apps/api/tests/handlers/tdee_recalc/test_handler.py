@@ -1,10 +1,10 @@
 """Integration testy dla handlers.tdee_recalc — POST /api/tdee/recalc + cron.
 
-10 testów: HTTP auth (3), happy path persist (1), skip scenarios (2),
-PK isolation (1), cron iteration (3).
+Sprint 11.5 ADR-009 pivot — `DietCheckResult` zamiast `RecalcResult`.
+Goal source = MANUAL `kcal_target` (nie Mifflin baseline). Drop wymóg
+`tdee_baseline` — feature działa dla każdego z manualem.
 
-Macros sync test (kcal_target propaguje z tdee_adaptive) odłożony do PR4 —
-PR2 minimal scope: persist tdee_adaptive + tdee_last_recalc + tdee_history.
+PR1: handler bez LLM (narrative=None, PR2 dorzuci Haiku).
 """
 
 from __future__ import annotations
@@ -17,7 +17,6 @@ from typing import Any
 import pytest
 
 FIXED_TODAY = date(2026, 5, 11)
-WINDOW_START = date(2026, 4, 28)
 
 
 class _FakeContext:
@@ -87,11 +86,14 @@ def _seed_window(
     *,
     today: date = FIXED_TODAY,
     days: int = 14,
-    kg: float = 80.0,
-    kcal: int = 2080,
+    kg_start: float = 80.0,
+    kg_end: float | None = None,
+    kcal: int = 2050,
 ) -> None:
+    """Seed 14d window. Jeśli kg_end ustawione, ostatni dzień ma kg_end (else const)."""
     for i in range(days):
         day = today - timedelta(days=i)
+        kg = kg_end if (kg_end is not None and i == 0) else kg_start
         _seed_weight(table, user_id, day=day, kg=kg)
         _seed_kcal_in(table, user_id, day=day, value=kcal)
 
@@ -133,20 +135,18 @@ def test_http_profile_not_found_404(dynamodb_table: Any) -> None:
     assert result["statusCode"] == 404
 
 
-# ─── Happy path + persist ──────────────────────────────────────────────────
+# ─── Happy path + persist ─────────────────────────────────────────────────
 
 
 @pytest.mark.usefixtures("ssm_params", "freeze_today")
-def test_http_recalc_persists_tdee_adaptive_and_appends_history(
+def test_http_returns_diet_check_result_and_persists_history(
     dynamodb_table: Any,
 ) -> None:
-    """Owner zjadł deficyt 200 kcal/dzień przez 14d, waga zero zmiany.
-    Recalc zwraca adjustment=-150 (capped), TDEE 2280→2130. Persist do PROFILE.
-    """
+    """Owner z kcal_target=2250 + 14d danych → 200 z DietCheckResult, persist."""
     from handlers.tdee_recalc import handler as h
 
-    _seed_profile(dynamodb_table, "tomek", tdee_baseline=2280, tdee_adaptive=2280)
-    _seed_window(dynamodb_table, "tomek", kg=80.0, kcal=2080)
+    _seed_profile(dynamodb_table, "tomek", kcal_target=2250)
+    _seed_window(dynamodb_table, "tomek", kg_start=80.0, kg_end=79.6, kcal=2050)
 
     cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
     result = h.handler(_http_event("POST", cookie), _FakeContext())
@@ -154,53 +154,28 @@ def test_http_recalc_persists_tdee_adaptive_and_appends_history(
     assert result["statusCode"] == 200
     body = json.loads(result["body"])
     assert body["skipped"] is False
-    assert body["tdee_after"] == 2130
-    assert body["adjustment"] == -150
-    assert body["capped"] is True
+    assert body["status"] == "on_track"
+    assert body["goal_kcal"] == 2250
+    assert body["kcal_in_avg"] == 2050
+    assert body["narrative"] is None  # PR2 wypełni
+    assert body["narrative_unavailable"] is False
 
     profile = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "PROFILE"})["Item"]
-    assert int(profile["tdee_adaptive"]) == 2130
-    assert profile["tdee_last_recalc"]["after"] == 2130
-    assert len(profile["tdee_history"]) == 1
-    assert profile["tdee_history"][0]["event"] == "recalc"
+    assert "diet_check_history" in profile
+    assert len(profile["diet_check_history"]) == 1
+    assert profile["diet_check_history"][0]["status"] == "on_track"
+    assert profile["diet_check_last"]["status"] == "on_track"
 
 
 # ─── Skip scenarios ────────────────────────────────────────────────────────
 
 
 @pytest.mark.usefixtures("ssm_params", "freeze_today")
-def test_http_skipped_returns_200_not_400(dynamodb_table: Any) -> None:
-    """Insufficient data (8 wags zamiast 10+) → 200 z skipped=true (NIE 400)."""
+def test_http_no_kcal_target_returns_skipped_200(dynamodb_table: Any) -> None:
+    """PROFILE bez kcal_target → 200 z skipped=true (NIE 400)."""
     from handlers.tdee_recalc import handler as h
 
-    _seed_profile(dynamodb_table, "tomek", tdee_baseline=2280, tdee_adaptive=2280)
-    for i in range(8):
-        day = FIXED_TODAY - timedelta(days=i)
-        _seed_weight(dynamodb_table, "tomek", day=day, kg=80.0)
-    for i in range(14):
-        day = FIXED_TODAY - timedelta(days=i)
-        _seed_kcal_in(dynamodb_table, "tomek", day=day, value=2080)
-
-    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
-    result = h.handler(_http_event("POST", cookie), _FakeContext())
-
-    assert result["statusCode"] == 200
-    body = json.loads(result["body"])
-    assert body["skipped"] is True
-    assert body["reason"] == "insufficient_weight_data"
-
-    profile = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "PROFILE"})["Item"]
-    assert int(profile["tdee_adaptive"]) == 2280
-    assert profile["tdee_last_recalc"]["event"] == "skipped"
-    assert profile["tdee_last_recalc"]["reason"] == "insufficient_weight_data"
-
-
-@pytest.mark.usefixtures("ssm_params", "freeze_today")
-def test_http_baseline_not_initialized_skipped(dynamodb_table: Any) -> None:
-    """Owner ma PROFILE ale brak tdee_baseline (PR4 init body_profile)."""
-    from handlers.tdee_recalc import handler as h
-
-    _seed_profile(dynamodb_table, "tomek")
+    _seed_profile(dynamodb_table, "tomek")  # bez kcal_target
     _seed_window(dynamodb_table, "tomek")
 
     cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
@@ -209,7 +184,29 @@ def test_http_baseline_not_initialized_skipped(dynamodb_table: Any) -> None:
     assert result["statusCode"] == 200
     body = json.loads(result["body"])
     assert body["skipped"] is True
-    assert body["reason"] == "baseline_not_initialized"
+    assert body["skip_reason"] == "no_kcal_target"
+
+
+@pytest.mark.usefixtures("ssm_params", "freeze_today")
+def test_http_insufficient_data_returns_skipped_200(dynamodb_table: Any) -> None:
+    """8 wag (< 10) → skipped insufficient_weight_data."""
+    from handlers.tdee_recalc import handler as h
+
+    _seed_profile(dynamodb_table, "tomek", kcal_target=2250)
+    for i in range(8):
+        day = FIXED_TODAY - timedelta(days=i)
+        _seed_weight(dynamodb_table, "tomek", day=day, kg=80.0)
+    for i in range(14):
+        day = FIXED_TODAY - timedelta(days=i)
+        _seed_kcal_in(dynamodb_table, "tomek", day=day, value=2050)
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handler(_http_event("POST", cookie), _FakeContext())
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["skipped"] is True
+    assert body["skip_reason"] == "insufficient_weight_data"
 
 
 # ─── PK isolation + history cap ────────────────────────────────────────────
@@ -219,61 +216,59 @@ def test_http_baseline_not_initialized_skipped(dynamodb_table: Any) -> None:
 def test_http_pk_isolation_user_a_does_not_touch_user_b(
     dynamodb_table: Any,
 ) -> None:
-    """JWT user_a → tylko user_a PROFILE update'd, user_b nietknięty."""
+    """JWT user_a → tylko user_a PROFILE update'd."""
     from handlers.tdee_recalc import handler as h
 
-    _seed_profile(dynamodb_table, "tomek", tdee_baseline=2280, tdee_adaptive=2280)
-    _seed_profile(dynamodb_table, "weronika", tdee_baseline=1900, tdee_adaptive=1900)
-    _seed_window(dynamodb_table, "tomek", kg=80.0, kcal=2080)
-    _seed_window(dynamodb_table, "weronika", kg=60.0, kcal=1700)
+    _seed_profile(dynamodb_table, "tomek", kcal_target=2250)
+    _seed_profile(dynamodb_table, "weronika", kcal_target=1900)
+    _seed_window(dynamodb_table, "tomek", kg_start=80.0, kg_end=79.6, kcal=2050)
+    _seed_window(dynamodb_table, "weronika", kg_start=60.0, kg_end=59.5, kcal=1700)
 
     cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
     result = h.handler(_http_event("POST", cookie), _FakeContext())
     assert result["statusCode"] == 200
 
     weronika = dynamodb_table.get_item(Key={"PK": "USER#weronika", "SK": "PROFILE"})["Item"]
-    assert int(weronika["tdee_adaptive"]) == 1900
-    assert "tdee_last_recalc" not in weronika
-    assert "tdee_history" not in weronika
+    assert "diet_check_history" not in weronika
+    assert "diet_check_last" not in weronika
 
 
 @pytest.mark.usefixtures("ssm_params", "freeze_today")
-def test_http_history_cap_20_fifo(dynamodb_table: Any) -> None:
-    """20 history entries → recalc → drop oldest, append new = nadal 20."""
+def test_http_history_cap_10_fifo(dynamodb_table: Any) -> None:
+    """10 history entries → next eval → drop oldest, append new = nadal 10."""
     from handlers.tdee_recalc import handler as h
 
     existing_history = [
         {
             "date": (FIXED_TODAY - timedelta(days=i * 14)).isoformat(),
-            "event": "recalc",
-            "before": 2280,
-            "after": 2280,
-            "kcal_in_avg": 2080,
-            "waga_delta_kg": Decimal("0"),
-            "adjustment": 0,
-            "capped": False,
-            "reason": None,
+            "skipped": False,
+            "skip_reason": None,
+            "goal_kcal": 2250,
+            "kcal_in_avg": 2050,
+            "waga_delta_kg": Decimal("-0.3"),
+            "diff_kg": Decimal("0.0"),
+            "status": "on_track",
+            "narrative": None,
         }
-        for i in range(20, 0, -1)
+        for i in range(10, 0, -1)
     ]
     _seed_profile(
         dynamodb_table,
         "tomek",
-        tdee_baseline=2280,
-        tdee_adaptive=2280,
-        tdee_history=existing_history,
+        kcal_target=2250,
+        diet_check_history=existing_history,
     )
-    _seed_window(dynamodb_table, "tomek")
+    _seed_window(dynamodb_table, "tomek", kg_start=80.0, kg_end=79.6, kcal=2050)
 
     cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
     result = h.handler(_http_event("POST", cookie), _FakeContext())
     assert result["statusCode"] == 200
 
     profile = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "PROFILE"})["Item"]
-    assert len(profile["tdee_history"]) == 20
-    assert profile["tdee_history"][-1]["date"] == FIXED_TODAY.isoformat()
+    assert len(profile["diet_check_history"]) == 10
+    assert profile["diet_check_history"][-1]["date"] == FIXED_TODAY.isoformat()
     oldest = existing_history[0]["date"]
-    assert all(entry["date"] != oldest for entry in profile["tdee_history"])
+    assert all(e["date"] != oldest for e in profile["diet_check_history"])
 
 
 # ─── Cron path ─────────────────────────────────────────────────────────────
@@ -283,45 +278,39 @@ def test_http_history_cap_20_fifo(dynamodb_table: Any) -> None:
 def test_cron_iterates_user_list(dynamodb_table: Any) -> None:
     from handlers.tdee_recalc import handler as h
 
-    _seed_profile(dynamodb_table, "tomek", tdee_baseline=2280, tdee_adaptive=2280)
-    _seed_profile(dynamodb_table, "weronika", tdee_baseline=1900, tdee_adaptive=1900)
-    _seed_window(dynamodb_table, "tomek", kg=80.0, kcal=2080)
-    _seed_window(dynamodb_table, "weronika", kg=60.0, kcal=1700)
+    _seed_profile(dynamodb_table, "tomek", kcal_target=2250)
+    _seed_profile(dynamodb_table, "weronika", kcal_target=1900)
+    _seed_window(dynamodb_table, "tomek", kg_start=80.0, kg_end=79.6, kcal=2050)
+    _seed_window(dynamodb_table, "weronika", kg_start=60.0, kg_end=59.5, kcal=1700)
 
     summary = h.handler(_cron_event(["tomek", "weronika"]), _FakeContext())
 
     assert summary == {
         "users": 2,
-        "recalculated": 2,
+        "evaluated": 2,
         "skipped": 0,
         "errored": 0,
     }
-    tomek = dynamodb_table.get_item(Key={"PK": "USER#tomek", "SK": "PROFILE"})["Item"]
-    weronika = dynamodb_table.get_item(Key={"PK": "USER#weronika", "SK": "PROFILE"})["Item"]
-    assert "tdee_last_recalc" in tomek
-    assert "tdee_last_recalc" in weronika
 
 
 @pytest.mark.usefixtures("ssm_params", "freeze_today")
 def test_cron_per_user_error_isolation(dynamodb_table: Any) -> None:
-    """user_a missing PROFILE (raises) → user_b nadal processed."""
+    """user_a missing PROFILE → user_b nadal processed."""
     from handlers.tdee_recalc import handler as h
 
-    _seed_profile(dynamodb_table, "weronika", tdee_baseline=1900, tdee_adaptive=1900)
-    _seed_window(dynamodb_table, "weronika", kg=60.0, kcal=1700)
+    _seed_profile(dynamodb_table, "weronika", kcal_target=1900)
+    _seed_window(dynamodb_table, "weronika", kg_start=60.0, kg_end=59.5, kcal=1700)
 
     summary = h.handler(_cron_event(["ghost", "weronika"]), _FakeContext())
 
     assert summary["users"] == 2
-    assert summary["recalculated"] == 1
+    assert summary["evaluated"] == 1
     assert summary["errored"] == 1
-    weronika = dynamodb_table.get_item(Key={"PK": "USER#weronika", "SK": "PROFILE"})["Item"]
-    assert "tdee_last_recalc" in weronika
 
 
 @pytest.mark.usefixtures("ssm_params", "freeze_today")
 def test_cron_summary_skipped_count(dynamodb_table: Any) -> None:
-    """Owner z brakiem baseline → skipped=1, nie errored."""
+    """Owner z brakiem kcal_target → skipped=1, nie errored."""
     from handlers.tdee_recalc import handler as h
 
     _seed_profile(dynamodb_table, "tomek")
@@ -331,7 +320,7 @@ def test_cron_summary_skipped_count(dynamodb_table: Any) -> None:
 
     assert summary == {
         "users": 1,
-        "recalculated": 0,
+        "evaluated": 0,
         "skipped": 1,
         "errored": 0,
     }
