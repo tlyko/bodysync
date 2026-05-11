@@ -349,7 +349,7 @@ function DashboardOverview({
       </SectionHeader>
 
       <div className="stat-grid">
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Spalone kalorie"
           series={kcalBurned}
           unit="kcal"
@@ -357,6 +357,7 @@ function DashboardOverview({
           icon={<FlameIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
+          today={today}
         />
         <TodayMetricStatCard
           label="Kcal spożyte"
@@ -370,13 +371,14 @@ function DashboardOverview({
           target={targets?.kcal_target}
         />
         <WeeklyActivitiesCard />
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Kroki"
           series={stepsSeries}
           accent="green"
           icon={<FootprintsIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
+          today={today}
         />
         <MetricStatCard
           label="Waga"
@@ -543,6 +545,7 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
   const restingHrSeries = buildSeries(days, 'resting_hr');
   const bodyFatSeries = buildSeries(days, 'body_fat');
   const weightSeries = buildSeries(days, 'weight');
+  const today = localTodayIso();
 
   return (
     <>
@@ -569,15 +572,16 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           fmt={(v) => v.toFixed(1)}
           trendWindow={trendWindow}
         />
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Kroki"
           series={stepsSeries}
           accent="green"
           icon={<FootprintsIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
+          today={today}
         />
-        <MetricStatCard
+        <TodayMetricStatCard
           label="Spalone kalorie"
           series={kcalBurnedSeries}
           unit="kcal"
@@ -585,6 +589,7 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
           icon={<FlameIcon />}
           fmt={(v) => Math.round(v).toLocaleString('pl-PL')}
           trendWindow={trendWindow}
+          today={today}
         />
         <MetricStatCard
           label="Resting HR"
