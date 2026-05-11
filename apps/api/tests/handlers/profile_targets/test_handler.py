@@ -83,6 +83,10 @@ def test_get_returns_defaults_when_targets_unset(dynamodb_table: Any) -> None:
         "carbs_target_g": 200,
         "is_default": True,
         "body_profile": None,
+        "tdee_baseline": None,
+        "tdee_adaptive": None,
+        "tdee_last_recalc": None,
+        "tdee_history": [],
     }
 
 
@@ -111,6 +115,10 @@ def test_get_returns_owner_values_when_set(dynamodb_table: Any) -> None:
         "carbs_target_g": 260,
         "is_default": False,
         "body_profile": None,
+        "tdee_baseline": None,
+        "tdee_adaptive": None,
+        "tdee_last_recalc": None,
+        "tdee_history": [],
     }
 
 
