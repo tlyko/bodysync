@@ -2441,3 +2441,248 @@ PR4 i PR5 muszą być sequential (PR5 deploy wymaga aby webhook był live żeby 
 4. **Brak test'a na PK isolation w fetcher.** Sprawdzamszlak nie jest multi-user, więc nie testuje że user_a webhook NIE może zapisać activity pod user_b PK. **Poprawa:** Step 5 `test_fetcher_persists_activity_with_pk_user` enforces `owner_id → user_id` mapping przez SSM athlete-to-user → activity PK = mapowany user_id, nie spoofowany.
 5. **Brak cost guard na Strava API call count.** Sprawdzamszlak nie monitoruje API quota — solo dev, ~10 activities/m. **Poprawa:** bodysync CloudWatch metric filter `strava_api_calls` (D13) → alarm > 200/h (jasny bug indicator: retry loop w fetcher). Tani win, $0.10/m metric cost.
 
+---
+
+## Sprint 11 — Adaptive TDEE recalculation (per ADR-008)
+
+**Cel:** auto-koryguj TDEE co 14d na bazie real waga + kcal_in trend (MacroFactor-style). Owner po deploy: TDEE 2280 → 2430 z badge "+150 z adaptacji 2026-05-25", makro auto-sync, audit history widoczna w Settings.
+
+**Założenia (per ADR-008):**
+- Bez Telegram alerts (owner odrzucił push notifications jako primary feature)
+- Single-tenant initial, dual-user (tomek + weronika) ready (cron iteruje po hardcoded list w handler.py)
+- Zero nowych entity types — extend PROFILE row o 4 attrs
+- KISS: bez chart "TDEE evolution over time" w MVP (post-MVP follow-up jeśli owner zechce)
+- Reuse `profile_targets/service.py` helpers (BMR/TDEE/macros)
+
+**Spec źródło:** `docs/adr/ADR-008-adaptive-tdee-recalculation.md`
+
+**Pliki referencyjne:**
+- `apps/api/handlers/profile_targets/service.py:138-181` — `calculate_bmr`, `calculate_tdee`, `suggest_macros` (do reuse)
+- `apps/api/handlers/profile_targets/service.py:103-135` — `get_latest_weight_kg` (BIOMETRY query pattern)
+- `apps/api/handlers/health_webhook/service.py:236,278,323` — SK patterns (`BIOMETRY#{date}#kcal_in#{ts}`, `BIOMETRY#{date}#weight`)
+- `apps/api/handlers/profile_targets/handler.py` — JWT + Pydantic + DDB merge wzorzec
+- `apps/web/src/components/dashboard/ProfileTargetsForm.tsx` + `TDEECalculatorWizard.tsx` — Settings integration points (Sprint 10)
+
+---
+
+### Step 1 (PR1): schemas + pure `service.recalculate_tdee()` + unit testy
+
+**Tworzy:**
+- `apps/api/handlers/tdee_recalc/__init__.py` (pusty)
+- `apps/api/handlers/tdee_recalc/schemas.py`:
+  - `RecalcResult` — `{ok, skipped, reason, tdee_before, tdee_after, kcal_in_avg, waga_delta_kg, adjustment, capped}`
+  - `RecalcHistoryEntry` — `{date, event: Literal["recalc","body_profile_change","skipped","initial"], before, after, kcal_in_avg, waga_delta_kg, adjustment, capped, reason}`
+  - `BiometryWindow` — input do pure function: `{weights: list[(date, kg)], kcals: list[(date, kcal)]}`
+- `apps/api/handlers/tdee_recalc/service.py`:
+  - Stałe: `MIN_DATA_POINTS=10`, `WINDOW_DAYS=14`, `KCAL_PER_KG=7700`, `ADJUSTMENT_CAP=150`, `BASELINE_FLOOR=0.7`, `BASELINE_CEIL=1.5`, `KCAL_IN_FLOOR=500`, `KCAL_IN_AVG_REALISTIC_FLOOR=1000`, `WEIGHT_ANCHOR_WINDOW_DAYS=2`
+  - `pure recalculate_tdee(*, today, baseline, current, window) -> RecalcResult` — bez DDB calls, deterministic
+  - `winsorized_mean(values, pct=0.10) -> float` helper
+  - `_find_weight_anchor(weights, target_date, window_days) -> tuple[date, float] | None`
+- `apps/api/tests/handlers/tdee_recalc/__init__.py`
+- `apps/api/tests/handlers/tdee_recalc/test_service.py` — 17 testów (każdy konkretny scenariusz):
+  1. `test_normal_recalc_lowers_tdee_when_actual_loss_less_than_expected` — deficyt 200/dzień przez 14d, waga 0 → adjustment=-150 (capped), tdee 2280→2130. **Confirms znak `(expected - actual)` z architect ADR sec 1.**
+  2. `test_normal_recalc_raises_tdee_when_actual_loss_more_than_expected` — deficyt 200/dzień, waga -1 kg → adjustment=+150 (capped)
+  3. `test_insufficient_kcal_data_skipped` — 8 dni kcal_in → reason="insufficient_kcal_data"
+  4. `test_insufficient_weight_data_skipped` — 8 wag → reason="insufficient_weight_data"
+  5. `test_weight_anchor_missing_skipped` — no weight w `today-14d ±2d` → reason="weight_anchor_missing"
+  6. `test_weight_now_missing_skipped` — no weight w last 3d → reason="weight_now_missing"
+  7. `test_kcal_in_avg_below_realistic_floor_skipped` — avg 700 < 1000 → reason="kcal_in_avg_unrealistic"
+  8. `test_winsorize_drops_top_and_bottom_10pct` — 14 dni z 4000 cheat day i 200 broken → ignoruje oba
+  9. `test_clamp_per_iteration_caps_extreme_adjustment` — waga -3 kg → adjustment cap'd ±150
+  10. `test_absolute_safety_floor_blocks_baseline_below_70pct`
+  11. `test_absolute_safety_ceiling_blocks_baseline_above_150pct`
+  12. `test_kcal_in_below_500_dropped_as_missing_day`
+  13. `test_winsorized_mean_with_small_list`
+  14. `test_recalc_result_capped_flag_true_when_adjustment_was_capped`
+  15. `test_recalc_result_capped_flag_false_when_within_bounds`
+  16. `test_baseline_above_floor_below_ceiling_pass_through`
+
+**Depends on:** ADR-008 (shipped 2026-05-11)
+
+**Test:**
+- `cd apps/api && pytest tests/handlers/tdee_recalc/ -v` → 16/16 pass
+- `cd apps/api && ruff check . && ruff format --check .` (per `feedback_ruff_full_scope.md`)
+- `cd apps/api && mypy handlers/tdee_recalc/`
+
+**Acceptance:**
+- 16 testów pass
+- `recalculate_tdee` pure (no DDB / no SSM / no boto3) — call bez moto
+- Znak `adjustment = (expected - actual) / 14` zweryfikowany testem 1
+- Brak `print` lub bare except
+
+**Effort:** ~3h
+
+---
+
+### Step 2 (PR2): handler.py HTTP `POST /api/tdee/recalc` + IAM + integration tests
+
+**Tworzy:**
+- `apps/api/handlers/tdee_recalc/handler.py`:
+  - Dispatcher: `requestContext.http.method` → HTTP path; `event.users` → EventBridge cron path
+  - HTTP path: JWT verify → user_id → GetItem PROFILE → Query BIOMETRY 14d → call `recalculate_tdee()` → if not skipped → `_apply_recalc()` UpdateItem PROFILE z `tdee_adaptive`/`tdee_last_recalc`/`tdee_history` (append + cap 20 FIFO) + auto-sync `kcal_target` + makro (reuse `profile_targets.service.suggest_macros`)
+  - Skipped → UpdateItem tylko `tdee_last_recalc` + append history z `event="skipped"`
+  - Cron path: hardcoded `USER_LIST = ["tomek", "weronika"]`, iterate, per-user try/catch, aggregate log `tdee_recalc_cron_complete`
+- `apps/api/handlers/tdee_recalc/requirements.txt` — `pydantic>=2.x`, `pyjwt==2.9.*`
+- `apps/api/tests/handlers/tdee_recalc/test_handler.py` — 10 moto integration testów:
+  1. `test_http_unauthenticated_401`
+  2. `test_http_authenticated_returns_recalc_result`
+  3. `test_http_skipped_returns_200_not_400`
+  4. `test_http_persists_tdee_adaptive_in_profile`
+  5. `test_http_appends_history_with_cap_20_fifo`
+  6. `test_http_pk_isolation_user_a_cannot_trigger_for_user_b`
+  7. `test_cron_iterates_user_list`
+  8. `test_cron_per_user_error_isolation`
+  9. `test_cron_logs_aggregate_summary`
+  10. `test_macros_synced_after_recalc` — assert `kcal_target/protein_target_g/fat_target_g/carbs_target_g` zaktualizowane
+
+**Modyfikuje:**
+- `apps/api/shared/dynamo.py` — DODAJ `query_biometry_range(user_id, start_date_iso, end_date_iso, metric=None)` jeśli nie istnieje (sprawdź — możliwe że jest podobny helper z Sprint 4)
+- `infrastructure/terraform/main.tf`:
+  - `module "tdee_recalc"` (512MB / 30s)
+  - `aws_apigatewayv2_integration` + `aws_apigatewayv2_route` `POST /api/tdee/recalc`
+  - `aws_lambda_permission` `tdee_recalc_apigw`
+  - IAM `extra_iam_statements`:
+    - `dynamodb:GetItem` PROFILE z LeadingKeys USER#*
+    - `dynamodb:Query` BIOMETRY z LeadingKeys USER#*
+    - `dynamodb:UpdateItem` PROFILE z LeadingKeys USER#*
+    - `ssm:GetParameter` `/bodysync/jwt/signing_secret`
+
+**Depends on:** Step 1
+
+**Test:**
+- `pytest tests/handlers/tdee_recalc/test_handler.py -v` → 10/10
+- `python apps/api/scripts/build.py tdee_recalc` → zip
+- `terraform plan` → +1 lambda + 1 integration + 1 route + 1 permission + IAM
+- Po deploy: `curl -X POST https://api.bodysync.pl/api/tdee/recalc -b "session=<JWT>"` → 200
+
+**Acceptance:**
+- HTTP 200 dla skipped scenarios (nie 400)
+- PK isolation enforced
+- Macros auto-sync — 4 attrs zaktualizowane razem z `tdee_adaptive`
+- History cap 20 FIFO działa
+- Per-user error isolation w cron
+- IAM `LeadingKeys USER#*` defense-in-depth
+
+**Effort:** ~2h
+
+---
+
+### Step 3 (PR3): EventBridge cron `rate(14 days)` + Terraform
+
+**Tworzy/Modyfikuje:**
+- `infrastructure/terraform/main.tf` (lub osobny `cron.tf` jeśli rośnie):
+  - `aws_cloudwatch_event_rule.tdee_recalc_biweekly` — `schedule_expression = "rate(14 days)"`
+  - `aws_cloudwatch_event_target.tdee_recalc` — target Lambda z input `{"users": ["tomek", "weronika"]}`
+  - `aws_lambda_permission.tdee_recalc_eventbridge`
+
+**Depends on:** Step 2 (Lambda ARN)
+
+**Test:**
+- `terraform plan` → +3 resources
+- Po deploy: `aws events list-rules --name-prefix bodysync-tdee` zwraca rule
+- Manual smoke: `aws lambda invoke --function-name bodysync-tdee-recalc --payload '{"users":["tomek"]}' /tmp/out.json && cat /tmp/out.json`
+
+**Acceptance:**
+- EventBridge rule LIVE
+- Pierwsze auto-invocation za 14d od deploy (button "Przelicz teraz" w międzyczasie sanity check)
+- Bez SNS / Step Functions overhead
+
+**Effort:** ~1h
+
+---
+
+### Step 4 (PR4): macros sync hook + body profile change reset w `profile_targets.update_targets()`
+
+**⚠️ Cross-handler change** — dotyka istniejącego endpointa `PUT /api/profile/targets` (Sprint 10 PR #85). Wymaga regression check.
+
+**Modyfikuje:**
+- `apps/api/handlers/profile_targets/service.py`:
+  - W `update_targets()` po update body_profile fields:
+    - Diff `old.height_cm/age/sex/activity_level/goal` vs `new`
+    - Jeśli zmiana → reset:
+      - `tdee_baseline = calculate_tdee(calculate_bmr(weight, ...), activity_level)`
+      - `tdee_adaptive = tdee_baseline` (restart pętli)
+      - `tdee_last_recalc = None`
+      - Append `tdee_history` `{date: today, event: "body_profile_change", new_baseline}` (cap 20 FIFO)
+      - Recompute `kcal_target` + macros via `calculate_target_kcal` + `suggest_macros`
+  - Initial onboarding (pierwsze save body_profile, brak `tdee_baseline`) → set `tdee_baseline = tdee_adaptive = calculate_tdee(...)`, `tdee_history = [{event: "initial", ...}]`
+- `apps/api/handlers/profile_targets/schemas.py`:
+  - DODAJ optional `tdee_baseline | tdee_adaptive | tdee_last_recalc | tdee_history` do `TargetsResponse` (read-only — endpoint zwraca, NIE accept w request body)
+
+**Tworzy:**
+- `apps/api/tests/handlers/profile_targets/test_service.py` (extend istniejący):
+  1. `test_first_body_profile_save_initializes_tdee_baseline_and_adaptive`
+  2. `test_body_profile_change_resets_baseline_and_adaptive` — start z baseline=2280/adaptive=2400 → change activity_level → assert baseline=adaptive=nowy Mifflin
+  3. `test_body_profile_change_appends_history_marker`
+  4. `test_no_body_profile_change_does_not_touch_tdee` — change tylko `kcal_target` → tdee_baseline/adaptive unchanged
+  5. `test_history_cap_20_fifo_in_update_targets`
+
+**Test:**
+- `pytest tests/handlers/profile_targets/ -v` → existing 10 + new 5 = 15/15
+- Regression: `PUT /api/profile/targets` test_handler.py nadal pass
+
+**Acceptance:**
+- Pierwsze body profile save inicjuje TDEE state
+- Body profile change → reset baseline/adaptive, history zachowana z markerem
+- Brak `tdee_baseline=None` po onboardingu (Step 5 frontend chronione)
+- 5 nowych + 0 regresji
+
+**Effort:** ~2h
+
+---
+
+### Step 5 (PR5): Frontend button "Przelicz teraz" + badge w Settings
+
+**Modyfikuje:**
+- `apps/web/src/api.ts`:
+  - DODAJ `postTdeeRecalc(): Promise<RecalcResult>` — POST `/api/tdee/recalc` (no body)
+  - DODAJ TS types `RecalcResult`, `RecalcHistoryEntry` (mirror backend)
+  - DODAJ `tdeeRecalcErrorMessage(reason: string): string` — fixed vocab PL: `insufficient_weight_data` → "Za mało pomiarów wagi w ostatnich 14 dniach (potrzeba ≥10)", `insufficient_kcal_data` → "Za mało logów kcal w ostatnich 14 dniach", `weight_anchor_missing` → "Brak pomiaru wagi sprzed ~14 dni", `kcal_in_avg_unrealistic` → "Średnie kcal poniżej 1000 — sprawdź pipeline HAE"
+- `apps/web/src/components/dashboard/ProfileTargetsForm.tsx` (lub nowy `TDEEAdaptiveCard.tsx` w Settings):
+  - Sekcja "TDEE adaptacyjne":
+    - `tdee_adaptive` (duża liczba) + small `baseline {tdee_baseline}` + delta badge (`+150` zielony / `-100` czerwony / `0` szary)
+    - `tdee_last_recalc.date` (relative PL: "Ostatnio: 2 dni temu") albo "Jeszcze nie obliczone"
+    - Button "Przelicz teraz" → `postTdeeRecalc()` → spinner → toast success/skip-with-reason
+    - Po success: refresh `getTargets()`
+
+**Tworzy:**
+- `apps/web/src/components/dashboard/ProfileTargetsForm.test.tsx` extend (lub nowy):
+  1. Renders `tdee_adaptive` value
+  2. Button "Przelicz teraz" → calls API → spinner → success toast
+  3. `skipped=true` → toast z reason PL
+  4. 401/network → handled przez `tdeeRecalcErrorMessage`
+
+**Test:**
+- `cd apps/web && npm run test` → 4 nowe pass
+- `npm run dev` → otworzyć Settings, kliknąć "Przelicz teraz" (po deploy backend), zobaczyć badge
+- Mobile UX: button widoczny + clickable na 390px (iPhone 14)
+
+**Acceptance:**
+- Settings tab pokazuje `tdee_adaptive` + delta vs baseline
+- Button działa, spinner, refresh display
+- Skip → friendly PL toast (nie raw error JSON)
+- Sprint 9 PR #85 testy nadal pass
+- Mobile UX OK
+
+**Effort:** ~3h
+
+---
+
+### Sprint 11 metryki (target)
+
+- Backend: 1 nowy Lambda, ~31 testów (16 service + 10 handler + 5 profile_targets cross-handler)
+- IaC: +1 module + 1 route + 1 EventBridge rule + 3 IAM stmts
+- DDB: extension PROFILE row (4 attrs), zero schema migration
+- Frontend: +1 sekcja Settings + 4 vitest
+
+**Sugerowana kolejność:** linear PR1 → PR2 → PR3 → PR4 → PR5. PR2/PR3 nie parallel (PR3 zależy od ARN z PR2). PR4/PR5 mogłyby być parallel (różne pliki) ALE PR5 testuje state ustawiany przez PR4 — bezpieczniej linear.
+
+**Top 3 ryzyka:**
+
+1. **PR4 cross-handler change** — `update_targets()` jest używane przez Settings PUT. Reset logic musi być triggered TYLKO przy body profile change, nie przy każdym save. Test 4 enforces. Mitigacja: dokładne diff old vs new body_profile.
+2. **Znak `adjustment` formula** — architect: `(expected - actual) / 14`, ja w briefie: `(actual - expected) / 14`. Test 1 PR1 zweryfikuje empirically — owner spojrzy na test case (deficyt 200/dzień, waga 0 kg → adjustment=-150) i potwierdzi że "obniż TDEE bo nie schudłem mimo deficytu" jest correct.
+3. **Insufficient data UX** — Weronika może długo nie mieć ≥10 wag w 14d, dostaje skip każdym razem. Toast może frustrować. Mitigacja: PR5 dodaje countdown "next attempt: za X dni" (planowane, nie blokuje deploy).
+
+**Pierwsze pytanie do `implementer` przy odpaleniu PR1:**
+> Czy znak `adjustment = (expected_delta - actual_delta) / 14` jest correct? Test case 1 ze Step 1: deficyt 200 kcal/dzień przez 14d (kcal_in 2080, tdee 2280), waga zero zmiany → expected=-2800, actual=0 → adjustment=(expected-actual)/14=-200, clamped do -150, tdee 2280→2130. Sens: jadłem deficyt ale waga zero = TDEE było przeszacowane, obniż. Confirm znak przed pisaniem 16 testów lub flag jako bug.
+
