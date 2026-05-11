@@ -2686,3 +2686,124 @@ PR4 i PR5 muszą być sequential (PR5 deploy wymaga aby webhook był live żeby 
 **Pierwsze pytanie do `implementer` przy odpaleniu PR1:**
 > Czy znak `adjustment = (expected_delta - actual_delta) / 14` jest correct? Test case 1 ze Step 1: deficyt 200 kcal/dzień przez 14d (kcal_in 2080, tdee 2280), waga zero zmiany → expected=-2800, actual=0 → adjustment=(expected-actual)/14=-200, clamped do -150, tdee 2280→2130. Sens: jadłem deficyt ale waga zero = TDEE było przeszacowane, obniż. Confirm znak przed pisaniem 16 testów lub flag jako bug.
 
+---
+
+## Sesja 2026-05-12 — backlog (start tasks)
+
+**Stan po sesji 2026-05-11:**
+- Sprint 11 (adaptive TDEE) → pivot na Sprint 11.5 (LLM diet review per ADR-009)
+- 5 PR-ów merged: #153 backend pivot, #154 google_auth merge, #155 LLM narrative+frontend, #156 dashboard today-only, **#157 wystawiony do merge** (health webhook URL/Bearer mismatch defense-in-depth)
+- Tomek's `kcal_target=2250` manual, diet check feature live end-to-end (LLM PL narrative)
+- Weronika onboarding pre-setup zrobiony: HAE webhook secret w SSM, smoke test 200 OK
+- **Pollution incident** (~14h): 140+ steps rows z Weroniki iPhone wpadły do USER#tomek (Bearer Tomka skopiowany na jej HAE) — cleanup komenda gotowa, PR #157 prevent future occurrence
+
+### Priorytet 1: Merge #157 + Weronika finalizacja (~30-45 min)
+
+**1.1 Merge PR #157** (defense-in-depth — bez tego Weronika może znów pollute jak pomyli Bearer)
+
+**1.2 Cleanup pollutowanych rows w USER#tomek** (jeśli jeszcze nie zrobione wczoraj):
+```bash
+TODAY=$(date +%Y-%m-%d)
+aws dynamodb query --table-name bodysync-data \
+  --key-condition-expression 'PK = :pk AND begins_with(SK, :skp)' \
+  --filter-expression 'contains(device, :dev)' \
+  --expression-attribute-values '{":pk":{"S":"USER#tomek"},":skp":{"S":"BIOMETRY#2026-05-11"},":dev":{"S":"Weronika"}}' \
+  --query 'Items[*].SK.S' --output text | tr '\t' '\n' | while read sk; do
+    [ -z "$sk" ] && continue
+    aws dynamodb delete-item --table-name bodysync-data \
+      --key '{"PK":{"S":"USER#tomek"},"SK":{"S":"'"$sk"'"}}'
+    echo "deleted: $sk"
+done
+```
+
+**1.3 SSM allowlist update** dla Weroniki:
+```bash
+aws ssm put-parameter --name /bodysync/auth/allowed_emails --type String --overwrite \
+  --value '[
+    {"email":"tlyko94@gmail.com","user_id":"tomek"},
+    {"email":"weronika.flak@gmail.com","user_id":"weronika"}
+  ]'
+```
+
+**1.4 Weronika konfiguracja iOS HAE:**
+- URL: `https://api.bodysync.pl/api/health/webhook?user_id=weronika`
+- Bearer: `0de272515826bb94a29c372778bd06a8f6bd11effe9752bc58f09976be90ff45` (wygenerowany 2026-05-11, w SSM `webhook_secret_weronika`)
+- Aggregation: `Hour`
+- Run Export Now → pierwszy POST
+
+**1.5 Weronika login** na `bodysync.pl` przez Google OAuth → PROFILE auto-created (z #154 fix re-login zachowa attrs)
+
+**1.6 Verify w DDB:**
+```bash
+# Biometry leci do USER#weronika (a nie USER#tomek!)
+aws dynamodb query --table-name bodysync-data \
+  --key-condition-expression 'PK = :pk AND begins_with(SK, :skp)' \
+  --expression-attribute-values '{":pk":{"S":"USER#weronika"},":skp":{"S":"BIOMETRY#"}}' \
+  --max-items 10 --query 'Items[*].SK.S' --output table
+
+# PROFILE auto-created
+aws dynamodb get-item --table-name bodysync-data \
+  --key '{"PK":{"S":"USER#weronika"},"SK":{"S":"PROFILE"}}'
+```
+
+### Priorytet 2: Waitlist landing wariant A (~2-3h)
+
+**Cel:** walidacja popytu PL przed inwestycją w native iOS app. Niska inwestycja, manual outreach z listy.
+
+**Co tworzymy:**
+- Section "Coming soon" w `apps/web/src/components/LoginScreen.tsx` z value pitch PL + email input + submit button
+- `apps/web/public/privacy.html` (lub route) — minimalna PL privacy policy ~300 słów
+- Owner+Weronika klikają discrete "Mam już konto → Zaloguj" → istniejący Google OAuth flow
+
+**Backend:**
+- `apps/api/handlers/waitlist/handler.py` — POST endpoint
+- Pydantic schema: `email: EmailStr`, `consent: bool (must be True)`, `honeypot: str (must be empty)`, opcjonalnie `interest: str` (textarea)
+- DDB row: `PK=WAITLIST, SK={timestamp}#{email_lower}` z attrs: `email`, `consent`, `interest`, `referrer`, `ip_hash` (sha256 dla rate limit, NIE raw IP)
+- 200 zawsze (NIE wyciekamy "email already registered") + log "waitlist_signup" w CloudWatch
+- Rate limit: API GW global 50 req/s już chroni; dodatkowo Lambda check `attribute_not_exists` żeby same email nie spamował
+
+**RODO:**
+- Consent checkbox required (Pydantic validation)
+- Privacy policy link obok checkbox
+- Email storage 24 miesiące (GDPR-compliant)
+
+**Anti-spam:**
+- Honeypot ukryty input `<input name="phone" style="display:none" tabindex="-1" autocomplete="off">` — boty wypełniają, ludzi nie
+- Rate limit per IP hash (1 signup / minute)
+
+**IaC:**
+- Nowy Lambda 256MB / 5s
+- API GW route `POST /api/waitlist`
+- IAM: `dynamodb:PutItem` na `PK=WAITLIST` (osobny prefix, nie USER#*)
+
+**Pull list dla owner:**
+```bash
+aws dynamodb query --table-name bodysync-data \
+  --key-condition-expression 'PK = :pk' \
+  --expression-attribute-values '{":pk":{"S":"WAITLIST"}}' \
+  --query 'Items[*].[SK.S,email.S,interest.S]' --output table
+```
+
+**Decyzje do podjęcia z owner'em jutro:**
+- Treść value pitch (3-4 zdania PL)
+- Counter "X osób zapisanych" — yes/no (social proof; cache 1h)
+- Optional textarea "Czego najbardziej oczekujesz?" — yes/no (research gold)
+- "Skąd dowiedziałeś się?" — yes/no (analytics dropdown)
+
+### Maintenance backlog (kiedy chwila, nie blocker)
+
+- `PROJECT-STATUS.md` fix `/health/webhook` → `/api/health/webhook` (zmyliłem ownera w playbook)
+- ADR-009 + Sprint 11.5 retrospective sekcja w `docs/TODO.md` (jeśli warto dokumentować pivot lesson)
+- Per-handler GHA build conditional — `git diff --name-only HEAD^ -- apps/api/handlers/{name}/` żeby tylko zmienione handlery rebuild (apply runs rosną ~6+ min)
+- #19 frontend bundle code-split — `React.lazy(ChatScreen)` + dynamic `recipes.json` import (657 KB raw / 162 KB gz)
+- `apps/api/handlers/api_read/service.py:131` cumulative metrics `sum(buckets)` — działa dla HAE delta-per-bucket, ale jeśli HAE schemat zmieni semantykę na cumulative-to-now → bug double counting. Monitor.
+
+### Strategiczne notatki (dyskusja 2026-05-11 wieczór)
+
+Owner pytał o niche / scaling potential:
+- **Niche PL AI fitness coach istnieje** — Fitatu/Diety od Specjalisty nie mają AI advisor, mainstream (MFP/MacroFactor/Whoop) są EN i bez couples mode
+- **Differentiator:** PL native + couples + LLM narrative + recipe RAG z polskich supermarketów
+- **Realistic scaling path:** native iOS companion app (~2-4 tyg) jeśli pivot do lifestyle business; current state OK dla hobby + para friends
+- **Window 12-18 mies** zanim OpenAI/Anthropic/mainstream apps add PL AI coach
+- **Decyzja owner'a:** dorzucić waitlist na login screen jako tani test popytu (priorytet 2 wyżej) zanim podejmie pivot decision
+
