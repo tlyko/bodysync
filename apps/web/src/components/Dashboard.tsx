@@ -30,7 +30,7 @@ import {
 import { NutritionDonut } from './dashboard/NutritionDonut';
 import { PlanScreen } from './dashboard/PlanScreen';
 import { ProfileTargetsForm } from './dashboard/ProfileTargetsForm';
-import { TDEEAdaptiveCard } from './dashboard/TDEEAdaptiveCard';
+import { DietCheckCard } from './dashboard/DietCheckCard';
 import { RangeToggle, type Range } from './dashboard/RangeToggle';
 import { SidebarNav, type AppTab } from './dashboard/SidebarNav';
 import { SleepStagesCard } from './dashboard/SleepStagesCard';
@@ -231,7 +231,7 @@ function SettingsView({ onLogout }: { onLogout: () => void }) {
     <>
       <TDEECalculatorWizard onTargetsUpdated={() => setRefreshKey((k) => k + 1)} />
       <ProfileTargetsForm key={refreshKey} />
-      <TDEEAdaptiveCard key={`tdee-${refreshKey}`} />
+      <DietCheckCard key={`diet-${refreshKey}`} />
       {/* Mobile fallback — sidebar foot z "Wyloguj" jest hidden na mobile
           (bottom nav nie ma miejsca). Settings tab to logiczne miejsce
           na konto/account actions. */}

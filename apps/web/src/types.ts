@@ -97,42 +97,47 @@ export type ProfileTargets = {
   body_profile: BodyProfile | null;
   // Sprint 11 — adaptive TDEE state (read-only, init przez body_profile save
   // w PR4, update przez tdee_recalc Lambda PR2/PR3 cron + manual button PR5).
-  tdee_baseline?: number | null;
-  tdee_adaptive?: number | null;
-  tdee_last_recalc?: RecalcHistoryEntry | null;
-  tdee_history?: RecalcHistoryEntry[];
+  // Sprint 11.5 ADR-009 — diet check state. Stare tdee_* attrs (Sprint 11)
+  // zostają w DDB jako dead weight, frontend ignoruje.
+  diet_check_last?: DietCheckHistoryEntry | null;
+  diet_check_history?: DietCheckHistoryEntry[];
 };
 
-export type RecalcSkipReason =
+export type DietCheckSkipReason =
   | 'insufficient_kcal_data'
   | 'insufficient_weight_data'
   | 'weight_anchor_missing'
   | 'weight_now_missing'
-  | 'kcal_in_avg_unrealistic'
-  | 'baseline_not_initialized';
+  | 'no_kcal_target';
 
-export type RecalcResult = {
-  ok: boolean;
+export type DietCheckStatus = 'on_track' | 'too_fast' | 'too_slow_or_gain';
+
+export type DietCheckResult = {
   skipped: boolean;
-  reason: RecalcSkipReason | null;
-  tdee_before: number;
-  tdee_after: number;
+  skip_reason: DietCheckSkipReason | null;
+  goal_kcal: number | null;
   kcal_in_avg: number | null;
+  waga_now_kg: number | null;
+  waga_then_kg: number | null;
   waga_delta_kg: number | null;
-  adjustment: number | null;
-  capped: boolean;
+  expected_delta_kg: number | null;
+  actual_delta_kg: number | null;
+  diff_kg: number | null;
+  status: DietCheckStatus | null;
+  narrative: string | null;
+  narrative_unavailable: boolean;
 };
 
-export type RecalcHistoryEntry = {
+export type DietCheckHistoryEntry = {
   date: string;
-  event: 'recalc' | 'body_profile_change' | 'skipped' | 'initial';
-  before: number | null;
-  after: number | null;
+  skipped: boolean;
+  skip_reason: DietCheckSkipReason | null;
+  goal_kcal: number | null;
   kcal_in_avg: number | null;
   waga_delta_kg: number | null;
-  adjustment: number | null;
-  capped: boolean;
-  reason: string | null;
+  diff_kg: number | null;
+  status: DietCheckStatus | null;
+  narrative: string | null;
 };
 
 export type ProfileTargetsUpdate = {

@@ -212,12 +212,15 @@ resource "aws_lambda_permission" "profile_targets_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
-# Sprint 11 PR2 — Adaptive TDEE recalc (per ADR-008). Read PROFILE +
-# Query BIOMETRY 14d window → recalculate_tdee → UpdateItem PROFILE z
-# `tdee_adaptive`/`tdee_last_recalc`/`tdee_history` (cap 20 FIFO).
-# Handler dispatchuje HTTP (POST /api/tdee/recalc) i EventBridge cron
-# (event.users list — PR3 wpina `rate(14 days)`). Macros sync (kcal_target
-# auto-update) odłożony do PR4 — cross-handler change w profile_targets.
+# Sprint 11.5 (per ADR-009) — diet check / progress narrative. Read PROFILE
+# + Query BIOMETRY 14d window → evaluate_diet_check → opcjonalnie LLM Haiku
+# narrative (graceful degradation gdy SSM key missing / API down) → PutItem
+# PROFILE z `diet_check_history` (cap 10 FIFO) + `diet_check_last`. Handler
+# dispatchuje HTTP (POST /api/tdee/recalc — endpoint reuse z Sprint 11) i
+# EventBridge cron `rate(14 days)` (log only per ADR-009 sec 6).
+#
+# Memory 1024MB (advisor_chat baseline dla anthropic SDK), timeout 30s
+# (LLM call 2-4s + DDB ~100ms + cold start init).
 module "tdee_recalc" {
   source = "./modules/lambda"
 
@@ -225,7 +228,7 @@ module "tdee_recalc" {
   function_name = "tdee-recalc"
   source_zip    = "${path.module}/../../apps/api/dist/tdee_recalc.zip"
   handler       = "handlers.tdee_recalc.handler.handler"
-  memory_size   = 512
+  memory_size   = 1024
   timeout       = 30
 
   environment = {
@@ -235,11 +238,7 @@ module "tdee_recalc" {
 
   extra_iam_statements = [
     {
-      # Read PROFILE + Query BIOMETRY (14d window: weights snapshots +
-      # kcal_in cumulative buckets) + UpdateItem PROFILE z nowymi tdee_*.
-      # `put_item` shared.dynamo robi PutItem (read-modify-write merge),
-      # więc PutItem zamiast UpdateItem na liście Action.
-      Sid      = "DDBProfileRecalc"
+      Sid      = "DDBProfileDietCheck"
       Effect   = "Allow"
       Action   = ["dynamodb:GetItem", "dynamodb:PutItem", "dynamodb:Query"]
       Resource = aws_dynamodb_table.data.arn
@@ -250,11 +249,12 @@ module "tdee_recalc" {
       }
     },
     {
-      Sid    = "ReadJWTSecret"
+      Sid    = "ReadJWTAndAnthropicSecrets"
       Effect = "Allow"
       Action = ["ssm:GetParameter"]
       Resource = [
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/anthropic/api_key",
       ]
     },
   ]

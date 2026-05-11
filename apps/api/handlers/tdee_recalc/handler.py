@@ -21,6 +21,7 @@ import json
 from datetime import date, timedelta
 from typing import Any
 
+from handlers.tdee_recalc.llm import generate_narrative
 from handlers.tdee_recalc.schemas import (
     BiometryWindow,
     DietCheckHistoryEntry,
@@ -149,6 +150,17 @@ def _process_user(user_id: str, today: date) -> DietCheckResult:
 
     window = _load_window(user_id, today)
     result = evaluate_diet_check(today=today, kcal_target=kcal_target, window=window)
+
+    # PR2 Sprint 11.5 — wywołaj LLM Haiku tylko gdy NOT skipped (skipped =
+    # brak danych do narracji, frontend pokazuje skip_reason). Graceful
+    # degradation: LLM None → narrative_unavailable=True, persist mimo to.
+    if not result.skipped:
+        narrative = generate_narrative(result)
+        if narrative is None:
+            result = result.model_copy(update={"narrative_unavailable": True})
+        else:
+            result = result.model_copy(update={"narrative": narrative})
+
     _persist_diet_check(user_id, profile, result, today)
     return result
 

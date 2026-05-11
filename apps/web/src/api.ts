@@ -11,13 +11,13 @@ import type {
   ChatHistoryResponse,
   ChatMessageDTO,
   ChatRequest,
+  DietCheckResult,
+  DietCheckSkipReason,
   LoginResponse,
   Me,
   PlanResponse,
   ProfileTargets,
   ProfileTargetsUpdate,
-  RecalcResult,
-  RecalcSkipReason,
 } from './types';
 
 class ApiError extends Error {
@@ -171,19 +171,17 @@ export async function getPlan(force = false): Promise<PlanResponse> {
   return request<PlanResponse>(`/api/plan${force ? '?refresh=1' : ''}`);
 }
 
-// Sprint 11 PR5 — manual button "Przelicz teraz" w Settings (TDEEAdaptiveCard).
-// Backend recalc tdee_adaptive na bazie 14d kcal_in vs waga drift. Pierwszy call
-// dla nowego usera (po body_profile save) wykonuje real recalc; bez waga lub
-// <10 punktów window → skipped=true z reason (NIE 400). UI pokazuje friendly
-// PL message przez `tdeeRecalcErrorMessage`.
-export async function postTdeeRecalc(): Promise<RecalcResult> {
-  return request<RecalcResult>('/api/tdee/recalc', { method: 'POST' });
+// Sprint 11.5 PR2 (per ADR-009) — manual button "Sprawdź teraz" w Settings.
+// Backend liczy 14d expected vs actual delta vs MANUAL kcal_target → status
+// classification → LLM Haiku narrative PL. Skip = brak danych (NIE 400) →
+// UI pokazuje friendly PL przez `dietCheckErrorMessage`.
+export async function postTdeeRecalc(): Promise<DietCheckResult> {
+  return request<DietCheckResult>('/api/tdee/recalc', { method: 'POST' });
 }
 
 // Fixed-vocab PL messages dla skip reasons + HTTP error fallback.
-// Mirror handlers/tdee_recalc/schemas.RecalcResult.reason Literal — owner
-// dodaje reason → mirror tu, dokładnie 6 skip + ApiError fallback.
-export function tdeeRecalcErrorMessage(reasonOrError: RecalcSkipReason | unknown): string {
+// Mirror handlers/tdee_recalc/schemas.DietCheckResult.skip_reason Literal.
+export function dietCheckErrorMessage(reasonOrError: DietCheckSkipReason | unknown): string {
   if (typeof reasonOrError === 'string') {
     switch (reasonOrError) {
       case 'insufficient_kcal_data':
@@ -194,10 +192,8 @@ export function tdeeRecalcErrorMessage(reasonOrError: RecalcSkipReason | unknown
         return 'Brak pomiaru wagi sprzed ~14 dni — algorytm potrzebuje punktu odniesienia.';
       case 'weight_now_missing':
         return 'Brak pomiaru wagi w ostatnich 3 dniach — zważ się i spróbuj ponownie.';
-      case 'kcal_in_avg_unrealistic':
-        return 'Średnie kcal poniżej 1000 — sprawdź czy pipeline HAE działa.';
-      case 'baseline_not_initialized':
-        return 'Najpierw uzupełnij swój profil ciała w "Oblicz mój TDEE" powyżej.';
+      case 'no_kcal_target':
+        return 'Najpierw ustaw cel kaloryczny w polach powyżej (lub kalkulator TDEE).';
     }
   }
   if (reasonOrError instanceof ApiError) {
