@@ -21,7 +21,7 @@ from google.oauth2 import id_token as google_id_token
 
 from handlers.google_auth.schemas import LoginRequest, LoginResponse
 from shared.auth import mint_jwt
-from shared.dynamo import put_item
+from shared.dynamo import get_item, put_item
 from shared.ssm import get_param
 
 GOOGLE_CLIENT_ID_SSM = "/bodysync/google/oauth_client_id"
@@ -84,15 +84,23 @@ def login(req: LoginRequest) -> tuple[LoginResponse, str]:
     user_id = _resolve_user_id(email)
     name = idinfo.get("name") if isinstance(idinfo.get("name"), str) else None
 
-    put_item(
-        pk=f"USER#{user_id}",
-        sk="PROFILE",
-        attrs={
-            "email": email,
-            "name": name,
-            "last_login": datetime.now(UTC).isoformat(),
-        },
-    )
+    # MERGE z istniejącym PROFILE (NIE overwrite). `put_item` w shared.dynamo
+    # to boto3 `Table.put_item` = full overwrite — bez merge re-login kasował
+    # kcal_target / makro / body_profile / diet_check_history / cokolwiek
+    # owner zapisał między first login a re-login. Ten bug wisiał nieujęty
+    # bo Tomek miał 30d cookie i nie re-loginował się od czasu zapisów —
+    # Weronika onboarding pierwszy raz ujawnił scenariusz.
+    existing = get_item(f"USER#{user_id}", "PROFILE") or {}
+    merged: dict[str, Any] = {
+        **existing,
+        "email": email,
+        "name": name,
+        "last_login": datetime.now(UTC).isoformat(),
+    }
+    merged.pop("PK", None)
+    merged.pop("SK", None)
+
+    put_item(pk=f"USER#{user_id}", sk="PROFILE", attrs=merged)
 
     token = mint_jwt(user_id)
     return LoginResponse(user_id=user_id, email=email, name=name), token

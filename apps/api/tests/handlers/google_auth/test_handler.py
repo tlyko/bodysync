@@ -159,6 +159,77 @@ def test_403_email_not_allowed() -> None:
 
 
 @pytest.mark.usefixtures("ssm_params")
+def test_relogin_preserves_existing_profile_attrs(dynamodb_table: Any) -> None:
+    """Re-login MUSI zachować user-managed attrs (kcal_target, diet_check_history,
+    body_profile etc). Pre-fix: `put_item` w `service.login` był full overwrite,
+    re-login kasował wszystko poza email/name/last_login.
+
+    Critical pre-Weronika onboarding fix — pierwszy raz Weronika by trafiła
+    na ten bug bo dla Tomka cookie 30d ukrywał re-login scenariusz.
+    """
+    from decimal import Decimal
+
+    from handlers.google_auth import handler as h
+
+    # Seed PROFILE alice z user-managed attrs (jakby wcześniej zapisała cele).
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#alice",
+            "SK": "PROFILE",
+            "email": "alice@example.com",
+            "name": "Alice",
+            "last_login": "2026-04-01T10:00:00+00:00",
+            "kcal_target": Decimal("2250"),
+            "protein_target_g": Decimal("130"),
+            "fat_target_g": Decimal("70"),
+            "carbs_target_g": Decimal("275"),
+            "height_cm": Decimal("177"),
+            "age": Decimal("32"),
+            "sex": "male",
+            "activity_level": "heavy",
+            "goal": "loss",
+            "diet_check_history": [
+                {
+                    "date": "2026-04-15",
+                    "skipped": False,
+                    "skip_reason": None,
+                    "goal_kcal": Decimal("2250"),
+                    "kcal_in_avg": Decimal("2050"),
+                    "waga_delta_kg": Decimal("-0.4"),
+                    "diff_kg": Decimal("-0.04"),
+                    "status": "on_track",
+                    "narrative": None,
+                }
+            ],
+        }
+    )
+
+    with _patch_google("alice@example.com", name="Alice"):
+        result = h.handler(_event({"id_token": "alice.fake.token"}), _FakeContext())
+    assert result["statusCode"] == 200
+
+    profile = dynamodb_table.get_item(Key={"PK": "USER#alice", "SK": "PROFILE"})["Item"]
+
+    # Email/name/last_login zaktualizowane (last_login != stary).
+    assert profile["email"] == "alice@example.com"
+    assert profile["name"] == "Alice"
+    assert profile["last_login"] != "2026-04-01T10:00:00+00:00"
+
+    # User-managed attrs PRESERVED.
+    assert int(profile["kcal_target"]) == 2250
+    assert int(profile["protein_target_g"]) == 130
+    assert int(profile["fat_target_g"]) == 70
+    assert int(profile["carbs_target_g"]) == 275
+    assert int(profile["height_cm"]) == 177
+    assert int(profile["age"]) == 32
+    assert profile["sex"] == "male"
+    assert profile["activity_level"] == "heavy"
+    assert profile["goal"] == "loss"
+    assert len(profile["diet_check_history"]) == 1
+    assert profile["diet_check_history"][0]["status"] == "on_track"
+
+
+@pytest.mark.usefixtures("ssm_params")
 def test_pk_isolation_two_users(dynamodb_table: Any) -> None:
     """Alice i Bob logują się — każdy ma SWÓJ PROFILE pod swoim PK,
     nie ma cross-write'u."""
