@@ -2342,3 +2342,137 @@ body:has(.preview-banner) .login-screen {
     gap: 0.3rem 0.65rem;
   }
 }
+
+/* ─── Sprint 11 PR5 — TDEE adaptive card (Settings tab) ──────────────── */
+.tdee-card {
+  max-width: 720px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.5rem 1.75rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.tdee-card-header h3 {
+  margin: 0 0 0.4rem;
+  font-size: 1rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.tdee-card-subtitle {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.tdee-card-banner {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.3);
+  color: var(--orange);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  font-size: 0.85rem;
+  line-height: 1.5;
+}
+.tdee-card-numbers {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 1rem;
+  flex-wrap: wrap;
+}
+.tdee-card-primary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+}
+.tdee-card-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 2.25rem;
+  font-weight: 700;
+  color: var(--text);
+}
+.tdee-card-unit {
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.tdee-card-secondary {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.85rem;
+}
+.tdee-card-baseline {
+  color: var(--text-muted);
+}
+.tdee-card-delta {
+  padding: 0.2rem 0.55rem;
+  border-radius: 6px;
+  font-weight: 600;
+}
+.tdee-card-delta-positive {
+  background: rgba(16, 185, 129, 0.15);
+  color: var(--green);
+}
+.tdee-card-delta-negative {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--red);
+}
+.tdee-card-delta-neutral {
+  background: rgba(148, 163, 184, 0.15);
+  color: var(--text-muted);
+}
+.tdee-card-meta {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.tdee-card-meta strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.tdee-card-muted {
+  margin: 0;
+  font-size: 0.85rem;
+  color: var(--text-muted);
+}
+.tdee-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+.tdee-card-toast {
+  font-size: 0.8rem;
+  flex: 1;
+  text-align: left;
+  line-height: 1.4;
+}
+.tdee-card-toast-success {
+  color: var(--green);
+}
+.tdee-card-toast-info {
+  color: var(--orange);
+}
+.tdee-card-toast-error {
+  color: var(--red);
+}
+.tdee-card-button {
+  background: var(--cyan);
+  color: #0a0e17;
+  border: none;
+  border-radius: 8px;
+  padding: 0.6rem 1.25rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+}
+.tdee-card-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
