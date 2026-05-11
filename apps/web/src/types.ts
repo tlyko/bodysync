@@ -95,6 +95,44 @@ export type ProfileTargets = {
   carbs_target_g: number;
   is_default: boolean;
   body_profile: BodyProfile | null;
+  // Sprint 11 — adaptive TDEE state (read-only, init przez body_profile save
+  // w PR4, update przez tdee_recalc Lambda PR2/PR3 cron + manual button PR5).
+  tdee_baseline?: number | null;
+  tdee_adaptive?: number | null;
+  tdee_last_recalc?: RecalcHistoryEntry | null;
+  tdee_history?: RecalcHistoryEntry[];
+};
+
+export type RecalcSkipReason =
+  | 'insufficient_kcal_data'
+  | 'insufficient_weight_data'
+  | 'weight_anchor_missing'
+  | 'weight_now_missing'
+  | 'kcal_in_avg_unrealistic'
+  | 'baseline_not_initialized';
+
+export type RecalcResult = {
+  ok: boolean;
+  skipped: boolean;
+  reason: RecalcSkipReason | null;
+  tdee_before: number;
+  tdee_after: number;
+  kcal_in_avg: number | null;
+  waga_delta_kg: number | null;
+  adjustment: number | null;
+  capped: boolean;
+};
+
+export type RecalcHistoryEntry = {
+  date: string;
+  event: 'recalc' | 'body_profile_change' | 'skipped' | 'initial';
+  before: number | null;
+  after: number | null;
+  kcal_in_avg: number | null;
+  waga_delta_kg: number | null;
+  adjustment: number | null;
+  capped: boolean;
+  reason: string | null;
 };
 
 export type ProfileTargetsUpdate = {

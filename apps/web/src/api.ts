@@ -16,6 +16,8 @@ import type {
   PlanResponse,
   ProfileTargets,
   ProfileTargetsUpdate,
+  RecalcResult,
+  RecalcSkipReason,
 } from './types';
 
 class ApiError extends Error {
@@ -167,6 +169,44 @@ export async function getActivities(limit = 20): Promise<ActivitiesResponse> {
 // może `force=true` przekazać żeby wymusić fresh fetch (button "Odśwież").
 export async function getPlan(force = false): Promise<PlanResponse> {
   return request<PlanResponse>(`/api/plan${force ? '?refresh=1' : ''}`);
+}
+
+// Sprint 11 PR5 — manual button "Przelicz teraz" w Settings (TDEEAdaptiveCard).
+// Backend recalc tdee_adaptive na bazie 14d kcal_in vs waga drift. Pierwszy call
+// dla nowego usera (po body_profile save) wykonuje real recalc; bez waga lub
+// <10 punktów window → skipped=true z reason (NIE 400). UI pokazuje friendly
+// PL message przez `tdeeRecalcErrorMessage`.
+export async function postTdeeRecalc(): Promise<RecalcResult> {
+  return request<RecalcResult>('/api/tdee/recalc', { method: 'POST' });
+}
+
+// Fixed-vocab PL messages dla skip reasons + HTTP error fallback.
+// Mirror handlers/tdee_recalc/schemas.RecalcResult.reason Literal — owner
+// dodaje reason → mirror tu, dokładnie 6 skip + ApiError fallback.
+export function tdeeRecalcErrorMessage(reasonOrError: RecalcSkipReason | unknown): string {
+  if (typeof reasonOrError === 'string') {
+    switch (reasonOrError) {
+      case 'insufficient_kcal_data':
+        return 'Za mało logów kcal w ostatnich 14 dniach (potrzeba ≥10).';
+      case 'insufficient_weight_data':
+        return 'Za mało pomiarów wagi w ostatnich 14 dniach (potrzeba ≥10).';
+      case 'weight_anchor_missing':
+        return 'Brak pomiaru wagi sprzed ~14 dni — algorytm potrzebuje punktu odniesienia.';
+      case 'weight_now_missing':
+        return 'Brak pomiaru wagi w ostatnich 3 dniach — zważ się i spróbuj ponownie.';
+      case 'kcal_in_avg_unrealistic':
+        return 'Średnie kcal poniżej 1000 — sprawdź czy pipeline HAE działa.';
+      case 'baseline_not_initialized':
+        return 'Najpierw uzupełnij swój profil ciała w "Oblicz mój TDEE" powyżej.';
+    }
+  }
+  if (reasonOrError instanceof ApiError) {
+    if (reasonOrError.status === 401) return 'Sesja wygasła. Zaloguj się ponownie.';
+    if (reasonOrError.status === 404) return 'Profil nie istnieje — zaloguj się ponownie.';
+    if (reasonOrError.status === -1) return 'Brak połączenia z serwerem — spróbuj za chwilę.';
+    return reasonOrError.message || `Błąd serwera (${reasonOrError.status})`;
+  }
+  return 'Nieoczekiwany błąd';
 }
 
 // Strava OAuth start endpoint zwraca 302 do strava.com — frontend
