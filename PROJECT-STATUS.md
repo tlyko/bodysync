@@ -48,17 +48,44 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Mobile UX (iPhone bottom nav, kcal_in today=0, dashboard symetria, NutritionDonut, Spalone kalorie) | ✅ shipped 2026-05-09 (PRy #109/#110/#114/#115/#128) — bottom navigation pattern dla iPhone 14/17 (Weronika), kcal_in/makro pokazują 0 dla dzisiaj jeśli HAE nie wysłał (zamiast wczoraj), NutritionDonut donut chart 1:1 prototype, Spalone kalorie = active+basal TDEE |
 | Logo pack + preview mock mode | ✅ shipped 2026-05-09 (PRy #108/#118) — bodysync brand pack (favicon + sidebar header + login screen), `VITE_PREVIEW_MODE=true` env w CF Workers Builds → window.fetch override z mock data dla preview branch deployments |
 | Plan Treningowy frontend tab (Sprint 5 PR #3 + follow-upy) | ✅ shipped 2026-05-09 (PRy #116/#117/#120-#124) — sidebar 7-y tab "Plan Treningowy", parser raw 2D rows → Training[] z sekcji Rozgrzewka+Trening, tabs po unique base names (Trening A/B/C), dropdown weeks per group (najnowszy default), STRICT no-guess advisor rule po halucynacji "wykonałeś Trening B zamiast C" |
+| Sprint 11 prep (Telegram pipeline + advisor activities + clear chat) | ✅ shipped 2026-05-10/11 (PRy #130/#143/#144/#145/#146) — cost-guard alarm → Telegram (smoke verified ALARM 🚨 + OK ✅ delivery), advisor widzi `<recent_activities>` z Strava 7d w prompt, button "Wyczyść rozmowę" + DELETE /api/advisor/chat/history (idempotent, PK isolation), network error message proper handling |
 
 ## Open PRs
 
-`gh pr list` — żadnych otwartych w danej chwili (po Sprint 5 + advisor strict + Spalone kalorie).
+`gh pr list` — żadnych otwartych (5 PR-ów merged w sesji 2026-05-10 → 11).
 
-## Aktywny sprint — żaden (Sprint 4+5+6+7+8+9 zamknięte 2026-05-09)
+## Aktywny sprint — żaden (Sprint 11 prep zamknięty 2026-05-11)
 
-Sześć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat advisor z RAG (Sprint 6) + frontend chat UI (Sprint 7) + biometry dashboard polish (Sprint 8) + profile targets + 1:1 prototype port (Sprint 9) + **Strava integration** (Sprint 4 zaległy) + **Google Sheets training plan + advisor injekcja** (Sprint 5).
+**Sesja 2026-05-10 → 11 (post-Sprint 10) — 5 PR-ów merged, Telegram pipeline verified end-to-end:**
 
-**Aktywne PR-y:**
-- **PR #130** (in-progress, PR1/2) — `telegram_notifier` Lambda backend, SNS subscriber dla cost-guard alarmu (backlog #17 — Gmail auto-unsub'uje SNS, więc owner nigdy nie dostawał alertów). 9 testów passing, 11KB stdlib zip. Po merge: PR2 z Terraform module + drop email subscription.
+- ✅ **PR #130** — `telegram_notifier` Lambda backend (170 LOC handler.py, stdlib `urllib` only, 11KB zip). SNS event → CloudWatch alarm payload → Telegram POST. HTML escape `<>&` w name/reason. Best-effort delivery (4xx/5xx/timeout → log warning, return ok). 9 testów + lazy-import handler fixture pattern (collection-time `boto3.client("ssm")` bez AWS_REGION env crashował CI).
+- ✅ **PR #143** — Telegram IaC + drop email subscription. `module "telegram_notifier"` w `cloudwatch.tf` (256MB/5s, IAM SSM read na bot_token + chat_id), `aws_sns_topic_subscription cost_guard_telegram` (protocol=lambda), `aws_lambda_permission` dla SNS principal. Drop `cost_guard_owner_email` + `local.owner_email`. SSM placeholders `/bodysync/telegram/bot_token` (SecureString) + `/bodysync/telegram/chat_id` (String).
+- ✅ **PR #144** — Advisor `<recent_activities>` injekcja. `load_recent_activities(user_id, today, days=7)` query `ACTIVITY#` + filter `start_date >= today-6d` + sort desc + cap 15. `RecentActivity` Pydantic (date, sport_type, name (≤80 chars), distance_km, duration_min, avg_hr, max_hr, kcal). Block `<recent_activities>` w `build_chat_messages` z `cache_control: ephemeral`, format 1-linia per activity `YYYY-MM-DD SportType "Name" Xkm/Ymin/HR avg Z (max M)/N kcal`. System prompt: nowa sekcja "DANE WEJŚCIOWE — `<recent_activities>`" + HR zones heuristic + anti-injection clause + 6-blok lista w forbidden tags. +13 testów. **Pre-req dla Sprint 11 Daily Brief.**
+- ✅ **PR #145** — "Wyczyść rozmowę". Backend: `DELETE /api/advisor/chat/history` (`_history_handler.handle_delete_history`, JWT required, idempotent), `shared/dynamo.batch_delete` helper (boto3 batch_writer), `service.delete_chat_history(user_id, today)` z boundary Warsaw + PK isolation. IaC: nowa route + IAM `DeleteItem` + `BatchWriteItem` z LeadingKeys=USER#*, CORS `allow_methods` += DELETE. Frontend: button w `.chat-header` (visible gdy thread niepusty), `window.confirm` + DELETE call + `setMessages([])`. +5 pytest + 3 vitest. **Bug post-merge:** owner kliknął clear gdy Terraform apply jeszcze trwał (route nie istniał) → 404 bez CORS headers → fetch TypeError → "Nieoczekiwany błąd" message.
+- ✅ **PR #146** — fix(web) hotfix dla post-#145 race. `request()` opakowuje `TypeError` jako `ApiError(-1, 'network')`, `chatErrorMessage` ma case `-1` → "Brak połączenia z serwerem — spróbuj za chwilę". +2 regression testy. Chroni też future scenariusze: DNS down, CORS regression, cold-start timeout.
+
+**Telegram smoke test (2026-05-11 07:41-07:42 UTC) — pipeline LIVE:**
+1. Owner: BotFather `/newbot` → `bodysync_123_bot` → token (46 chars) → `/start` w prywatnym chacie → chat_id=`1476210457`
+2. SSM put-parameter × 2: bot_token (SecureString), chat_id (String)
+3. CloudWatch `set-alarm-state ALARM` → Lambda invoke 386ms (cold start) + 388ms init → `telegram_sent status_code: 200` → 🚨 wiadomość w chacie ownera
+4. CloudWatch `set-alarm-state OK` → warm Lambda ~30ms → ✅ recovery message
+
+End-to-end pipeline: `CloudWatch alarm → SNS → Lambda → Telegram POST → chat`. Cost-guard alarm reaguje, Sprint 11 Daily Brief odblokowany (ten sam bot_token reusable).
+
+**Audyt 2026-05-11 (auditor agent, post-sesja):**
+
+3 najpilniejsze rzeczy (po dzisiejszych 5 PR):
+1. **Extract `_post_handler.py`** z `advisor_chat/handler.py` (369 LOC, asymetria z `_history_handler.py` 113 LOC) → `@architect` + `@implementer`. Przed Sprint 11.
+2. **`telegram_notifier` moduł do `main.tf`** lub split `cloudwatch.tf` (ADR-003 konwencja "Lambdas w main.tf") → `@aws-infra`. ~30 min.
+3. **Frontend component tests** dla RecipeCard / ChatInput / RecipeModal / WeightChart → `@tester` + `@frontend-designer`.
+
+Pozytywne sygnały z audytu: security clean (sekrety nigdy w git), IAM PK isolation defense-in-depth, 100% handler test coverage (14/14), anti-injection schema sync OK po PR #144 (regex i system prompt synced), `apps/web/src/api.ts` jeden helper `request()` → fix #146 dostał free coverage dla wszystkich endpointów.
+
+Open questions z audytu (do decyzji przy następnej sesji):
+- Czy import blocks w `main.tf:7-10` + `:16-19` można już usunąć (apply był OK po wszystkich sprintach)?
+- `RECENT_ACTIVITIES_MAX=15` realny dla 7-day window (typowo 5-10/tydzień)?
+- `ACTIVITY#` query bez SK range — wystarczy dla 2-user MVP, ale przy >100 activities/user cost rośnie (~5 RCU per chat turn). Multi-year retention plans?
+- Sprint 11 `<recent_activities>` w Daily Brief: ten sam schema raw vs aggregate (7d totals + top 3)?
 
 **Strategiczny backlog post-Sprint 9 (nocna analiza 2026-05-10):**
 - 📊 [`docs/backlog-2026-05-10.md`](docs/backlog-2026-05-10.md) — master backlog z 45+ feature ideas, priorytetyzowanymi w 4 tier-y (Quick wins / Sprint candidates / Strategic / Parking lot), value/effort scoring
@@ -229,7 +256,7 @@ Sześć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat adviso
 **Spec źródła:** `docs/adr/ADR-007-chat-assistant-rag.md`, `docs/TODO.md` Sprint 6.1+6.2.
 
 **Backlog post-Sprint 4+5+6+7+8+9 (do TaskList):**
-- **#17 Telegram bot subscriber** — replacement Gmail email który auto-unsub'uje SNS notifications (cost-guard alarm musi dzwonić)
+- ~~**#17 Telegram bot subscriber**~~ ✅ DONE 2026-05-10/11 (PR #130 handler + #143 IaC; smoke test live verified end-to-end ALARM 🚨 + OK ✅ delivery)
 - **#18 Restore test_rag.py** — investigate faiss-cpu + pytest segfault na macOS aarch64 + Linux GHA. Granular RAG unit tests skipped
 - **#19 Frontend bundle code-split** — `React.lazy(ChatScreen)` + dynamic `recipes.json` import. Aktualnie ~624KB raw / ~152KB gzip (wzrost z 611KB po Sprint 5 + dropdown weeks + Spalone kalorie)
 - **#20 PDF hosting decision** — Sprint 7.5 mini-sprint jeśli owner chce link do source PDF z RecipeCard (R2/S3 public/CF Pages assets, 127MB)
@@ -288,6 +315,8 @@ Sześć sprintów shipped end-to-end w ciągu 2 dni (2026-05-08/09): chat adviso
 | `/bodysync/google/oauth_client_id` | String | owner (CLI) | google_auth (audience verify) | ✅ live |
 | `/bodysync/auth/allowed_emails` | String (JSON list) | owner (CLI) | google_auth (allowlist 2 emaili) | ✅ live |
 | `/bodysync/jwt/signing_secret` | SecureString | owner (CLI) | api Lambda (mint + verify) | ✅ live |
+| `/bodysync/telegram/bot_token` | SecureString | owner (CLI) | telegram_notifier Lambda (SNS subscriber) | ✅ live (2026-05-11) |
+| `/bodysync/telegram/chat_id` | String | owner (CLI) | telegram_notifier Lambda | ✅ live (`1476210457` Tomek private chat) |
 
 ## Operational items still open
 
