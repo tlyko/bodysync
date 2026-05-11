@@ -21,7 +21,10 @@ WERONIKA_SECRET = "weronika-webhook-secret-bbbbbbbbbbbbbb"
 
 
 def _event(
-    body: str | dict[str, Any] | None, *, bearer: str | None = TOMEK_SECRET
+    body: str | dict[str, Any] | None,
+    *,
+    bearer: str | None = TOMEK_SECRET,
+    query_user_id: str | None = None,
 ) -> dict[str, Any]:
     if body is None:
         raw = ""
@@ -32,13 +35,16 @@ def _event(
     headers: dict[str, str] = {"content-type": "application/json"}
     if bearer is not None:
         headers["authorization"] = f"Bearer {bearer}"
-    return {
+    event: dict[str, Any] = {
         "version": "2.0",
         "routeKey": "POST /api/health/webhook",
         "headers": headers,
         "body": raw,
         "isBase64Encoded": False,
     }
+    if query_user_id is not None:
+        event["queryStringParameters"] = {"user_id": query_user_id}
+    return event
 
 
 class _FakeContext:
@@ -108,6 +114,60 @@ def test_pk_isolation_two_users(dynamodb_table: Any) -> None:
     )["Items"]
     assert all(i["PK"] == "USER#tomek" for i in tomek)
     assert len(tomek) == 3
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_url_user_id_matching_bearer_user_passes_200(dynamodb_table: Any) -> None:
+    """URL `?user_id=tomek` + Bearer Tomka → 200, dane lecą do USER#tomek."""
+    from handlers.health_webhook import handler as h
+
+    result = h.handler(
+        _event(_load_minimal_payload(), bearer=TOMEK_SECRET, query_user_id="tomek"),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_url_user_id_mismatching_bearer_user_returns_403(dynamodb_table: Any) -> None:
+    """Pollution scenariusz 2026-05-11: Weronika iPhone HAE z URL ?user_id=weronika
+    ale skopiowanym Bearer'em Tomka → 403, brak persist do USER#tomek.
+
+    Defense-in-depth: Bearer match wygrywa identyfikację, ale URL hint MUSI
+    matchować bo inaczej user A zapisze swoje dane pod USER#B (jak się stało
+    z Weronika onboarding).
+    """
+    from handlers.health_webhook import handler as h
+
+    result = h.handler(
+        _event(_load_minimal_payload(), bearer=TOMEK_SECRET, query_user_id="weronika"),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 403
+    body = json.loads(result["body"])
+    assert body == {"error": "user_id mismatch"}
+
+    # Brak persist — DDB pusty.
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk",
+        ExpressionAttributeValues={":pk": "USER#tomek"},
+    )["Items"]
+    assert items == []
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_url_without_user_id_query_passes_legacy(dynamodb_table: Any) -> None:
+    """Backwards compat — legacy konfiguracja iOS HAE bez query param przechodzi.
+    Bearer match jako autorytatywny identifier (jak przed PR z mismatch checkiem).
+    """
+    from handlers.health_webhook import handler as h
+
+    # Brak `query_user_id` → no queryStringParameters w event.
+    result = h.handler(
+        _event(_load_minimal_payload(), bearer=TOMEK_SECRET),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 200
 
 
 @pytest.mark.usefixtures("ssm_params", "dynamodb_table")
