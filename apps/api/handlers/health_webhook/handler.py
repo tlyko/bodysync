@@ -96,6 +96,20 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.warning("invalid_bearer", extra={"request_id": request_id})
         return _response(401, {"error": "invalid bearer token"})
 
+    # Defense-in-depth: jeśli URL ma `?user_id=X`, MUSI matchować user_id
+    # z Bearer match. Bez tego: user A z Bearer'em user'a B (skopiowany przez
+    # przypadek) zapisze dane pod USER#B mimo URL `?user_id=A`. Zdarzyło się
+    # 2026-05-11 podczas Weronika onboarding — jej iPhone HAE z Bearer'em
+    # Tomka pollutował 140+ steps rows w USER#tomek przez ~14h.
+    qsp = event.get("queryStringParameters") or {}
+    url_user_id = qsp.get("user_id")
+    if url_user_id and url_user_id != user_id:
+        logger.warning(
+            "bearer_user_mismatch",
+            extra={"request_id": request_id, "user_id": user_id},
+        )
+        return _response(403, {"error": "user_id mismatch"})
+
     raw_body = event.get("body") or "{}"
     if event.get("isBase64Encoded"):
         import base64
