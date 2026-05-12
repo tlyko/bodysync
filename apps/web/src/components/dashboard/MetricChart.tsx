@@ -49,6 +49,9 @@ export function MetricChart({
   // Fallback 600px gdy ref nieaktywny (initial render / jsdom test env).
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
+  // Hover state: index aktualnie podświetlonego bara (null = brak hover).
+  // Steruje tooltip pozycją i opacity boost.
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   useEffect(() => {
     if (!wrapRef.current || typeof ResizeObserver === 'undefined') return;
@@ -138,11 +141,14 @@ export function MetricChart({
 
       {/* Bars — jeden rect per data point, gradient fill, rounded top corners.
           SVG nie ma per-corner radius, więc używamy global `rx`/`ry` — wpływa
-          też na dolne corners, ale baseline line je przykrywa wizualnie. */}
+          też na dolne corners, ale baseline line je przykrywa wizualnie.
+          Hovered bar dostaje solid color + drop shadow filter (zdefiniowany
+          w defs). Hover handlers ustawiają hoveredIdx → reactRender. */}
       {sorted.map((d, i) => {
         const x = PAD_LEFT + i * slotW + (slotW - barW) / 2;
         const y = yFor(d.value);
         const h = baseY - y;
+        const isHovered = hoveredIdx === i;
         return (
           <rect
             key={d.date}
@@ -152,12 +158,11 @@ export function MetricChart({
             height={Math.max(h, 0)}
             rx={BAR_RADIUS}
             ry={BAR_RADIUS}
-            fill={`url(#${gradId})`}
-          >
-            <title>
-              {d.date}: {formatValue(d.value)} {unit}
-            </title>
-          </rect>
+            fill={isHovered ? fill : `url(#${gradId})`}
+            style={{ transition: 'fill 100ms ease' }}
+            onMouseEnter={() => setHoveredIdx(i)}
+            onMouseLeave={() => setHoveredIdx(null)}
+          />
         );
       })}
 
@@ -169,6 +174,29 @@ export function MetricChart({
         {lastDate}
       </text>
     </svg>
+
+    {/* Tooltip — HTML absolute positioned, NIE SVG text (lepsze styling +
+        responsive font). pointer-events:none w CSS żeby nie blokował hover
+        kolejnych barów gdy cursor przejedzie nad tooltip. Pokazany tylko
+        gdy hoveredIdx !== null. */}
+    {hoveredIdx !== null && sorted[hoveredIdx] && (() => {
+      const d = sorted[hoveredIdx];
+      const barX = PAD_LEFT + hoveredIdx * slotW + slotW / 2;
+      const barY = yFor(d.value);
+      // Tooltip pozycja: środek bara horizontally, 8px nad topem bara.
+      // transform translate(-50%, -100%) w CSS centruje + flipuje nad bar.
+      return (
+        <div
+          className="metric-chart-tooltip"
+          style={{ left: `${(barX / width) * 100}%`, top: `${barY - 8}px` }}
+        >
+          <div className="metric-chart-tooltip-date">{d.date}</div>
+          <div className="metric-chart-tooltip-value">
+            {formatValue(d.value)} <span>{unit}</span>
+          </div>
+        </div>
+      );
+    })()}
     </div>
   );
 }
