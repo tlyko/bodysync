@@ -82,7 +82,7 @@ describe('PlanScreen', () => {
     );
   });
 
-  test('"Odśwież" wywołuje getPlan z refresh=1', async () => {
+  test('"Zsynchronizuj plan" wywołuje getPlan z refresh=1', async () => {
     const initialRows = [
       ['Numer', 'Ćwiczenie', 'Serie x powt.'],
       ['Trening A', '', ''],
@@ -113,7 +113,7 @@ describe('PlanScreen', () => {
     render(<PlanScreen />);
     await waitFor(() => expect(screen.getByText('Initial-exercise')).toBeInTheDocument());
 
-    fireEvent.click(screen.getByRole('button', { name: /Odśwież/i }));
+    fireEvent.click(screen.getByRole('button', { name: /Zsynchronizuj/i }));
 
     await waitFor(() => expect(screen.getByText('Fresh-exercise')).toBeInTheDocument());
 
