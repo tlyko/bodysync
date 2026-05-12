@@ -39,9 +39,34 @@ describe('MetricChart', () => {
     );
     const bars = container.querySelectorAll('rect');
     expect(bars).toHaveLength(3);
-    // Każdy bar ma <title> z date + value dla hover tooltip
-    const titles = container.querySelectorAll('rect title');
-    expect(titles).toHaveLength(3);
+  });
+
+  test('hover na barze pokazuje tooltip z datą + wartością', async () => {
+    const { container } = render(
+      <MetricChart
+        data={[
+          { date: '2026-05-01', value: 7500 },
+          { date: '2026-05-02', value: 8200 },
+        ]}
+        label="Kroki"
+        unit="kroki"
+        color="green"
+      />,
+    );
+    // Przed hover: brak tooltip
+    expect(container.querySelector('.metric-chart-tooltip')).toBeNull();
+    // Po fireEvent mouseEnter na drugim barze: tooltip widoczny z datą + value
+    const bars = container.querySelectorAll('rect');
+    const { fireEvent } = await import('@testing-library/react');
+    fireEvent.mouseEnter(bars[1]);
+    const tooltip = container.querySelector('.metric-chart-tooltip');
+    expect(tooltip).not.toBeNull();
+    expect(tooltip?.textContent).toContain('2026-05-02');
+    expect(tooltip?.textContent).toContain('8200');
+    expect(tooltip?.textContent).toContain('kroki');
+    // mouseLeave znika tooltip
+    fireEvent.mouseLeave(bars[1]);
+    expect(container.querySelector('.metric-chart-tooltip')).toBeNull();
   });
 
   test('formatValue custom — Y-axis labele używają formattera', () => {
