@@ -90,11 +90,11 @@ const PROFILE_TARGETS = {
 const PLAN: PlanResponse = {
   rows: [
     ['Rozgrzewka', '', '', '', ''],
-    ['Numer', 'Ćwiczenie', 'Serie x powt.', 'Ciężar (Anita)', 'Notatki'],
+    ['Numer', 'Ćwiczenie', 'Serie x powt.', 'Ciężar', 'Notatki'],
     ['01', 'Hip opener', '1-2s x 5p/', '—', 'powoli'],
     ['02', 'Wall sit', '2-3s x 45-60s', 'BW', 'RPE6'],
     ['', '', '', '', ''],
-    ['Trening A', 'Ćwiczenie', 'Serie x powt.', 'Ciężar (Anita)', 'Notatki'],
+    ['Trening A', 'Ćwiczenie', 'Serie x powt.', 'Ciężar', 'Notatki'],
     ['01', 'Squat', '5x5', '60kg', 'tempo 3-1-1-1'],
     ['02', 'Bench press', '4x8', '40kg', 'kontrola'],
     ['03', 'Pull-ups', '3xAMRAP', 'BW', 'do failure'],
