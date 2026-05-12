@@ -68,6 +68,12 @@ class JsonFormatter(logging.Formatter):
             "owner_id",
             "received_sub",
             "duplicate",
+            # waitlist (Sprint 12 PR1 — landing signup). Hash fingerprints
+            # NIE plain email/IP (PII) — owner widzi same-user resubmit
+            # bez deanonymizacji w logach.
+            "email_hash",
+            "ip_hash",
+            "has_interest",
         ):
             value = getattr(record, key, None)
             if value is not None:
