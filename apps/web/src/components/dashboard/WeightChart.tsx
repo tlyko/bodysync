@@ -30,6 +30,9 @@ export function WeightChart({ data, height = 220 }: Props) {
   // coords = pixel coords. Tekst/circle/EMA dashed pattern bez stretchu.
   const wrapRef = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(600);
+  // Hover state: index data point pod kursorem (null = brak hover).
+  // Steruje rendering highlight dotów (raw + EMA) i tooltip.
+  const [hoveredIdx, setHoveredIdx] = useState<number | null>(null);
 
   useEffect(() => {
     if (!wrapRef.current || typeof ResizeObserver === 'undefined') return;
@@ -168,15 +171,78 @@ export function WeightChart({ data, height = 220 }: Props) {
         />
       )}
 
-      {/* Last point dot */}
-      <circle
-        cx={xFor(sorted.length - 1)}
-        cy={yFor(lastWeight)}
-        r="4"
-        fill="#10b981"
-        stroke="#0a0e17"
-        strokeWidth="2"
-      />
+      {/* Last point dot — pokazywany TYLKO gdy brak hover (w przeciwnym
+          przypadku hovered dot pełni tę funkcję, bo last point byłby
+          duplikatem visual element). */}
+      {hoveredIdx === null && (
+        <circle
+          cx={xFor(sorted.length - 1)}
+          cy={yFor(lastWeight)}
+          r="4"
+          fill="#10b981"
+          stroke="#0a0e17"
+          strokeWidth="2"
+        />
+      )}
+
+      {/* Hover highlight — raw dot (green, większy) + EMA dot (cyan). Oba
+          jednocześnie żeby user widział obie metryki dla tego samego dnia. */}
+      {hoveredIdx !== null && sorted[hoveredIdx] && (
+        <>
+          <circle
+            cx={xFor(hoveredIdx)}
+            cy={yFor(sorted[hoveredIdx].weight)}
+            r="5"
+            fill="#10b981"
+            stroke="#0a0e17"
+            strokeWidth="2"
+          />
+          {emaPoints[hoveredIdx] && (
+            <circle
+              cx={xFor(hoveredIdx)}
+              cy={yFor(emaPoints[hoveredIdx].value)}
+              r="4"
+              fill="#22d3ee"
+              stroke="#0a0e17"
+              strokeWidth="2"
+            />
+          )}
+          {/* Pionowa linia łącząca oba doty — wizualnie sugeruje że są dla
+              tego samego dnia. */}
+          <line
+            x1={xFor(hoveredIdx)}
+            y1={PAD_TOP}
+            x2={xFor(hoveredIdx)}
+            y2={PAD_TOP + plotH}
+            stroke="#94a3b8"
+            strokeWidth="1"
+            strokeDasharray="2 3"
+            opacity="0.4"
+          />
+        </>
+      )}
+
+      {/* Invisible hit areas — jeden rect per data point na pełną wysokość
+          plotu. Hover na nim ustawia hoveredIdx. Width = slotW (równy
+          podział plotW), x = środek slotu - slotW/2. Transparent fill
+          (pointer-events default = auto). */}
+      {sorted.map((d, i) => {
+        const slotW = sorted.length > 1 ? plotW / (sorted.length - 1) : plotW;
+        const x = xFor(i) - slotW / 2;
+        return (
+          <rect
+            key={`hit-${d.date}`}
+            x={x}
+            y={PAD_TOP}
+            width={slotW}
+            height={plotH}
+            fill="transparent"
+            style={{ cursor: 'pointer' }}
+            onMouseEnter={() => setHoveredIdx(i)}
+            onMouseLeave={() => setHoveredIdx(null)}
+          />
+        );
+      })}
 
       {/* X-axis date labels (first + last) */}
       <text x={PAD_LEFT} y={height - 6} className="weight-chart-axis-label">
@@ -186,6 +252,33 @@ export function WeightChart({ data, height = 220 }: Props) {
         {lastDate}
       </text>
     </svg>
+
+    {/* Tooltip — HTML absolute positioned (NIE SVG text), pokazany gdy hover
+        aktywny. Format: data + raw waga (kg) + EMA waga (kg) jeśli istnieje. */}
+    {hoveredIdx !== null && sorted[hoveredIdx] && (() => {
+      const d = sorted[hoveredIdx];
+      const ema = emaPoints[hoveredIdx]?.value;
+      const dotY = yFor(Math.max(d.weight, ema ?? d.weight));
+      return (
+        <div
+          className="chart-tooltip"
+          style={{
+            left: `${(xFor(hoveredIdx) / width) * 100}%`,
+            top: `${dotY - 8}px`,
+          }}
+        >
+          <div className="chart-tooltip-date">{d.date}</div>
+          <div className="chart-tooltip-value">
+            {d.weight.toFixed(1)} <span>kg</span>
+          </div>
+          {ema !== undefined && (
+            <div className="chart-tooltip-meta">
+              wygładzona: {ema.toFixed(1)} kg
+            </div>
+          )}
+        </div>
+      );
+    })()}
     {/* Sprint 10 A5 — trend summary pod chartem. EMA smoothed line legenda
         + trend tygodniowy gdy ≥7 punktów. Bez tego user widzi 2 linie ale
         nie wie która jest "true weight". */}

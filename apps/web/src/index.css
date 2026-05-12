@@ -1791,6 +1791,7 @@ body:has(.preview-banner) .login-screen {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
+  position: relative;
 }
 .weight-chart-footer {
   display: flex;
@@ -2880,6 +2881,7 @@ body:has(.preview-banner) .login-screen {
 .metric-chart rect {
   cursor: pointer;
 }
+.chart-tooltip,
 .metric-chart-tooltip {
   position: absolute;
   transform: translate(-50%, -100%);
@@ -2898,21 +2900,30 @@ body:has(.preview-banner) .login-screen {
   gap: 0.125rem;
   margin-top: -6px;
 }
+.chart-tooltip-date,
 .metric-chart-tooltip-date {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-size: 0.7rem;
   color: var(--text-muted);
 }
+.chart-tooltip-value,
 .metric-chart-tooltip-value {
   font-family: 'JetBrains Mono', ui-monospace, monospace;
   font-weight: 600;
   color: var(--text);
 }
+.chart-tooltip-value span,
 .metric-chart-tooltip-value span {
   color: var(--text-muted);
   font-weight: 400;
   font-size: 0.7rem;
   margin-left: 0.125rem;
+}
+.chart-tooltip-meta {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.7rem;
+  color: var(--cyan);
+  margin-top: 0.125rem;
 }
 .metric-chart {
   display: block;
