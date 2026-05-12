@@ -218,7 +218,7 @@ const TAB_TITLES: Record<AppTab, string> = {
   plan: 'Plan Treningowy',
   body: 'Ciało',
   nutrition: 'Odżywianie',
-  recipes: 'Przepisy AI',
+  recipes: 'Asystent AI',
   settings: 'Ustawienia',
 };
 

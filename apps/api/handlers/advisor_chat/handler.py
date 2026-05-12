@@ -203,33 +203,45 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         today_state = service.build_today_state(user_id, today)
 
         # ── 6.5 RAG retrieval (per ADR-007 D6 — top-K=5 cosine recipes) ────
+        # Topical gate: skip RAG gdy user pyta NIE o jedzenie (waga, trening,
+        # regeneracja). Oszczędza embedding + S3 + FAISS cost gdy recipe
+        # cards by były off-topic. Owner UX feedback: nie pokazuj przepisów
+        # przy pytaniu o wagę lub trening.
+        #
         # Graceful degradation: każda RAG porażka (S3 missing, OpenAI down,
         # FAISS broken) → `retrieved=None`, chat kontynuuje bez recipes.
         # NIE leakujemy SDK exception body do logów (per ADR-007 OPEN-4).
         retrieved: list[UsedRecipe] | None = None
-        try:
-            retrieved = rag.retrieve(request.message, k=5)
-        except rag.RAGUnavailableError as exc:
-            logger.warning(
-                "rag_unavailable",
-                extra={
-                    "request_id": request_id,
-                    "user_id": user_id,
-                    "reason": exc.reason,
-                    "status_code": exc.status_code,
-                },
+        food_related = service.is_food_related(request.message)
+        if not food_related:
+            logger.info(
+                "rag_skipped_non_food_query",
+                extra={"request_id": request_id, "user_id": user_id},
             )
-        except Exception as exc:  # noqa: BLE001 — RAG nie może crashować chatu
-            # Catch-all jako defense-in-depth. `exc_type` only (klasa), bez
-            # `str(exc)` — third-party SDK może echo'ować prompt w `__str__`.
-            logger.error(
-                "rag_unexpected_error",
-                extra={
-                    "request_id": request_id,
-                    "user_id": user_id,
-                    "exc_type": type(exc).__name__,
-                },
-            )
+        else:
+            try:
+                retrieved = rag.retrieve(request.message, k=5)
+            except rag.RAGUnavailableError as exc:
+                logger.warning(
+                    "rag_unavailable",
+                    extra={
+                        "request_id": request_id,
+                        "user_id": user_id,
+                        "reason": exc.reason,
+                        "status_code": exc.status_code,
+                    },
+                )
+            except Exception as exc:  # noqa: BLE001 — RAG nie może crashować chatu
+                # Catch-all jako defense-in-depth. `exc_type` only (klasa), bez
+                # `str(exc)` — third-party SDK może echo'ować prompt w `__str__`.
+                logger.error(
+                    "rag_unexpected_error",
+                    extra={
+                        "request_id": request_id,
+                        "user_id": user_id,
+                        "exc_type": type(exc).__name__,
+                    },
+                )
 
         # ── 6.6 Training plan injection (Sprint 5 PR #4) ───────────────────
         # Best-effort load z DDB (PK=USER#{id} SK=PLAN#current — populated

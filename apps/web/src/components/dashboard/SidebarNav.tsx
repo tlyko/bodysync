@@ -86,7 +86,7 @@ const ITEMS: Item[] = [
   { id: 'plan', label: 'Plan Treningowy', icon: <PlanIcon /> },
   { id: 'body', label: 'Ciało', icon: <ScaleIcon /> },
   { id: 'nutrition', label: 'Odżywianie', icon: <FoodIcon /> },
-  { id: 'recipes', label: 'Przepisy AI', icon: <RecipeIcon /> },
+  { id: 'recipes', label: 'Asystent AI', icon: <RecipeIcon /> },
   { id: 'settings', label: 'Ustawienia', icon: <SettingsIcon /> },
 ];
 
