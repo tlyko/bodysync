@@ -1117,3 +1117,63 @@ resource "aws_lambda_permission" "activities_list_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# Sprint 12 PR1 — waitlist landing signup. POST /api/waitlist, no auth
+# (public landing form). Zbiera email + opcjonalny interest + RODO consent
+# pod PK=WAITLIST. Defense-in-depth: IAM warunkuje LeadingKeys=WAITLIST
+# (NIE USER#*) — separate prefix od user space, owner-readable później bez
+# ryzyka cross-mixu z user data. Lekki: 256 MB / 5 s.
+module "waitlist" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "waitlist"
+  source_zip    = "${path.module}/../../apps/api/dist/waitlist.zip"
+  handler       = "handlers.waitlist.handler.handler"
+  memory_size   = 256
+  timeout       = 5
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # PK=WAITLIST partition — public signup writes only. Brak USER#*
+      # path bo waitlist NIE należy do user space (pre-signup landing).
+      # Owner-readable później bezpośrednio przez AWS console / CLI bez
+      # ryzyka leak'u user data via wrong query w analytics.
+      Sid      = "DDBWriteWaitlist"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["WAITLIST"]
+        }
+      }
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "waitlist" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.waitlist.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "waitlist" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/waitlist"
+  target    = "integrations/${aws_apigatewayv2_integration.waitlist.id}"
+}
+
+resource "aws_lambda_permission" "waitlist_apigw" {
+  statement_id  = "AllowAPIGWInvokeWaitlist"
+  action        = "lambda:InvokeFunction"
+  function_name = module.waitlist.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}

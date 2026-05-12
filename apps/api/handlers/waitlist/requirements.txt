@@ -1,0 +1,5 @@
+pydantic==2.10.*
+# `EmailStr` validation wymaga dodatkowego `email-validator` package
+# (Pydantic ma go jako optional dep, NIE pull'uje automatycznie).
+email-validator==2.2.*
+boto3==1.35.*

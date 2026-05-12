@@ -24,6 +24,9 @@ dev = [
     # Mirror prod deps so type checking sees them; pinning loose because
     # they're test-time only.
     "pydantic>=2.10",
+    # `EmailStr` w pydantic wymaga osobnego pakietu (NIE pull'uje
+    # automatycznie). Lambda runtime version w handlers/waitlist/requirements.txt.
+    "email-validator>=2.2",
     "PyJWT>=2.9",
     "google-auth>=2.35",
     # Sprint 5 — `tests/handlers/plan/test_service.py` importuje
