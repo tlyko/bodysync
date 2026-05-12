@@ -36,6 +36,7 @@ import { SidebarNav, type AppTab } from './dashboard/SidebarNav';
 import { SleepStagesCard } from './dashboard/SleepStagesCard';
 import { StatCard } from './dashboard/StatCard';
 import { TDEECalculatorWizard } from './dashboard/TDEECalculatorWizard';
+import { TrendCharts } from './dashboard/TrendCharts';
 import { WeightChart } from './dashboard/WeightChart';
 import { WorkoutPlanCard } from './dashboard/WorkoutPlanCard';
 
@@ -440,6 +441,13 @@ function DashboardOverview({
           </SectionPanel>
         </div>
       </div>
+
+      {/* Sprint 10 — sekcja Trendy: 7d/30d charts dla kcal_in / kroki /
+          spalone kcal. POZA overview-grid (charty potrzebują full width).
+          Owner: "chce widzieć jak zmieniają mi się te 3 metryki w czasie". */}
+      <SectionPanel title={`Trendy · ${rangeLabel(range, latestDate(days))}`}>
+        <TrendCharts days={days} range={range} />
+      </SectionPanel>
     </>
   );
 }
