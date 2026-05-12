@@ -114,7 +114,7 @@ export function PlanScreen() {
           className="plan-refresh-button"
           disabled={refreshing}
         >
-          {refreshing ? 'Odświeżam…' : 'Odśwież z arkusza'}
+          {refreshing ? 'Synchronizuję…' : 'Zsynchronizuj plan'}
         </button>
       </div>
 
