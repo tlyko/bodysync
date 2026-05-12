@@ -37,8 +37,9 @@ describe('TrendCharts', () => {
     expect(screen.getByText('Kalorie spożyte')).toBeInTheDocument();
     expect(screen.getByText('Kroki')).toBeInTheDocument();
     expect(screen.getByText('Spalone kalorie')).toBeInTheDocument();
-    // 3 SVG polyline (1 per chart, każdy ma 2+ punkty)
-    expect(container.querySelectorAll('polyline')).toHaveLength(3);
+    // 3 SVG (1 per chart), każdy z 3 barami (1 per data point) = 9 rectów total
+    expect(container.querySelectorAll('svg.metric-chart')).toHaveLength(3);
+    expect(container.querySelectorAll('rect')).toHaveLength(9);
   });
 
   test('last value displayed obok header — sumuje active+basal dla spalone', () => {

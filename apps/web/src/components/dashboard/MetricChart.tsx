@@ -1,10 +1,10 @@
 import type { SeriesPoint } from '../../biometry';
 
-// Color tokens dla MetricChart — reflect `--{name}` vars w `index.css`.
-// Inline gradient definicje SVG nie obsługują `var()` w stop-color w 100%
-// browserów (Safari edge cases), więc trzymamy mapping na hex tutaj.
-// Trzymane jako single source of truth — gdy zmieniamy color tokens w
-// index.css, synchronizujemy tutaj.
+export type MetricChartColor = 'cyan' | 'orange' | 'green' | 'purple' | 'red';
+
+// Color tokens dla MetricChart — mirror `--{name}` vars z `index.css`. SVG
+// `fill="var(--cyan)"` ma niespójne wsparcie w Safari dla niektórych wersji,
+// więc trzymamy hex mapping single source of truth.
 const COLOR_HEX: Record<MetricChartColor, string> = {
   cyan: '#22d3ee',
   orange: '#f59e0b',
@@ -12,8 +12,6 @@ const COLOR_HEX: Record<MetricChartColor, string> = {
   purple: '#a78bfa',
   red: '#ef4444',
 };
-
-export type MetricChartColor = 'cyan' | 'orange' | 'green' | 'purple' | 'red';
 
 type Props = {
   data: SeriesPoint[];
@@ -26,19 +24,18 @@ type Props = {
 };
 
 const PAD_TOP = 16;
-const PAD_BOTTOM = 24; // miejsce na first/last date label
-const PAD_LEFT = 36; // miejsce na axis labels (Y range)
+const PAD_BOTTOM = 24;
+const PAD_LEFT = 36;
 const PAD_RIGHT = 8;
+const BAR_GAP_RATIO = 0.3;
+const BAR_RADIUS = 3;
 
 const defaultFormat = (v: number) => v.toFixed(0);
 
-// Generic line chart dla pojedynczej metryki w czasie. Empty state gdy
-// `data.length < 2` (analog WeightChart). Y-axis labele min/max + X-axis
-// first/last date pod osią. Mirror SVG struktury z `WeightChart` minus
-// EMA overlay i waga-specific footer (trend kg/week).
-//
-// Reuse: linearGradient pod krzywą, X/Y axis labels, last point dot,
-// padding constants. `color` z 5 design tokenów (cyan/orange/green/purple/red).
+// Generic bar chart per-day dla pojedynczej metryki w czasie. Empty state
+// gdy `data.length === 0`. Y-axis od 0 (bar chart best-practice — proportional
+// scale, NIE relatywny diff), padded ~5% nad max żeby najwyższy bar nie
+// dotykał górnej krawędzi. Each data point = jeden bar z rounded top.
 export function MetricChart({
   data,
   label,
@@ -51,45 +48,31 @@ export function MetricChart({
   if (data.length === 0) {
     return <div className="metric-chart-empty">Brak danych dla wybranego okresu</div>;
   }
-  if (data.length < 2) {
-    return (
-      <div className="metric-chart-empty">
-        Tylko 1 punkt ({formatValue(data[0].value)} {unit}) — wykres pojawi się po kolejnym.
-      </div>
-    );
-  }
 
   const sorted = [...data].sort((a, b) => a.date.localeCompare(b.date));
   const values = sorted.map((d) => d.value);
-  const minV = Math.min(...values);
-  const maxV = Math.max(...values);
-  // Padding range — chroni przed "płaską linią" gdy wartości identyczne.
-  // Używamy 5% range padding, minimum 1 jednostkę (kcal/steps są integer).
-  const rangeRaw = maxV - minV;
-  const pad = Math.max(rangeRaw * 0.05, 1);
-  const yMin = Math.floor(minV - pad);
-  const yMax = Math.ceil(maxV + pad);
-  const yRange = yMax - yMin || 1;
+  const maxV = Math.max(...values, 0);
+  // Bar chart Y zaczyna od 0 (NIE minV) — proportional comparison między
+  // dniami. Top padding 5% nad max żeby bar nie dotykał krawędzi.
+  const yMax = Math.ceil(maxV * 1.05) || 1;
+  const yMin = 0;
+  const yRange = yMax - yMin;
 
   const plotW = width - PAD_LEFT - PAD_RIGHT;
   const plotH = height - PAD_TOP - PAD_BOTTOM;
+  const slotW = plotW / sorted.length;
+  const barW = slotW * (1 - BAR_GAP_RATIO);
 
-  const xFor = (i: number) =>
-    PAD_LEFT + (sorted.length === 1 ? plotW / 2 : (i / (sorted.length - 1)) * plotW);
   const yFor = (v: number) => PAD_TOP + plotH - ((v - yMin) / yRange) * plotH;
-
-  const linePoints = sorted.map((d, i) => `${xFor(i)},${yFor(d.value)}`).join(' ');
+  const baseY = PAD_TOP + plotH;
 
   const firstDate = sorted[0].date;
   const lastDate = sorted[sorted.length - 1].date;
   const lastValue = sorted[sorted.length - 1].value;
 
-  const stroke = COLOR_HEX[color];
-  // Unique gradient id na render — gdy 3 instancje MetricChart na tej samej
-  // stronie z różnymi `color`, gradient defs muszą się NIE zderzyć. Format
-  // `metric-chart-grad-${color}-${label}` — `label` jest stable identyfikatorem
-  // (np. "Kalorie spożyte") i pozwala mieć 2 chart-y z tym samym color
-  // tokenem na tej samej stronie. Sanitize spaces i polish chars dla
+  const fill = COLOR_HEX[color];
+  // Unique gradient id (3 chart-y na stronie z różnymi kolorami → defs muszą
+  // się NIE zderzyć). `label` jest stable identyfikatorem, sanitize do
   // valid SVG id.
   const gradId = `metric-chart-grad-${color}-${label.replace(/[^a-zA-Z0-9]/g, '')}`;
 
@@ -101,20 +84,20 @@ export function MetricChart({
       height={height}
       preserveAspectRatio="none"
       role="img"
-      aria-label={`Wykres ${label} ${firstDate} — ${lastDate}, ostatnia wartość ${formatValue(lastValue)} ${unit}`}
+      aria-label={`Wykres słupkowy ${label} ${firstDate} — ${lastDate}, ostatnia wartość ${formatValue(lastValue)} ${unit}`}
     >
       <defs>
         <linearGradient id={gradId} x1="0" y1="0" x2="0" y2="1">
-          <stop offset="0%" stopColor={stroke} stopOpacity="0.3" />
-          <stop offset="100%" stopColor={stroke} stopOpacity="0" />
+          <stop offset="0%" stopColor={fill} stopOpacity="0.95" />
+          <stop offset="100%" stopColor={fill} stopOpacity="0.55" />
         </linearGradient>
       </defs>
 
-      {/* Y-axis labels (max top, min bottom) */}
+      {/* Y-axis labels (max top, 0 bottom) */}
       <text x={PAD_LEFT - 6} y={PAD_TOP + 4} className="metric-chart-axis-label y-label">
         {formatValue(yMax)}
       </text>
-      <text x={PAD_LEFT - 6} y={PAD_TOP + plotH} className="metric-chart-axis-label y-label">
+      <text x={PAD_LEFT - 6} y={baseY} className="metric-chart-axis-label y-label">
         {formatValue(yMin)}
       </text>
 
@@ -127,31 +110,39 @@ export function MetricChart({
         className="metric-chart-grid"
       />
 
-      {/* Filled gradient area under line */}
-      <polygon
-        points={`${xFor(0)},${PAD_TOP + plotH} ${linePoints} ${xFor(sorted.length - 1)},${PAD_TOP + plotH}`}
-        fill={`url(#${gradId})`}
+      {/* Baseline (0) — pomaga wizualnie "zakotwiczyć" bary */}
+      <line
+        x1={PAD_LEFT}
+        y1={baseY}
+        x2={PAD_LEFT + plotW}
+        y2={baseY}
+        className="metric-chart-grid"
       />
 
-      {/* Main line */}
-      <polyline
-        points={linePoints}
-        fill="none"
-        stroke={stroke}
-        strokeWidth="2"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-
-      {/* Last point dot — wyróżnia "current value" na końcu serii. */}
-      <circle
-        cx={xFor(sorted.length - 1)}
-        cy={yFor(lastValue)}
-        r="4"
-        fill={stroke}
-        stroke="#0a0e17"
-        strokeWidth="2"
-      />
+      {/* Bars — jeden rect per data point, gradient fill, rounded top corners.
+          SVG nie ma per-corner radius, więc używamy global `rx`/`ry` — wpływa
+          też na dolne corners, ale baseline line je przykrywa wizualnie. */}
+      {sorted.map((d, i) => {
+        const x = PAD_LEFT + i * slotW + (slotW - barW) / 2;
+        const y = yFor(d.value);
+        const h = baseY - y;
+        return (
+          <rect
+            key={d.date}
+            x={x}
+            y={y}
+            width={barW}
+            height={Math.max(h, 0)}
+            rx={BAR_RADIUS}
+            ry={BAR_RADIUS}
+            fill={`url(#${gradId})`}
+          >
+            <title>
+              {d.date}: {formatValue(d.value)} {unit}
+            </title>
+          </rect>
+        );
+      })}
 
       {/* X-axis date labels (first + last) */}
       <text x={PAD_LEFT} y={height - 6} className="metric-chart-axis-label">
