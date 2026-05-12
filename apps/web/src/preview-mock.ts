@@ -144,6 +144,60 @@ const ADVISOR_REPLY = {
   turn_idx: 0,
 };
 
+// Demo conversation — używane do screenshot landing demo gallery.
+// Pokazuje realistyczny exchange: user pyta o śniadanie pod trening, advisor
+// daje porcjowane porady z markdown formatowaniem + recipe reference.
+const ADVISOR_HISTORY = {
+  date: today,
+  messages: [
+    {
+      role: 'user',
+      content: 'Co zjeść na śniadanie przed treningiem A o 10:00?',
+      turn_idx: 0,
+      ts: new Date(Date.now() - 5 * 60_000).toISOString(),
+    },
+    {
+      role: 'assistant',
+      content:
+        'Przed treningiem siłowym (Trening A — Squat 5x5, Bench 4x8) warto zjeść posiłek\n' +
+        'lekkostrawny, bogaty w węglowodany złożone + umiarkowane białko, ~1.5–2h przed.\n\n' +
+        '**Propozycja (~520 kcal, 32g B / 12g T / 75g W):**\n\n' +
+        '- 🍞 80g płatków owsianych z mlekiem 2% (300 ml)\n' +
+        '- 🥚 1 jajko na miękko\n' +
+        '- 🍌 1 banan\n' +
+        '- ☕ kawa czarna bez cukru\n\n' +
+        'Wskazówki:\n' +
+        '1. Unikaj tłuszczu (>15g) — spowalnia trawienie.\n' +
+        '2. Wypij 300–500 ml wody w ciągu godziny przed.\n' +
+        '3. Jeśli czujesz głód 30 min przed treningiem — banan lub daktyle.',
+      turn_idx: 0,
+      ts: new Date(Date.now() - 4 * 60_000).toISOString(),
+    },
+    {
+      role: 'user',
+      content: 'A co po treningu?',
+      turn_idx: 1,
+      ts: new Date(Date.now() - 2 * 60_000).toISOString(),
+    },
+    {
+      role: 'assistant',
+      content:
+        'Po treningu (anabolic window ~2h) priorytet to białko + węgle szybkie:\n\n' +
+        '**Opcja A — szybki shake (~380 kcal):**\n' +
+        '- 30g białka whey + 250 ml mleka\n' +
+        '- 1 banan + łyżka miodu\n\n' +
+        '**Opcja B — pełny posiłek (~620 kcal, 45g B):**\n' +
+        '- 150g kurczak grillowany\n' +
+        '- 200g ryżu basmati (waga ugotowanego)\n' +
+        '- 200g brokuł na parze\n' +
+        '- oliwa 5g\n\n' +
+        'Cel kaloryczny dzisiaj: **2400 kcal** (deficyt 300 vs TDEE 2700).',
+      turn_idx: 1,
+      ts: new Date(Date.now() - 1 * 60_000).toISOString(),
+    },
+  ],
+};
+
 export function installPreviewMock(): void {
   const realFetch = window.fetch.bind(window);
 
@@ -170,6 +224,12 @@ export function installPreviewMock(): void {
         return json({ ...body, is_default: false });
       }
       return json(PROFILE_TARGETS);
+    }
+    if (url.includes('/api/advisor/chat/history')) {
+      if (init?.method === 'DELETE') {
+        return json({ deleted: 0, date: today });
+      }
+      return json(ADVISOR_HISTORY);
     }
     if (url.includes('/api/advisor/chat')) {
       // Symuluj 800ms latency dla realistycznego loading state w UI
