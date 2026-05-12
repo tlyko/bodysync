@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import { weeklyTrendKg, weightEMA } from '../../biometry';
 
 type WeightPoint = {
@@ -7,7 +8,6 @@ type WeightPoint = {
 
 type Props = {
   data: WeightPoint[];
-  width?: number;
   height?: number;
 };
 
@@ -25,7 +25,23 @@ const EMA_ALPHA = 0.1;
 // (jeden punkt = brak skali). Y-axis ma min/max range padded o 0.5 kg każdy
 // koniec żeby linia nie dotykała górnej/dolnej krawędzi. Pokazuje labele
 // min/max na osi Y + first/last datę pod osią X.
-export function WeightChart({ data, width = 600, height = 220 }: Props) {
+export function WeightChart({ data, height = 220 }: Props) {
+  // ResizeObserver — viewBox śledzi pixel width containera, SVG internal
+  // coords = pixel coords. Tekst/circle/EMA dashed pattern bez stretchu.
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(600);
+
+  useEffect(() => {
+    if (!wrapRef.current || typeof ResizeObserver === 'undefined') return;
+    const el = wrapRef.current;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0].contentRect.width);
+      if (w > 0) setWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   if (data.length === 0) {
     return (
       <div className="weight-chart-empty">
@@ -86,11 +102,11 @@ export function WeightChart({ data, width = 600, height = 220 }: Props) {
         : `${trendKgPerWeek > 0 ? '+' : ''}${trendKgPerWeek.toFixed(1).replace('.', ',')} kg/tydz.`;
 
   return (
-    <div className="weight-chart-wrap">
+    <div ref={wrapRef} className="weight-chart-wrap">
     <svg
       className="weight-chart"
       viewBox={`0 0 ${width} ${height}`}
-      width="100%"
+      width={width}
       height={height}
       preserveAspectRatio="none"
       role="img"

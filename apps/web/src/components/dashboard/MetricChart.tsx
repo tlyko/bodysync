@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react';
 import type { SeriesPoint } from '../../biometry';
 
 export type MetricChartColor = 'cyan' | 'orange' | 'green' | 'purple' | 'red';
@@ -18,7 +19,6 @@ type Props = {
   label: string;
   unit: string;
   color: MetricChartColor;
-  width?: number;
   height?: number;
   formatValue?: (v: number) => string;
 };
@@ -41,10 +41,26 @@ export function MetricChart({
   label,
   unit,
   color,
-  width = 600,
   height = 180,
   formatValue = defaultFormat,
 }: Props) {
+  // ResizeObserver pattern — viewBox śledzi pixel width containera, więc
+  // SVG internal coords = pixel coords. Brak stretchu tekstu/circle/rx.
+  // Fallback 600px gdy ref nieaktywny (initial render / jsdom test env).
+  const wrapRef = useRef<HTMLDivElement>(null);
+  const [width, setWidth] = useState(600);
+
+  useEffect(() => {
+    if (!wrapRef.current || typeof ResizeObserver === 'undefined') return;
+    const el = wrapRef.current;
+    const ro = new ResizeObserver((entries) => {
+      const w = Math.round(entries[0].contentRect.width);
+      if (w > 0) setWidth(w);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
+
   if (data.length === 0) {
     return <div className="metric-chart-empty">Brak danych dla wybranego okresu</div>;
   }
@@ -77,10 +93,11 @@ export function MetricChart({
   const gradId = `metric-chart-grad-${color}-${label.replace(/[^a-zA-Z0-9]/g, '')}`;
 
   return (
+    <div ref={wrapRef} className="metric-chart-wrap">
     <svg
       className="metric-chart"
       viewBox={`0 0 ${width} ${height}`}
-      width="100%"
+      width={width}
       height={height}
       preserveAspectRatio="none"
       role="img"
@@ -152,5 +169,6 @@ export function MetricChart({
         {lastDate}
       </text>
     </svg>
+    </div>
   );
 }
