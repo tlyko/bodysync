@@ -8,10 +8,10 @@ describe('MetricChart', () => {
       <MetricChart data={[]} label="Kroki" unit="kroki" color="green" />,
     );
     expect(screen.getByText('Brak danych dla wybranego okresu')).toBeInTheDocument();
-    expect(container.querySelector('polyline')).toBeNull();
+    expect(container.querySelector('rect')).toBeNull();
   });
 
-  test('empty state gdy 1 point — pokazuje single value + komunikat o kolejnym', () => {
+  test('renders 1 bar dla 1 punktu (bar chart radzi sobie z single point)', () => {
     const { container } = render(
       <MetricChart
         data={[{ date: '2026-05-01', value: 8000 }]}
@@ -20,13 +20,11 @@ describe('MetricChart', () => {
         color="green"
       />,
     );
-    // Komunikat "wykres pojawi się po kolejnym" (case-insensitive na
-    // wypadek redakcyjnych poprawek tekstu).
-    expect(screen.getByText(/wykres pojawi się po kolejnym/i)).toBeInTheDocument();
-    expect(container.querySelector('polyline')).toBeNull();
+    const bars = container.querySelectorAll('rect');
+    expect(bars).toHaveLength(1);
   });
 
-  test('renders polyline z 2+ points', () => {
+  test('renders 1 rect per data point z 3+ points', () => {
     const { container } = render(
       <MetricChart
         data={[
@@ -39,17 +37,14 @@ describe('MetricChart', () => {
         color="green"
       />,
     );
-    const polyline = container.querySelector('polyline');
-    expect(polyline).not.toBeNull();
-    const points = polyline?.getAttribute('points') ?? '';
-    // 3 punkty = 3 pary x,y oddzielone spacją
-    expect(points.split(' ')).toHaveLength(3);
-    // Last point dot present
-    expect(container.querySelector('circle')).not.toBeNull();
+    const bars = container.querySelectorAll('rect');
+    expect(bars).toHaveLength(3);
+    // Każdy bar ma <title> z date + value dla hover tooltip
+    const titles = container.querySelectorAll('rect title');
+    expect(titles).toHaveLength(3);
   });
 
   test('formatValue custom — Y-axis labele używają formattera', () => {
-    // formatValue z thousand separator (jak w TrendCharts.tsx — toLocaleString)
     const fmt = (v: number) => Math.round(v).toLocaleString('pl-PL');
     render(
       <MetricChart
@@ -63,15 +58,13 @@ describe('MetricChart', () => {
         formatValue={fmt}
       />,
     );
-    // Y-axis pokazuje min/max sformatowane przez fmt — wartości będą
-    // padded (yMin floor, yMax ceil) ale powinny zawierać NBSP/space jako
-    // thousands separator (pl-PL standard). Regex sprawdza presence
-    // 4-cyfrowej liczby ze spacją (NBSP   lub regular).
     const labels = document.querySelectorAll('.metric-chart-axis-label.y-label');
     expect(labels.length).toBe(2);
     const texts = Array.from(labels).map((l) => l.textContent ?? '');
-    // Co najmniej jedna z osi Y zawiera thousands-separator format
-    expect(texts.some((t) => /\d[\s ]?\d{3}/.test(t))).toBe(true);
+    // Y-max z 2700 padded ~5% → 2835 sformatowane "2 835" (pl-PL NBSP/space).
+    expect(texts.some((t) => /\d[\s ]?\d{3}/.test(t))).toBe(true);
+    // Y-min powinien być "0" (bar chart baseline)
+    expect(texts.some((t) => t === '0')).toBe(true);
   });
 
   test('aria-label zawiera label metryki + zakres dat + ostatnia wartość', () => {
@@ -89,6 +82,7 @@ describe('MetricChart', () => {
     const svg = screen.getByRole('img');
     const aria = svg.getAttribute('aria-label') ?? '';
     expect(aria).toContain('Kroki');
+    expect(aria).toContain('słupkowy');
     expect(aria).toContain('2026-05-01');
     expect(aria).toContain('2026-05-07');
     expect(aria).toContain('kroki');
