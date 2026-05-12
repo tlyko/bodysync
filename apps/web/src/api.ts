@@ -18,6 +18,7 @@ import type {
   PlanResponse,
   ProfileTargets,
   ProfileTargetsUpdate,
+  WaitlistSignupRequest,
 } from './types';
 
 class ApiError extends Error {
@@ -203,6 +204,38 @@ export function dietCheckErrorMessage(reasonOrError: DietCheckSkipReason | unkno
     return reasonOrError.message || `Błąd serwera (${reasonOrError.status})`;
   }
   return 'Nieoczekiwany błąd';
+}
+
+// PR2 waitlist landing — public POST (bez JWT). Backend rozpoznaje honeypot
+// path i odpowiada 200 silently (bot signal). Walidacja schemy → 422 z PL
+// mapping przez `waitlistErrorMessage`. Email DDB-stored 24mc + sha256(IP).
+export async function postWaitlist(payload: WaitlistSignupRequest): Promise<{ ok: true }> {
+  return request<{ ok: true }>('/api/waitlist', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// PL banner message dla waitlist submit error. Status 0 = aborted (ignoruj),
+// -1 = network/CORS, 422 = validation (rzadkie po client-side regex check),
+// 5xx = server (Lambda cold start / DDB throttle), default fallback.
+export function waitlistErrorMessage(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return 'Coś poszło nie tak.';
+  }
+  if (err.status === 0) {
+    return ''; // aborted — UI nie pokazuje
+  }
+  if (err.status === -1) {
+    return 'Brak połączenia — spróbuj za chwilę.';
+  }
+  if (err.status === 422) {
+    return 'Sprawdź email i zgodę.';
+  }
+  if (err.status >= 500) {
+    return 'Coś nie pyknęło — spróbuj ponownie.';
+  }
+  return 'Coś poszło nie tak.';
 }
 
 // Strava OAuth start endpoint zwraca 302 do strava.com — frontend

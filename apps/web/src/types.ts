@@ -209,3 +209,12 @@ export type PlanResponse = {
   fresh: boolean; // true = just fetched z Sheets, false = z DDB cache
   sheet_tab: string;
 };
+
+// ─── Waitlist landing (PR1 backend mirror — handlers/waitlist/schemas.py) ───
+
+export type WaitlistSignupRequest = {
+  email: string;
+  consent: boolean;
+  honeypot: string;
+  interest: string | null;
+};

@@ -1,7 +1,8 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { GOOGLE_CLIENT_ID } from '../config';
 import { loginWithGoogle } from '../api';
 import logoHorizontal from '../assets/logo-horizontal.svg';
+import { WaitlistForm } from './WaitlistForm';
 
 // Google Identity Services types — minimum potrzebne, biblioteka inject'uje
 // `window.google.accounts.id` po załadowaniu skryptu z gsi/client.
@@ -37,10 +38,13 @@ type Props = {
 };
 
 export function LoginScreen({ onLoginSuccess }: Props) {
+  // PR2 waitlist — Google login button schowany za toggle żeby waitlist był
+  // primary CTA. Owner + Weronika klikają "Mam już konto → Zaloguj" → reveals.
+  const [showLogin, setShowLogin] = useState(false);
   const buttonRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    if (!GOOGLE_CLIENT_ID) {
+    if (!GOOGLE_CLIENT_ID || !showLogin) {
       return;
     }
     let attempts = 0;
@@ -81,25 +85,43 @@ export function LoginScreen({ onLoginSuccess }: Props) {
     };
 
     init();
-  }, [onLoginSuccess]);
-
-  if (!GOOGLE_CLIENT_ID) {
-    return (
-      <div className="login-screen">
-        <img src={logoHorizontal} alt="bodysync" className="login-logo" />
-        <p className="error">
-          Konfiguracja niekompletna — brak <code>VITE_GOOGLE_CLIENT_ID</code>. Ustaw w
-          Cloudflare project Environment Variables i przebuduj.
-        </p>
-      </div>
-    );
-  }
+  }, [onLoginSuccess, showLogin]);
 
   return (
     <div className="login-screen">
-      <img src={logoHorizontal} alt="bodysync" className="login-logo" />
-      <p className="tagline">Personal health + fitness dashboard</p>
-      <div ref={buttonRef} className="gsi-button" />
+      <div className="waitlist-hero">
+        <img src={logoHorizontal} alt="bodysync" className="login-logo" />
+        <h1>Osobisty asystent AI dla treningu i diety</h1>
+        <p className="waitlist-pitch">
+          <strong>bodysync</strong> łączy dane z Apple Health, Strava i Twojego planu treningowego,
+          żeby dawać Ci codzienne rekomendacje po polsku — co zjeść, jak się zregenerować, kiedy
+          odpuścić. Aplikacja w fazie zamkniętej bety, dla par i osób uzależnionych od danych.
+          Zostaw email — odezwę się gdy ruszymy szerzej.
+        </p>
+        <WaitlistForm />
+
+        <button
+          type="button"
+          className="login-toggle"
+          onClick={() => setShowLogin((s) => !s)}
+          aria-expanded={showLogin}
+          aria-controls="login-reveal"
+        >
+          Mam już konto → Zaloguj
+        </button>
+
+        {showLogin && (
+          <div id="login-reveal" className="login-reveal">
+            {GOOGLE_CLIENT_ID ? (
+              <div ref={buttonRef} className="gsi-button" />
+            ) : (
+              <p className="error">
+                Konfiguracja niekompletna — brak <code>VITE_GOOGLE_CLIENT_ID</code>.
+              </p>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }
