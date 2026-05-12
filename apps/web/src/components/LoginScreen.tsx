@@ -3,6 +3,7 @@ import { GOOGLE_CLIENT_ID } from '../config';
 import { loginWithGoogle } from '../api';
 import logoHorizontal from '../assets/logo-horizontal.svg';
 import { WaitlistForm } from './WaitlistForm';
+import { DemoGallery } from './DemoGallery';
 
 // Google Identity Services types — minimum potrzebne, biblioteka inject'uje
 // `window.google.accounts.id` po załadowaniu skryptu z gsi/client.
@@ -98,6 +99,11 @@ export function LoginScreen({ onLoginSuccess }: Props) {
           odpuścić. Aplikacja w fazie zamkniętej bety, dla par i osób uzależnionych od danych.
           Zostaw email — odezwę się gdy ruszymy szerzej.
         </p>
+      </div>
+
+      <DemoGallery />
+
+      <div className="waitlist-hero">
         <WaitlistForm />
 
         <button
