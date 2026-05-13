@@ -163,6 +163,115 @@ def _decimal_to_float(value: Any) -> float:
     return float(value)
 
 
+# Keywords food-related po polsku — heurystyka czy pytanie usera dotyczy
+# jedzenia / diety / przepisów. Używamy żeby zaoszczędzić RAG retrieval cost
+# (OpenAI embedding + S3 + FAISS) gdy user pyta o trening, wagę, regenerację.
+# Lista celowo nieperfekcyjna — false positive (trafiamy niefoodowe pytanie
+# i pokażemy recipes) jest minimum harm; false negative (food pytanie bez
+# keyword → no recipes) zauważymy i dodamy keyword.
+_FOOD_KEYWORDS: tuple[str, ...] = (
+    # Posiłki + okresy
+    "jedz",  # jeść, jedzenie, zjedz, zjadłem
+    "zjem",
+    "zjes",  # zjeść
+    "zjad",
+    "śniadan",
+    "obiad",
+    "kolacj",
+    "podwieczor",
+    "drugie śniadan",
+    "posiłek",
+    "posiłk",
+    "porcj",
+    "menu",
+    "danie",
+    "dania",
+    "potraw",
+    # Przepisy / kuchnia
+    "przepis",
+    "gotow",
+    "ugotuj",
+    "kuchni",
+    "zrobi",  # "co zrobić na obiad"
+    "smaczn",
+    # Makro / kalorie
+    "kalori",
+    "kcal",
+    "makro",
+    "białk",
+    "bialk",
+    "tłuszcz",
+    "tluszcz",
+    "węglowod",
+    "weglowod",
+    "carbs",
+    "protein",
+    # Dieta / głód
+    "diet",
+    "głod",
+    "glod",
+    "syt",
+    "deficyt",
+    "nadwyżk",
+    "nadwyzk",
+    "surplus",
+    "redukcj",
+    "masa",
+    # Źródła recipes
+    "lidl",
+    "biedronk",
+    # Konkretne foody (top-frequency)
+    "owsiank",
+    "kanapk",
+    "shake",
+    "koktajl",
+    "sałatk",
+    "salatk",
+    "makaron",
+    "ryż",
+    "ryz",
+    "jajk",
+    "jajeczn",
+    "tost",
+    "bajgl",
+    "wrap",
+    "burger",
+    "kurczak",
+    "łosoś",
+    "losos",
+    "owoc",
+    "warzyw",
+)
+
+
+def _strip_diacritics(text: str) -> str:
+    """NFD decompose + drop combining marks. "zjeść" → "zjesc", "łosoś" →
+    "losos". Pozwala dopasować keyword w PL message niezależnie od diacritics
+    wpisanych przez user'a."""
+    import unicodedata
+
+    nfd = unicodedata.normalize("NFD", text)
+    # Drop combining marks (Mn category). Polski 'ł' jest osobny codepoint
+    # (NIE decomposed), więc zamieniamy explicitly.
+    stripped = "".join(c for c in nfd if unicodedata.category(c) != "Mn")
+    return stripped.replace("ł", "l").replace("Ł", "L")
+
+
+def is_food_related(message: str) -> bool:
+    """Heurystyka czy user message dotyczy jedzenia/diety/przepisów.
+
+    Case-insensitive substring match na liście PL keywords. Strip diacritics
+    żeby "zjeść" matchowało keyword "zjes". Pusty/whitespace-only message
+    → False (skip RAG, owner pewnie kliknął submit przez pomyłkę).
+
+    Owner spec: nie pokazuj recipe cards gdy user pyta o wagę lub treningi.
+    """
+    normalized = _strip_diacritics(message.lower().strip())
+    if not normalized:
+        return False
+    return any(_strip_diacritics(kw) in normalized for kw in _FOOD_KEYWORDS)
+
+
 def _query_snapshots_in_range(
     user_id: str, metric_short: str, *, start: date, end: date
 ) -> list[dict[str, Any]]:

@@ -24,6 +24,50 @@ import pytest
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 
 
+# ─── is_food_related ──────────────────────────────────────────────────────
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Co zjeść na śniadanie?",
+        "Daj mi przepis na obiad",
+        "Ile kalorii dziennie żeby schudnąć?",
+        "Jaki shake po treningu",
+        "Potrzebuję więcej białka",
+        "Deficyt 500 kcal — jak ułożyć posiłki?",
+        "Owsianka z bananem — ok przed treningiem?",
+        "Co kupić w Lidlu na tydzień?",
+        "Makro na masie",
+        "Zjadłem tylko 1500 kcal — mało?",
+    ],
+)
+def test_is_food_related_true_for_food_queries(message: str) -> None:
+    from handlers.advisor_chat.service import is_food_related
+
+    assert is_food_related(message) is True, f"expected True dla: {message!r}"
+
+
+@pytest.mark.parametrize(
+    "message",
+    [
+        "Ile dziś ważę?",
+        "Jaki mam dziś trening?",
+        "Powinienem dziś pójść biegać?",
+        "Co z moim HRV ostatnio?",
+        "Czy mam się dziś zregenerować?",
+        "Czy iść na siłownię z bólem kolana?",
+        "Ile spałem w nocy?",
+        "",
+        "   ",
+    ],
+)
+def test_is_food_related_false_for_non_food_queries(message: str) -> None:
+    from handlers.advisor_chat.service import is_food_related
+
+    assert is_food_related(message) is False, f"expected False dla: {message!r}"
+
+
 # ─── read_history ─────────────────────────────────────────────────────────
 
 
