@@ -499,7 +499,7 @@ function RecentActivitiesPanel({ onSeeAll }: { onSeeAll: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
-    getActivities(3)
+    getActivities(5)
       .then((res) => {
         if (cancelled) return;
         setActivities(res.items);
