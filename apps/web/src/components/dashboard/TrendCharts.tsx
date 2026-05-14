@@ -36,7 +36,6 @@ export function TrendCharts({ days, range: _range }: Props) {
 
   const rows: Row[] = [
     { key: 'kcal_in', label: 'Kalorie spożyte', unit: 'kcal', color: 'orange', series: kcalInSeries },
-    { key: 'steps', label: 'Kroki', unit: 'kroki', color: 'green', series: stepsSeries },
     {
       key: 'kcal_burned',
       label: 'Spalone kalorie',
@@ -44,6 +43,7 @@ export function TrendCharts({ days, range: _range }: Props) {
       color: 'cyan',
       series: kcalBurnedSeries,
     },
+    { key: 'steps', label: 'Kroki', unit: 'kroki', color: 'green', series: stepsSeries },
   ];
 
   return (
