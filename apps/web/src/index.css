@@ -2853,6 +2853,162 @@ body:has(.preview-banner) .login-screen {
 
 /* ─── Trend charts (Sprint 10) ─── */
 
+/* ─── Kcal Balance Card ─── */
+
+.kcal-balance-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.kcal-balance-card h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.kcal-balance-card-empty p {
+  color: var(--text-muted);
+  font-size: 0.875rem;
+  margin: 0;
+}
+.kcal-balance-primary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0;
+}
+.kcal-balance-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.kcal-balance-unit {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 0.25rem;
+}
+.kcal-balance-status {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+}
+.kcal-balance-deficyt {
+  color: var(--green);
+}
+.kcal-balance-status.kcal-balance-deficyt {
+  background: var(--green-dim);
+}
+.kcal-balance-nadwyzka {
+  color: var(--red);
+}
+.kcal-balance-status.kcal-balance-nadwyzka {
+  background: var(--red-dim);
+}
+.kcal-balance-bilans {
+  color: var(--cyan);
+}
+.kcal-balance-status.kcal-balance-bilans {
+  background: var(--cyan-dim);
+}
+.kcal-balance-empty-today {
+  color: var(--text-dim);
+}
+.kcal-balance-status.kcal-balance-empty-today {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-dim);
+}
+.kcal-balance-breakdown {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.kcal-balance-breakdown > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: center;
+}
+.kcal-balance-breakdown-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.kcal-balance-breakdown-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.kcal-balance-breakdown-value small {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 0.125rem;
+}
+.kcal-balance-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.kcal-balance-spark-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  align-self: center;
+}
+.kcal-balance-spark-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 40px;
+  flex: 1;
+}
+.kcal-balance-spark-bar {
+  flex: 1;
+  border-radius: 3px;
+  min-height: 4px;
+  transition: opacity 120ms ease;
+}
+.kcal-balance-spark-bar.kcal-balance-deficyt {
+  background: var(--green);
+}
+.kcal-balance-spark-bar.kcal-balance-nadwyzka {
+  background: var(--red);
+}
+.kcal-balance-spark-bar.kcal-balance-bilans {
+  background: var(--cyan);
+}
+.kcal-balance-spark-bar:hover {
+  opacity: 0.7;
+}
+
+@media (max-width: 480px) {
+  .kcal-balance-card {
+    padding: 1rem;
+  }
+  .kcal-balance-value {
+    font-size: 2rem;
+  }
+}
+
 .trend-charts {
   display: flex;
   flex-direction: column;
