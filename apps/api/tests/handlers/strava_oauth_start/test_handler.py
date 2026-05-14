@@ -75,7 +75,7 @@ def test_oauth_start_returns_302_with_strava_authorize_url() -> None:
     parsed = urlparse(location)
     assert parsed.scheme == "https"
     assert parsed.netloc == "www.strava.com"
-    assert parsed.path == "/oauth/mobile/authorize"
+    assert parsed.path == "/oauth/authorize"
 
     qs = parse_qs(parsed.query)
     assert qs["client_id"] == ["123456"]

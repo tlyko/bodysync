@@ -26,12 +26,13 @@ STRAVA_SCOPE = "read,activity:read_all"
 # variability cross-environment (single API GW custom domain).
 STRAVA_CALLBACK_URL = "https://api.bodysync.pl/api/strava/oauth/callback"
 
-# Mobile-friendly endpoint (per Strava dev docs) — Universal Link behavior:
-# iOS / Android otwiera appkę Strava jeśli zainstalowana (user authorizuje
-# w native app, callback do api.bodysync.pl), desktop / browser zachowuje się
-# identycznie jak `/oauth/authorize`. Lepszy UX bo użytkownik mobilny już
-# jest zalogowany w Stravie appce — nie musi wpisywać creds w przeglądarce.
-STRAVA_AUTHORIZE_URL = "https://www.strava.com/oauth/mobile/authorize"
+# Standard OAuth authorize endpoint. Próbowaliśmy `/oauth/mobile/authorize`
+# (PR #171) żeby native deep-link otworzył Strava app, ale Strava app rzuca
+# "error" zaraz po kliknięciu "Authorize" — ten endpoint jest deprecated dla
+# third-party developers (tylko Strava-owned apps mają OAuth flow w native UI).
+# Browser flow z `/oauth/authorize` działa wszędzie; iOS pokazuje banner
+# "Open in Strava" automatycznie jeśli user zalogowany w app.
+STRAVA_AUTHORIZE_URL = "https://www.strava.com/oauth/authorize"
 
 
 def mint_state(user_id: str) -> str:
