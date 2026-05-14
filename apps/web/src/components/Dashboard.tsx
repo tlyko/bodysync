@@ -37,6 +37,7 @@ import { SleepStagesCard } from './dashboard/SleepStagesCard';
 import { StatCard } from './dashboard/StatCard';
 import { TDEECalculatorWizard } from './dashboard/TDEECalculatorWizard';
 import { TrendCharts } from './dashboard/TrendCharts';
+import { KcalBalanceCard } from './dashboard/KcalBalanceCard';
 import { WeightChart } from './dashboard/WeightChart';
 import { WorkoutPlanCard } from './dashboard/WorkoutPlanCard';
 
@@ -441,6 +442,11 @@ function DashboardOverview({
           </SectionPanel>
         </div>
       </div>
+
+      {/* Bilans kaloryczny — today's kcal_in vs kcal_burned + saldo z
+          DEFICYT/NADWYŻKA label + 7-day sparkline. Owner request — wybiera
+          glanceable widok czy jest na deficycie danego dnia. */}
+      <KcalBalanceCard days={days} todayIso={today} />
 
       {/* Sprint 10 — sekcja Trendy: 7d/30d charts dla kcal_in / kroki /
           spalone kcal. POZA overview-grid (charty potrzebują full width).
