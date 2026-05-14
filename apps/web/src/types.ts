@@ -210,6 +210,22 @@ export type PlanResponse = {
   sheet_tab: string;
 };
 
+// ─── Body measurements (Sprint 12, mirror handlers/measurements/schemas.py) ───
+
+export type MeasurementsRequest = {
+  date: string; // YYYY-MM-DD
+  waist_cm?: number | null;
+  hips_cm?: number | null;
+  chest_cm?: number | null;
+  biceps_cm?: number | null;
+  thigh_cm?: number | null;
+};
+
+export type MeasurementsResponse = {
+  saved: string[];
+  date: string;
+};
+
 // ─── Waitlist landing (PR1 backend mirror — handlers/waitlist/schemas.py) ───
 
 export type WaitlistSignupRequest = {

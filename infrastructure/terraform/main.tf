@@ -1125,6 +1125,73 @@ resource "aws_lambda_permission" "activities_list_apigw" {
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
 
+# Sprint 12 — Manual body measurements (talia/biodra/klatka/biceps/udo).
+# POST /api/measurements, JWT auth, DDB PutItem per metric. SK format
+# `BIOMETRY#{date}#{metric}#manual` (suffix differentiates od HAE samples
+# które mają timestamp suffix `+02:00`). Lekki: 256 MB / 5 s, max 5 PutItem
+# per request.
+module "measurements" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "measurements"
+  source_zip    = "${path.module}/../../apps/api/dist/measurements.zip"
+  handler       = "handlers.measurements.handler.handle"
+  memory_size   = 256
+  timeout       = 5
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Per CLAUDE.md "Reguła PK isolation" + sec audit H5 — IAM defense
+      # in depth. Handler scope'uje pod USER#{user_id z JWT}, condition
+      # zatrzymuje pisanie poza USER#* przy ewentualnym bug'u.
+      Sid      = "DDBWriteBiometryManual"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTSecret"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "measurements" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.measurements.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "measurements" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/measurements"
+  target    = "integrations/${aws_apigatewayv2_integration.measurements.id}"
+}
+
+resource "aws_lambda_permission" "measurements_apigw" {
+  statement_id  = "AllowAPIGWInvokeMeasurements"
+  action        = "lambda:InvokeFunction"
+  function_name = module.measurements.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
 # Sprint 12 PR1 — waitlist landing signup. POST /api/waitlist, no auth
 # (public landing form). Zbiera email + opcjonalny interest + RODO consent
 # pod PK=WAITLIST. Defense-in-depth: IAM warunkuje LeadingKeys=WAITLIST

@@ -46,6 +46,14 @@ const EXTRACTORS: Record<string, Extractor> = {
   protein: (raw) => singleNumber(raw, 'g'),
   fat: (raw) => singleNumber(raw, 'g'),
   carbs: (raw) => singleNumber(raw, 'g'),
+  // Sprint 12 — manual body tape measurements (cm). Każdy obwód ma DDB
+  // attr `cm` (mirror `weight.kg`). Source `manual` (vs HAE), zapisywane
+  // przez POST /api/measurements pod SK BIOMETRY#date#metric#manual.
+  waist: (raw) => singleNumber(raw, 'cm'),
+  hips: (raw) => singleNumber(raw, 'cm'),
+  chest: (raw) => singleNumber(raw, 'cm'),
+  biceps: (raw) => singleNumber(raw, 'cm'),
+  thigh: (raw) => singleNumber(raw, 'cm'),
 };
 
 // Buduje listę {date, value} dla danego metrica. Pomija dni bez metryki
