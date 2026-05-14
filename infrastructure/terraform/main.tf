@@ -475,6 +475,13 @@ resource "aws_ssm_parameter" "training_sheet_tab_tomek" {
 
 # Sprint 3 — Apple Health webhook. POST /api/health/webhook,
 # Bearer auth (per-user secret w SSM, server resolves user_id po hmac match).
+#
+# Memory 1024MB / timeout 29s — bumped 2026-05-14 po Weronika onboarding
+# initial export timeout'ował na 512MB/10s nawet dla 1-day Date Range.
+# Lambda CPU jest proporcjonalna do memory (512MB ≈ 0.3 vCPU), DDB
+# BatchWriteItem przy wielu metrykach × wielu bucket'ach = setki sequential
+# batches. 1024MB daje ~2x vCPU + headroom dla initial historical imports.
+# 29s = max API GW HTTP integration timeout (30s).
 module "health_webhook" {
   source = "./modules/lambda"
 
@@ -482,8 +489,8 @@ module "health_webhook" {
   function_name = "health-webhook"
   source_zip    = "${path.module}/../../apps/api/dist/health_webhook.zip"
   handler       = "handlers.health_webhook.handler.handler"
-  memory_size   = 512
-  timeout       = 10
+  memory_size   = 1024
+  timeout       = 29
 
   environment = {
     TABLE_NAME      = aws_dynamodb_table.data.name
