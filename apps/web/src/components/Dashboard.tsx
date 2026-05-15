@@ -13,6 +13,7 @@ import type { Activity, BiometryDay, Me, ProfileTargets } from '../types';
 import { ChatScreen } from './chat/ChatScreen';
 import { ActivitiesView } from './dashboard/ActivitiesView';
 import { ActivityRow } from './dashboard/ActivityRow';
+import { BodyMeasurementsCard } from './dashboard/BodyMeasurementsCard';
 import {
   DropletIcon,
   EggIcon,
@@ -635,6 +636,11 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
       <div className="stat-grid">
         <WeightSummaryCards series={weightSeries} rangeLabel={rangeLabel(range, latestDate(days))} />
       </div>
+
+      {/* Sprint 12 — manualne pomiary obwodów. Pod WeightChart bo to ten
+          sam koncept "body composition tracking". Auto-refresh deferred —
+          po Zapisz user refreshuje page lub czeka na next mount. */}
+      <BodyMeasurementsCard days={days} todayIso={today} />
     </>
   );
 }

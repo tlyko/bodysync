@@ -74,6 +74,11 @@ class JsonFormatter(logging.Formatter):
             "email_hash",
             "ip_hash",
             "has_interest",
+            # Sprint 12 measurements (POST /api/measurements). Nazwy metryk
+            # (`waist`, `biceps`) + date — NIE values (cm wartości to PII
+            # biometryczne, log retention 90d).
+            "metrics_saved",
+            "date",
         ):
             value = getattr(record, key, None)
             if value is not None:

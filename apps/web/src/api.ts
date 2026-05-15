@@ -14,6 +14,8 @@ import type {
   DietCheckResult,
   DietCheckSkipReason,
   LoginResponse,
+  MeasurementsRequest,
+  MeasurementsResponse,
   Me,
   PlanResponse,
   ProfileTargets,
@@ -236,6 +238,31 @@ export function waitlistErrorMessage(err: unknown): string {
     return 'Coś nie pyknęło — spróbuj ponownie.';
   }
   return 'Coś poszło nie tak.';
+}
+
+// Sprint 12 — manual body tape measurements (talia/biodra/klatka/biceps/udo).
+// Tylko non-null pola są zapisywane (Pydantic optional + at-least-one
+// validator po stronie backendu). 422 = validation, 401 = sesja, 500 = DDB.
+export async function postMeasurements(
+  payload: MeasurementsRequest,
+): Promise<MeasurementsResponse> {
+  return request<MeasurementsResponse>('/api/measurements', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+// PL banner messages dla measurements submit error.
+export function measurementsErrorMessage(err: unknown): string {
+  if (!(err instanceof ApiError)) {
+    return 'Nieoczekiwany błąd.';
+  }
+  if (err.status === 0) return ''; // aborted
+  if (err.status === -1) return 'Brak połączenia — spróbuj za chwilę.';
+  if (err.status === 401) return 'Sesja wygasła. Zaloguj się ponownie.';
+  if (err.status === 422) return 'Sprawdź wpisane wartości (cm, > 0, < 500).';
+  if (err.status >= 500) return 'Coś nie pyknęło — spróbuj ponownie.';
+  return err.message || 'Coś poszło nie tak.';
 }
 
 // Strava OAuth start endpoint zwraca 302 do strava.com — frontend
