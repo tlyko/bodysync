@@ -17,8 +17,8 @@ type DemoSlide = {
 const SLIDES: DemoSlide[] = [
   {
     src: '/demo/dashboard.png',
-    alt: 'Dashboard bodysync z wykresami HRV, snu, kalorii i Recovery',
-    caption: 'Dashboard — HRV, sen, kalorie, kroki i Recovery w jednym widoku',
+    alt: 'Dashboard bodysync z wykresami snu, kalorii i Recovery',
+    caption: 'Dashboard — sen, kalorie, kroki, waga i Recovery w jednym widoku',
   },
   {
     src: '/demo/chat.png',
@@ -33,7 +33,7 @@ const SLIDES: DemoSlide[] = [
   {
     src: '/demo/cialo.png',
     alt: 'Sekcja Ciało z biometrią z Apple Health',
-    caption: 'Biometria — Apple Health → trendy 30 dni (HRV, sen, RHR, body fat)',
+    caption: 'Biometria — Apple Health → trendy 30 dni (sen, RHR, body fat, obwody)',
   },
 ];
 
