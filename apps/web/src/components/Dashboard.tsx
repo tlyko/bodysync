@@ -20,7 +20,6 @@ import {
   FlameIcon,
   FootprintsIcon,
   HeartIcon,
-  HeartPulseIcon,
   MoonIcon,
   PercentIcon,
   RunIcon,
@@ -338,7 +337,6 @@ function DashboardOverview({
   const kcalIn = buildSeries(days, 'kcal_in');
   const stepsSeries = buildSeries(days, 'steps');
   const weightSeries = buildSeries(days, 'weight');
-  const hrvSeries = buildSeries(days, 'hrv');
   const sleepSeries = buildSeries(days, 'sleep');
   const restingHrSeries = buildSeries(days, 'resting_hr');
   const bodyFatSeries = buildSeries(days, 'body_fat');
@@ -407,13 +405,6 @@ function DashboardOverview({
 
           <SectionPanel title="Recovery">
             <div className="mini-stat-grid">
-              <MiniStat
-                label="HRV"
-                value={latestValue(hrvSeries)?.value.toFixed(1) ?? '—'}
-                unit="ms"
-                accent="cyan"
-                icon={<HeartPulseIcon />}
-              />
               <MiniStat
                 label="Sen"
                 value={latestValue(sleepSeries)?.value.toFixed(1) ?? '—'}
@@ -551,7 +542,6 @@ function RecentActivitiesPanel({ onSeeAll }: { onSeeAll: () => void }) {
 // ─── Body tab (waga + biometria) ────────────────────────────────────────
 
 function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
-  const hrvSeries = buildSeries(days, 'hrv');
   const sleepSeries = buildSeries(days, 'sleep');
   const stepsSeries = buildSeries(days, 'steps');
   const kcalActiveSeries = buildSeries(days, 'kcal_active');
@@ -569,15 +559,6 @@ function BodyView({ days, range, onRangeChange, trendWindow }: ViewProps) {
       </SectionHeader>
 
       <div className="stat-grid">
-        <MetricStatCard
-          label="HRV (avg ms)"
-          series={hrvSeries}
-          unit="ms"
-          accent="cyan"
-          icon={<HeartPulseIcon />}
-          fmt={(v) => v.toFixed(1)}
-          trendWindow={trendWindow}
-        />
         <MetricStatCard
           label="Sen"
           series={sleepSeries}
