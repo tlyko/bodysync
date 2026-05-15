@@ -152,6 +152,15 @@ function numberOr(value: number | string | null | undefined, fallback: number): 
   return typeof value === 'number' && Number.isFinite(value) ? value : fallback;
 }
 
+// Jakość snu — % czasu w deep+rem (restorative stages) z całkowitego snu.
+// Typowe zdrowe wartości: 30-50%. <25% = płytki sen, >55% = nietypowo dużo
+// (zwykle ok jeśli sen krótki, error w detekcji jeśli długi).
+// Returns null gdy asleep == 0 (no signal — div by zero guard).
+export function sleepQualityPercent(stages: SleepStages): number | null {
+  if (stages.asleep <= 0) return null;
+  return ((stages.deep + stages.rem) / stages.asleep) * 100;
+}
+
 // Sprint 10 A5 — exponential moving average dla "true weight" smoothing
 // (MacroFactor-style). Eliminuje noise z hydratacji/sodu/glikogenu z raw
 // daily weight (±0.5 kg dnia na dzień typowo). α=0.1 daje ~10-day half-life

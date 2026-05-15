@@ -4,6 +4,7 @@ import {
   buildSeries,
   extractLatestSleepStages,
   latestValue,
+  sleepQualityPercent,
   sumSeries,
   trendPct,
   valueForDate,
@@ -429,6 +430,18 @@ function DashboardOverview({
                 unit="%"
                 accent="muted"
                 icon={<PercentIcon />}
+              />
+              <MiniStat
+                label="Jakość snu"
+                value={(() => {
+                  const stages = extractLatestSleepStages(days);
+                  if (!stages) return '—';
+                  const q = sleepQualityPercent(stages);
+                  return q !== null ? Math.round(q).toString() : '—';
+                })()}
+                unit="%"
+                accent="cyan"
+                icon={<MoonIcon />}
               />
             </div>
           </SectionPanel>
