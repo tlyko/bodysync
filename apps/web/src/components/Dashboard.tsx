@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useMemo, useState } from 'react';
+import { type ReactNode, lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import { getActivities, getBiometry, getProfileTargets } from '../api';
 import {
   buildSeries,
@@ -11,7 +11,12 @@ import {
   type SeriesPoint,
 } from '../biometry';
 import type { Activity, BiometryDay, Me, ProfileTargets } from '../types';
-import { ChatScreen } from './chat/ChatScreen';
+// ChatScreen + jego dependency `recipes.json` (~324 KB) lazy-loaded — większość
+// userów nie wchodzi w tab "Asystent AI" przy każdej wizycie. Vite rolluje to
+// w osobny chunk, eliminuje warning >500KB z initial bundle.
+const ChatScreen = lazy(() =>
+  import('./chat/ChatScreen').then((m) => ({ default: m.ChatScreen })),
+);
 import { ActivitiesView } from './dashboard/ActivitiesView';
 import { ActivityRow } from './dashboard/ActivityRow';
 import { BodyMeasurementsCard } from './dashboard/BodyMeasurementsCard';
@@ -204,7 +209,11 @@ export function Dashboard({ me, onLogout }: Props) {
           )}
           {activeTab === 'activities' && <ActivitiesView />}
           {activeTab === 'plan' && <PlanScreen />}
-          {activeTab === 'recipes' && <ChatScreen />}
+          {activeTab === 'recipes' && (
+            <Suspense fallback={<p>Wczytywanie asystenta…</p>}>
+              <ChatScreen />
+            </Suspense>
+          )}
           {activeTab === 'settings' && (
             <SettingsView onLogout={onLogout} />
           )}
