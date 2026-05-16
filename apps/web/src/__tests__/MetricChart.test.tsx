@@ -69,6 +69,30 @@ describe('MetricChart', () => {
     expect(container.querySelector('.metric-chart-tooltip')).toBeNull();
   });
 
+  test('touch tap pokazuje tooltip; tap poza wykresem zamyka', async () => {
+    const { container } = render(
+      <MetricChart
+        data={[
+          { date: '2026-05-01', value: 7500 },
+          { date: '2026-05-02', value: 8200 },
+        ]}
+        label="Kroki"
+        unit="kroki"
+        color="green"
+      />,
+    );
+    const bars = container.querySelectorAll('rect');
+    const { fireEvent } = await import('@testing-library/react');
+
+    // Tap (touchStart) na barze — tooltip widoczny
+    fireEvent.touchStart(bars[1]);
+    expect(container.querySelector('.metric-chart-tooltip')).not.toBeNull();
+
+    // Tap poza wykresem (na document.body) zamyka tooltip
+    fireEvent.touchStart(document.body);
+    expect(container.querySelector('.metric-chart-tooltip')).toBeNull();
+  });
+
   test('formatValue custom — Y-axis labele używają formattera', () => {
     const fmt = (v: number) => Math.round(v).toLocaleString('pl-PL');
     render(

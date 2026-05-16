@@ -45,6 +45,19 @@ export function WeightChart({ data, height = 220 }: Props) {
     return () => ro.disconnect();
   }, []);
 
+  // Touch UX: tap outside the chart container closes the tooltip. Mouse leave
+  // fires onMouseLeave naturally, but touch tap needs explicit dismiss.
+  useEffect(() => {
+    if (hoveredIdx === null) return;
+    const handler = (e: TouchEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setHoveredIdx(null);
+      }
+    };
+    document.addEventListener('touchstart', handler);
+    return () => document.removeEventListener('touchstart', handler);
+  }, [hoveredIdx]);
+
   if (data.length === 0) {
     return (
       <div className="weight-chart-empty">
@@ -240,6 +253,10 @@ export function WeightChart({ data, height = 220 }: Props) {
             style={{ cursor: 'pointer' }}
             onMouseEnter={() => setHoveredIdx(i)}
             onMouseLeave={() => setHoveredIdx(null)}
+            onTouchStart={(e) => {
+              e.preventDefault();
+              setHoveredIdx(i);
+            }}
           />
         );
       })}
