@@ -49,12 +49,75 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Logo pack + preview mock mode | ✅ shipped 2026-05-09 (PRy #108/#118) — bodysync brand pack (favicon + sidebar header + login screen), `VITE_PREVIEW_MODE=true` env w CF Workers Builds → window.fetch override z mock data dla preview branch deployments |
 | Plan Treningowy frontend tab (Sprint 5 PR #3 + follow-upy) | ✅ shipped 2026-05-09 (PRy #116/#117/#120-#124) — sidebar 7-y tab "Plan Treningowy", parser raw 2D rows → Training[] z sekcji Rozgrzewka+Trening, tabs po unique base names (Trening A/B/C), dropdown weeks per group (najnowszy default), STRICT no-guess advisor rule po halucynacji "wykonałeś Trening B zamiast C" |
 | Sprint 11 prep (Telegram pipeline + advisor activities + clear chat) | ✅ shipped 2026-05-10/11 (PRy #130/#143/#144/#145/#146) — cost-guard alarm → Telegram (smoke verified ALARM 🚨 + OK ✅ delivery), advisor widzi `<recent_activities>` z Strava 7d w prompt, button "Wyczyść rozmowę" + DELETE /api/advisor/chat/history (idempotent, PK isolation), network error message proper handling |
+| Waitlist landing wariant A | ✅ shipped 2026-05-12 (PRy #159/#160/#161/#162/#163) — POST /api/waitlist (no-auth, honeypot+RODO consent), Coming soon section w LoginScreen z gradient hero, privacy.html (RODO PL), DemoGallery z 4 mock screens (dashboard/chat/plan/cialo), fix mock ref personal "Anita" + rename "Odśwież z arkusza" → "Zsynchronizuj plan" |
+| Dashboard Trendy (bar charts + hover tooltips) | ✅ shipped 2026-05-12/13 (PRy #164/#165/#166/#167/#168) — sekcja "Trendy" pełnej szerokości pod overview-grid, 3 stacked bar charts (Kalorie spożyte / Spalone kalorie / Kroki — kolejność po PR #173 swap), MetricChart `<rect>` per data point z gradient, ResizeObserver pattern dla typografii w obu chartach (MetricChart + WeightChart), hover state z solid bar + custom tooltip nad barem; WeightChart hover dots (raw green + EMA cyan) + pionowa linia + 3-line tooltip |
+| Bilans kaloryczny dziś + sparkline 7d | ✅ shipped 2026-05-13 (PR #174) — KcalBalanceCard na Dashboard overview między grid a Trendami, today's saldo `kcal_in - (kcal_active + kcal_basal)` z +/− prefix, status DEFICYT/NADWYŻKA/BILANS (threshold ±100), breakdown row Spożyte/Spalone, 7-day mini-sparkline z per-day color |
+| Manual body measurements | ✅ shipped 2026-05-14 (PR #176) — POST /api/measurements (JWT, Pydantic v2, model_validator wymaga ≥1 metric), 5 optional `*_cm` fields (waist/hips/chest/biceps/thigh), DDB SK `BIOMETRY#{date}#{metric}#manual` (suffix disambiguates z HAE), BodyMeasurementsCard w Ciało tab z 5 inputs + placeholdery latest + 5 mini-charts 30d, IaC module 256MB/5s + IAM `LeadingKeys=USER#*` |
+| Asystent AI rename + non-food RAG skip | ✅ shipped 2026-05-12 (PR #169) — tab "Przepisy AI" → "Asystent AI" (SidebarNav + TAB_TITLES); backend `is_food_related(message)` ~50 PL keywords z strip diacritics, handler gates RAG retrieval gdy user pyta o wagę/trening → `used_recipes=[]` + log `rag_skipped_non_food_query`. Oszczędność embed cost + cleaner UX |
+| Recent activities 3 → 5 + Trend swap + HRV drop + Jakość snu | ✅ shipped 2026-05-14/15 (PRy #173/#175/#177/#178) — Trendy reorder (in/spalone/kroki), Dashboard pokazuje 5 ostatnich aktywności, HRV drop z UI (Garmin nie wysyła do AH, 0 rows w DDB), nowy MiniStat "Jakość snu" `(deep+rem)/asleep × 100%` w Recovery 2×2 panel |
+| HAE webhook scaling (Weronika onboarding) | ✅ shipped 2026-05-14 (PR #170) — bump memory 512MB → 1024MB i timeout 10s → 29s. Powód: Weronika initial export timeout'ował na 10s nawet dla `Date Range: Last 1 day`. 1024MB ≈ 2× vCPU (Lambda CPU proporcjonalna do memory), 29s = max API GW HTTP integration timeout |
+| Strava OAuth mobile experiment (revert) | ⚠️ tested + reverted 2026-05-14 (PRy #171 → #172) — próbowaliśmy `/oauth/mobile/authorize` żeby otworzyć Strava app native na iPhone. Live test: Strava app rzuca "error" zaraz po Authorize → `/oauth/mobile/authorize` deprecated dla third-party developers (tylko Strava-owned partner apps). Revert do standard `/oauth/authorize` browser flow (iOS i tak pokazuje banner "Open in Strava" jeśli zalogowany) |
 
 ## Open PRs
 
-`gh pr list` — żadnych otwartych (5 PR-ów merged w sesji 2026-05-10 → 11).
+`gh pr list` — **PR #178** (Jakość snu w Recovery panel) czeka na merge.
 
-## Aktywny sprint — żaden (Sprint 11 prep zamknięty 2026-05-11)
+## Aktywny sprint — Weronika onboarding (częściowo) + Strava limit ticket pending
+
+**Sesja 2026-05-12 → 15 — 20 PR-ów merged (#159-#178), waitlist landing + dashboard polish + body measurements + onboarding Weroniki:**
+
+### Waitlist landing (PR #159/#160/#161/#162/#163)
+
+- ✅ **PR #159** — backend POST /api/waitlist (no-auth public), Pydantic schema z `EmailStr` + `consent: bool must True` + honeypot `must empty` + `interest: str | None max 500`. DDB PK=WAITLIST, SK={iso_ts_us}#{email_lower} + attrs (email/interest/ip_hash sha256/referrer/created_at). Honeypot path → 200 SILENTLY (NIE 422 — anti-bot pattern). Email + IP w logach jako sha256[:16] fingerprint (privacy). IaC: Lambda 256MB/5s + route + IAM Condition `LeadingKeys=WAITLIST` (separate od USER#*). 10 testów, ruff zielony.
+- ✅ **PR #160** — frontend Coming soon + privacy.html + vitest. LoginScreen split: hero (logo + gradient h1 "Osobisty asystent AI dla treningu i diety" + value pitch PL) → `<WaitlistForm />` → `<DemoGallery />` → Google OAuth schowany za toggle "Mam już konto → Zaloguj". WaitlistForm z email + interest textarea (max 500 + counter X/500) + RODO consent + honeypot (`<input name="phone">` off-screen via CSS, NIE `display:none`). PL error mapper (422/-1/5xx). privacy.html RODO PL static (administrator/dane/cel/24mc retention/AWS eu-west-1/prawa). 8 vitest.
+- ✅ **PR #161** — DemoGallery na landing — 4 mock screens (`apps/web/public/demo/dashboard.png` + `chat.png` + `plan.png` + `cialo.png`) z Playwright + preview-mock. Sekcja "Zobacz, co dostaniesz" między hero a form, grid 2-col desktop / stack mobile, click → lightbox modal. Plus dedicated `/api/advisor/chat/history` handler w `preview-mock.ts` (wcześniej wildcard catchował history → frontend crashował `res.messages.map`).
+- ✅ **PR #162** — fix mock PLAN: drop "Ciężar (Anita)" personal ref (Anita = imię trenerki, nieadekwatne dla landing demo). Re-screen plan.png.
+- ✅ **PR #163** — rename button "Odśwież z arkusza" → "Zsynchronizuj plan" (user-facing intent vs technical detail). PlanScreen + test update + re-screen.
+
+### Dashboard polish — Trendy bar charts + hover (PR #164/#165/#166/#167/#168)
+
+- ✅ **PR #164** — sekcja "Trendy" pełnej szerokości pod overview-grid. 3 stacked MetricChart (uogólnienie WeightChart) z `<rect>` per data point gradient fill. Reuse `buildSeries` + `sumSeries` + `latestValue` z biometry.ts.
+- ✅ **PR #165** — owner feedback "bars zamiast linii" (dane discrete per-day, NIE continuous). MetricChart line → bary, Y zaczyna od 0 (proportional comparison), rounded top corners (rx=3), drop "last point dot" + drop empty state "1 point". WeightChart NIETKNIĘTY (waga continuous, line OK).
+- ✅ **PR #166** — owner feedback "tekst rozciągnięty". Root cause: viewBox 600px + `preserveAspectRatio="none"` + container ~1100px = horizontal stretch 1.83×. Fix: ResizeObserver pattern w obu chartach — `viewBox=${width}` matchuje pixel width → SVG internal coords = pixel coords → brak stretchu.
+- ✅ **PR #167** — owner feedback "hover żeby pokazać dokładną liczbę". Hovered bar: solid color fill (drop gradient) z 100ms transition. HTML tooltip absolute-positioned nad barem z `pointer-events: none` (NIE blokuje sąsiednich). Drop natywny `<title>` (brzydki delayed browser tooltip).
+- ✅ **PR #168** — owner feedback "waga też hover bullety". WeightChart: invisible hit-area rects per data point (slotW × plotH) → green dot na raw + cyan dot na EMA + pionowa linia dashed łącząca + 3-line tooltip (data / raw kg / wygładzona X kg). Last point dot ukrywany gdy hover aktywny. CSS shared `.chart-tooltip*` (rename z `.metric-chart-tooltip*`).
+
+### Body measurements + KcalBalanceCard + tab cleanup (PR #169/#170/#173/#174/#175/#176/#177/#178)
+
+- ✅ **PR #169** — rename "Przepisy AI" → "Asystent AI" (już nie tylko przepisy). Backend `is_food_related(message)` z ~50 PL keywords (śniadan/obiad/przepis/kcal/makro/białk/deficyt/owsianka/...) z `_strip_diacritics()` ("zjeść" → "zjesc"). Handler gate: non-food query → skip RAG retrieve + log `rag_skipped_non_food_query`. +19 parametrized testów.
+- ✅ **PR #170** — HAE webhook bump 512MB/10s → 1024MB/29s. Weronika initial export timeout'ował na 10s nawet dla 1-day Range. Lambda CPU proporcjonalna do memory (512MB ≈ 0.3 vCPU). 29s = max API GW HTTP integration timeout.
+- ✅ **PR #171 → #172 (revert)** — `/oauth/mobile/authorize` deprecated dla third-party. Live test Weroniki: red "error" w Strava app + log `user_denied access_denied`. Revert do `/oauth/authorize`.
+- ✅ **PR #173** — Trendy reorder: Kalorie spożyte / **Spalone kalorie** / Kroki (in/out razem, kroki na końcu).
+- ✅ **PR #174** — KcalBalanceCard. Today's `kcal_in - (kcal_active + kcal_basal)`, big saldo z +/− prefix (U+2212 dla typografii), status DEFICYT (green) / NADWYŻKA (red) / BILANS (cyan) z threshold ±100 kcal (HAE noise tolerance). Breakdown row Spożyte/Spalone. 7-day sparkline z per-day color (height proporcjonalna do max abs, min 8%). Insertion: między overview-grid a sekcją Trendy. 7 vitest.
+- ✅ **PR #175** — Dashboard recent activities 3 → 5 (1-line `getActivities(3)` → `getActivities(5)`).
+- ✅ **PR #176** — manual body measurements. Backend POST /api/measurements (JWT, Pydantic v2, model_validator wymaga ≥1 metric), 5 optional `*_cm` fields. DDB SK `BIOMETRY#{date}#{metric}#manual` (suffix disambiguates z HAE samples). BodyMeasurementsCard w Ciało tab pod WeightChart: 5 inputs (Talia/Biodra/Klatka/Biceps/Udo, step 0.1, placeholder z latest value), submit disabled gdy wszystkie puste, success/error banners, 5 mini-charts 30d (MetricChart height 120). 11 backend + 8 frontend testów. IaC: Lambda 256MB/5s + route + IAM `LeadingKeys=USER#*`.
+- ✅ **PR #177** — HRV drop z UI (Garmin nie wysyła HRV do Apple Health — diagnostyka: 0 rows w DDB przez 7 dni). Drop MiniStat HRV z Recovery panel + MetricStatCard HRV z BodyView + unused `hrvSeries` consts + `HeartPulseIcon` import. Backend mapper + advisor system_prompt zostają (future-proof gdy Apple Watch lub Garmin Connect direct).
+- 🟡 **PR #178** (czeka na merge) — MiniStat "Jakość snu" w Recovery panel (4th slot po HRV drop). `sleepQualityPercent()` helper: `(deep + rem) / asleep × 100%` z guard div-by-zero. Recovery teraz 2×2 grid: Sen / RHR / Body fat / Jakość snu.
+
+### Onboarding Weroniki (operational learnings)
+
+- ✅ **Cleanup pollution** 2026-05-12 — 140+ steps rows z Weroniki iPhone (Bearer Tomka skopiowany na jej HAE pre-PR #157) wycofane z USER#tomek (komenda z TODO 2026-05-12 zakończona).
+- ✅ **SSM allowlist** Weronika dodana wcześniej (pre-sesja).
+- 🟡 **HAE Aggregation requirement** 2026-05-14 — Weronika initial export wpadł z 4486 BIOMETRY rows (per-minute raw samples z 2 devices Apple Watch + iPhone = double counting → dashboard pokazywał 17k kroków przy realnych 8800). Cleanup: parallel delete xargs -P 20 wszystkich `BIOMETRY#` z USER#weronika (~30s). Wymaganie: **Aggregation: Hour** w HAE settings na iPhone (operational, brak server-side enforcement na razie).
+- 🟡 **Strava 1-athlete limit** 2026-05-14 — Strava app na Tomku → Authorize Weroniki = "przekroczono limit podłączonych sportowców" (app w single-player mode, default 1 athlete). Wymaga **ticket do Strava developer support** o increase do 99 athletes (auto-approved 1-3 dni). **Form wypełniony i wysłany 2026-05-14** — czekamy na odpowiedź. Bez approval Weronika nie ma activities, ale ma biometry/plan/advisor/odżywianie.
+
+### Operational decisions w sesji
+
+- 🚫 **Telegram Daily Brief odrzucony** (owner: "nie interesuje mnie wgl" 2026-05-15) — nie pracujemy nad cron morning brief / weekly recap auto-deliver przez Telegram. Telegram pipeline (PR #130/#143) zostaje dla cost-guard CloudWatch alarmów, nie autonomicznych powiadomień.
+- 🚫 **Garmin Connect direct integration** wciąż w backlog (Sprint 4.5) ale **nie priorytetowe** — Apple Watch (capex) lub czekanie na Strava approval to dobre alternatywy.
+- ✅ **Recovery Score sleep+RHR-based** proposed (bez HRV bo Garmin nie wysyła) — composite z (asleep h, deep+rem quality, RHR delta vs baseline). Owner zatwierdził koncepcję ale jeszcze nie ruszyliśmy z implementacją.
+
+### Sesja 2026-05-12 → 15 — metryki
+
+- **20 PR-ów merged** (#159-#177, plus #178 wystawiony) + 1 revert pair (#171→#172)
+- **Backend**: 2 nowe Lambdas (waitlist, measurements), +1 modyfikacja (HAE webhook bump memory/timeout), +19 testów (`is_food_related`)
+- **Frontend**: 6 nowych komponentów (WaitlistForm, DemoGallery, MetricChart, TrendCharts, KcalBalanceCard, BodyMeasurementsCard) + 4 modyfikacje (LoginScreen, WeightChart, Dashboard, biometry.ts)
+- **Testy**: 187/187 frontend (z 161 początkowych, +26 nowych), 391/391 backend (z 369 początkowych, +22 nowe), 6 skipped (faiss RAG, pre-existing)
+- **Bundle delta**: +~14 KB raw / ~+3.5 KB gz przez całą sesję (waitlist + demo gallery + trend charts + kcal balance + body measurements)
+- **DDB extensions**: `WAITLIST` PK (separate prefix), `BIOMETRY#{date}#{metric}#manual` SK suffix dla manual measurements
+- **SSM**: brak nowych parameters (waitlist no-auth public)
+
+---
 
 **Sesja 2026-05-10 → 11 (post-Sprint 10) — 5 PR-ów merged, Telegram pipeline verified end-to-end:**
 
@@ -270,7 +333,9 @@ Open questions z audytu (do decyzji przy następnej sesji):
 
 ## Active backlog
 
-- **Garmin Connect direct integration** — Apple Health → HAE → DDB pipeline serwuje kroki z **Garmin Connect Sync to Apple Health** który desync'uje (delay + miss). Owner zauważył live 2026-05-07 że steps z dziennego export'u są niższe niż realne. Plan: bezpośredni połączenie do Garmin Connect (`python-garminconnect` lib lub Garmin Connect IQ Web Services). Storage Garmin email/password w SSM SecureString per user (Garmin nie ma proper OAuth dla konsumenta), refresh tokenów. Zakres: steps + active calories (jako alternatywa dla HAE/Apple Health ścieżki dla tych metryk). Activity tracking nadal przez Strava (Sprint 4). Osobny sprint, prawdopodobnie po Sprint 4 (Strava) jako **Sprint 4.5 — Garmin Connect**.
+- **Strava 99-athlete approval pending** — ticket wysłany 2026-05-14 (client_id 235187). Auto-approved 1-3 dni. Bez tego Weronika nie ma Strava connect (Tomek zajmuje 1/1 slot). Po approval: Weronika authorize jednym kliknięciem.
+- **Recovery Score (sleep+RHR-based)** — bez HRV bo Garmin nie wysyła. Composite: asleep h + (deep+rem)/asleep quality + RHR delta vs 14d baseline. Card w Dashboard overview z 0-100 score + ZREGENEROWANY/UMIARKOWANY/WYPOCZYNEK label + 7-day sparkline. ~10h. Owner zaakceptował koncepcję, czeka na implementację.
+- **Garmin Connect direct integration** — Apple Health → HAE → DDB pipeline serwuje kroki z **Garmin Connect Sync to Apple Health** który desync'uje (delay + miss). Owner zauważył live 2026-05-07 że steps z dziennego export'u są niższe niż realne. **Dodatkowo:** Garmin celowo NIE wysyła HRV ani pełnych workout streams do AH (premium insights trzymane w Garmin Connect). Plan: bezpośredni połączenie do Garmin Connect (`python-garminconnect` lib lub Garmin Connect IQ Web Services). Storage Garmin email/password w SSM SecureString per user (Garmin nie ma proper OAuth dla konsumenta), refresh tokenów. Zakres: steps + active calories + HRV + body battery + sleep stages szczegółowe. Activity tracking nadal przez Strava (Sprint 4). Osobny sprint, **Sprint 4.5 — Garmin Connect**. NIE priorytetowy — Apple Watch alternatywa lub Strava approval wystarczy MVP.
 - **Sleep historical backfill** — sleep rows dla 2026-05-01..05 (sprzed PR #46) mają `asleep=0` mimo że HAE wysyła `core+rem+deep`. Fallback `asleep = core+rem+deep` z PR #46 działa tylko przy zapisie. Backfill: jednorazowy script `scripts/recompute_sleep.py` — query DDB sleep rows z `asleep=0 AND inBed>0`, recompute, update. Niski priorytet — zacznie się samo poprawiać po HAE re-export historycznych dni.
 - **`syncbody` → `bodysync` rename (destructive)** — bootstrap state ma legacy literówkę: `Project=syncbody` tag, `syncbody-tfstate-{account_id}` bucket, `syncbody-tflock` DDB table, `syncbody-github-actions` IAM role. Rename = IAM role DELETE+CREATE (nowa ARN, GitHub variable `AWS_ROLE_ARN` reset) + bucket/table rename = state file move. Osobny PR z świadomą destrukcją. Zostawiamy "syncbody" do tej akcji.
 - **Layout decision dla Step 2** — bootstrap obecnie zajmuje `infrastructure/terraform/`. Główny workspace nie może tam siedzieć (różne backendy). Decyzja: przenieść bootstrap do `infrastructure/terraform/bootstrap/` (preferowane per ADR-003) lub stworzyć główny w `infrastructure/terraform-app/`. Ruszanie state file = manualnie + `terraform init -migrate-state`.
