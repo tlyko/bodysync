@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useBodyScrollLock } from '../hooks/useBodyScrollLock';
 
 // Demo gallery na landing page — pokazuje screeny z working dashboardu jako
 // zajawkę dla osób które zapisują się na waitlist. Screeny w `public/demo/`
@@ -39,6 +40,7 @@ const SLIDES: DemoSlide[] = [
 
 export function DemoGallery() {
   const [active, setActive] = useState<DemoSlide | null>(null);
+  useBodyScrollLock(active !== null);
 
   return (
     <section className="demo-gallery" aria-label="Zajawka działającej aplikacji">

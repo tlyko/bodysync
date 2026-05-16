@@ -1,5 +1,6 @@
-import { useEffect } from 'react';
+import { useEffect, useId } from 'react';
 import type { RecipeFull } from '../../recipes';
+import { useBodyScrollLock } from '../../hooks/useBodyScrollLock';
 
 type Props = {
   recipe: RecipeFull | null;
@@ -15,6 +16,9 @@ const MEAL_TYPE_LABELS: Record<string, string> = {
 };
 
 export function RecipeModal({ recipe, onClose }: Props) {
+  const titleId = useId();
+  useBodyScrollLock(recipe !== null);
+
   useEffect(() => {
     if (!recipe) return;
     const onKey = (e: KeyboardEvent) => {
@@ -36,11 +40,17 @@ export function RecipeModal({ recipe, onClose }: Props) {
 
   return (
     <div className="recipe-modal-overlay" onClick={onClose}>
-      <div className="recipe-modal" onClick={(e) => e.stopPropagation()} role="dialog">
+      <div
+        className="recipe-modal"
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+      >
         <button type="button" className="recipe-modal-close" onClick={onClose} aria-label="Zamknij">
           ×
         </button>
-        <h2 className="recipe-modal-name">{recipe.name}</h2>
+        <h2 id={titleId} className="recipe-modal-name">{recipe.name}</h2>
         <p className="recipe-modal-subtitle">
           {mealLabel}
           {variantLabel && ` · ${variantLabel}`}
