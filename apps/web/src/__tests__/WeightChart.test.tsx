@@ -34,6 +34,24 @@ describe('WeightChart', () => {
     expect(container.querySelector('.chart-tooltip')).toBeNull();
   });
 
+  test('touch tap pokazuje tooltip; tap poza wykresem zamyka', () => {
+    const data = [
+      { date: '2026-04-13', weight: 79.0 },
+      { date: '2026-04-20', weight: 78.5 },
+      { date: '2026-04-27', weight: 78.8 },
+    ];
+    const { container } = render(<WeightChart data={data} />);
+    const hitAreas = container.querySelectorAll('rect[fill="transparent"]');
+
+    // Tap (touchStart) na hit-area — tooltip widoczny
+    fireEvent.touchStart(hitAreas[1]);
+    expect(container.querySelector('.chart-tooltip')).not.toBeNull();
+
+    // Tap poza wykresem zamyka tooltip
+    fireEvent.touchStart(document.body);
+    expect(container.querySelector('.chart-tooltip')).toBeNull();
+  });
+
   test('empty state gdy 0 punktów', () => {
     const { container } = render(<WeightChart data={[]} />);
     expect(container.textContent).toContain('Brak danych wagowych');

@@ -64,6 +64,19 @@ export function MetricChart({
     return () => ro.disconnect();
   }, []);
 
+  // Touch UX: tap outside the chart container closes the tooltip. Mouse leave
+  // fires onMouseLeave naturally, but touch tap needs explicit dismiss.
+  useEffect(() => {
+    if (hoveredIdx === null) return;
+    const handler = (e: TouchEvent) => {
+      if (wrapRef.current && !wrapRef.current.contains(e.target as Node)) {
+        setHoveredIdx(null);
+      }
+    };
+    document.addEventListener('touchstart', handler);
+    return () => document.removeEventListener('touchstart', handler);
+  }, [hoveredIdx]);
+
   if (data.length === 0) {
     return <div className="metric-chart-empty">Brak danych dla wybranego okresu</div>;
   }
@@ -162,6 +175,10 @@ export function MetricChart({
             style={{ transition: 'fill 100ms ease' }}
             onMouseEnter={() => setHoveredIdx(i)}
             onMouseLeave={() => setHoveredIdx(null)}
+            onTouchStart={(e) => {
+              e.preventDefault();
+              setHoveredIdx(i);
+            }}
           />
         );
       })}
