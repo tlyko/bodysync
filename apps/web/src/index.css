@@ -132,8 +132,6 @@ code {
 /* ─── App shell — sidebar + content (Sprint 9, prototype port) ─── */
 
 .app-shell {
-  display: grid;
-  grid-template-columns: 240px 1fr;
   min-height: 100dvh;
 }
 .app-sidebar {
@@ -143,9 +141,13 @@ code {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-  position: sticky;
+  position: fixed;
   top: 0;
+  left: 0;
+  width: 240px;
   height: 100dvh;
+  z-index: 10;
+  box-sizing: border-box;
 }
 .app-sidebar-brand {
   display: flex;
@@ -230,8 +232,8 @@ code {
   display: flex;
   flex-direction: column;
   padding: 2rem 2.5rem 3rem;
+  margin-left: 240px;
   max-width: 1240px;
-  width: 100%;
   box-sizing: border-box;
 }
 .app-content-header {
@@ -2301,11 +2303,15 @@ body:has(.preview-banner) .login-screen {
   }
   .app-sidebar {
     position: fixed;
-    /* Reset desktop `top: 0; height: 100dvh` — bottom navigation hugs dolny krawędź */
+    /* Reset desktop `top: 0; height: 100dvh; width: 240px` — bottom navigation
+       hugs dolny krawędź i rozciąga się na pełną szerokość. `right: 0` z
+       `width: auto` daje full-width fixed bar (samo `right: 0` przegrywa z
+       explicit `width: 240px` z desktop rule'a). */
     top: auto;
     bottom: 0;
     left: 0;
     right: 0;
+    width: auto;
     height: auto;
     padding: 0.45rem 0.5rem calc(0.45rem + env(safe-area-inset-bottom, 0));
     border-right: 0;
@@ -2348,8 +2354,10 @@ body:has(.preview-banner) .login-screen {
     width: 100%;
   }
   .app-content {
-    /* Padding-bottom = nav height (~62px) + safe-area + breathing room */
+    /* Padding-bottom = nav height (~62px) + safe-area + breathing room.
+       Reset desktop margin-left: 240px — bottom nav nie zajmuje lewej kolumny. */
     padding: 1rem 1rem calc(80px + env(safe-area-inset-bottom, 0));
+    margin-left: 0;
   }
   /* H1 + section header smaller */
   .app-content-title {
