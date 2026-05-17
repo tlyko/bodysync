@@ -56,6 +56,21 @@ def put_param(name: str, value: str, *, secure: bool = True, overwrite: bool = T
     _cache.pop(name, None)
 
 
+def delete_param(name: str) -> bool:
+    """Idempotent delete — returns True jeśli istniał, False jeśli ParameterNotFound.
+
+    Sprint GDPR: account erasure (RODO Art. 17) — kasujemy per-user SSM keys
+    (Strava tokens, HAE webhook secret, training-sheet refs). Idempotency
+    pozwala retry'om działać bez 500.
+    """
+    try:
+        _client.delete_parameter(Name=name)
+    except _client.exceptions.ParameterNotFound:
+        return False
+    _cache.pop(name, None)
+    return True
+
+
 def load_secure_secret(name: str, *, min_length: int = 32) -> str:
     """Pobierz SecureString z SSM, fail-fast jeśli PLACEHOLDER lub za krótki.
 
