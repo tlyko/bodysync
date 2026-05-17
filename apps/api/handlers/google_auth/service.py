@@ -21,11 +21,12 @@ from google.oauth2 import id_token as google_id_token
 
 from handlers.google_auth.schemas import LoginRequest, LoginResponse
 from shared.auth import mint_jwt
-from shared.dynamo import get_item, put_item
+from shared.dynamo import get_item, put_item, put_item_idempotent
 from shared.ssm import get_param
 
 GOOGLE_CLIENT_ID_SSM = "/bodysync/google/oauth_client_id"
 ALLOWED_EMAILS_SSM = "/bodysync/auth/allowed_emails"
+NONCE_TTL_SECONDS = 5 * 60  # short window — Google Sign-In flow zwykle <30s
 
 
 class GoogleTokenError(Exception):
@@ -80,6 +81,18 @@ def login(req: LoginRequest) -> tuple[LoginResponse, str]:
     email = idinfo.get("email")
     if not isinstance(email, str) or not idinfo.get("email_verified"):
         raise GoogleTokenError("token without verified email")
+
+    # Replay protection (sec audit P1-1 / 2026-05-16). Frontend wstrzykuje nonce
+    # do `google.accounts.id.initialize({nonce})`, Google podpisuje go w id_token.
+    # Sprawdzamy że (a) id_token zawiera ten sam nonce, (b) nonce nie był jeszcze
+    # użyty (single-use DDB row z TTL). Bez tego wykradziony id_token może być
+    # replay'owany aż do exp (~1h).
+    token_nonce = idinfo.get("nonce")
+    if not isinstance(token_nonce, str) or token_nonce != req.nonce:
+        raise GoogleTokenError("nonce mismatch")
+    ttl_epoch = int(datetime.now(UTC).timestamp()) + NONCE_TTL_SECONDS
+    if not put_item_idempotent(pk=f"NONCE#{req.nonce}", sk="USED", attrs={"ttl": ttl_epoch}):
+        raise GoogleTokenError("nonce replay")
 
     user_id = _resolve_user_id(email)
     name = idinfo.get("name") if isinstance(idinfo.get("name"), str) else None

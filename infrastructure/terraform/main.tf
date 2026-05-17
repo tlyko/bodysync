@@ -58,6 +58,20 @@ module "google_auth" {
       }
     },
     {
+      # Sec audit 2026-05-16 P1-1 — Google Sign-In nonce replay protection.
+      # Atomic single-use NONCE row z TTL 5min. Tylko PutItem (z attribute_not_exists
+      # condition); TTL atrybut auto-czyści, brak DeleteItem.
+      Sid      = "DDBWriteNonce"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["NONCE#*"]
+        }
+      }
+    },
+    {
       Sid    = "ReadAuthSecrets"
       Effect = "Allow"
       Action = ["ssm:GetParameter"]
