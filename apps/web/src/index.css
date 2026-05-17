@@ -3604,3 +3604,146 @@ body:has(.preview-banner) .login-screen {
   color: var(--text-muted);
   font-weight: 500;
 }
+
+/* Workout history (2026-05-17) — sekcja w Plan tab z button extract + lista. */
+.workout-history {
+  margin-top: 2rem;
+  padding-top: 1.5rem;
+  border-top: 1px solid var(--border);
+}
+.workout-history-header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  margin-bottom: 1rem;
+}
+.workout-history-header h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.workout-history-header p {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+}
+.workout-history-button {
+  background: var(--cyan);
+  color: var(--bg);
+  border: none;
+  border-radius: 8px;
+  padding: 0.625rem 1.25rem;
+  font-weight: 600;
+  font-size: 0.875rem;
+  cursor: pointer;
+  align-self: flex-start;
+  margin-top: 0.5rem;
+  transition: opacity 120ms ease;
+}
+.workout-history-button:hover:not(:disabled) {
+  opacity: 0.9;
+}
+.workout-history-button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.workout-history-success {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--green);
+  background: var(--green-dim);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+}
+.workout-history-error {
+  margin: 0;
+  font-size: 0.8125rem;
+  color: var(--red);
+  background: var(--red-dim);
+  padding: 0.5rem 0.75rem;
+  border-radius: 8px;
+}
+.workout-history-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.workout-history-day h4 {
+  margin: 0 0 0.5rem 0;
+  font-size: 0.875rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.workout-history-day ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+.workout-history-item {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  overflow: hidden;
+}
+.workout-history-item-toggle {
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.625rem 1rem;
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  text-align: left;
+  color: var(--text);
+}
+.workout-history-item-toggle:hover {
+  background: var(--card-hover);
+}
+.workout-history-item-name {
+  font-weight: 500;
+}
+.workout-history-item-summary {
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+}
+.workout-history-sets {
+  padding: 0.5rem 1rem 1rem;
+  border-top: 1px solid var(--border);
+}
+.workout-history-sets table {
+  width: 100%;
+  border-collapse: collapse;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.8125rem;
+}
+.workout-history-sets th {
+  text-align: left;
+  font-weight: 500;
+  color: var(--text-muted);
+  padding: 0.25rem 0.5rem;
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+.workout-history-sets td {
+  padding: 0.25rem 0.5rem;
+  color: var(--text);
+}
+.workout-history-sets td:first-child {
+  color: var(--text-muted);
+  width: 2rem;
+}
+.workout-history-notes {
+  margin: 0.5rem 0 0 0;
+  font-size: 0.8125rem;
+  color: var(--text-muted);
+  font-style: italic;
+}

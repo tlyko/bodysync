@@ -15,7 +15,12 @@ from __future__ import annotations
 from typing import Any
 
 from handlers.api_read.schemas import BiometryResponse
-from handlers.api_read.service import ProfileNotFoundError, get_biometry, get_me
+from handlers.api_read.service import (
+    ProfileNotFoundError,
+    get_biometry,
+    get_me,
+    get_workouts,
+)
 from shared.auth import AuthError, verify_jwt
 from shared.http import extract_session_cookie, response
 from shared.logging import get_logger
@@ -24,6 +29,19 @@ logger = get_logger("api_read")
 
 DEFAULT_BIOMETRY_DAYS = 7
 MAX_BIOMETRY_DAYS = 90
+DEFAULT_WORKOUTS_DAYS = 30
+MAX_WORKOUTS_DAYS = 365
+
+
+def _parse_workouts_days(event: dict[str, Any]) -> int:
+    raw = (event.get("queryStringParameters") or {}).get("days")
+    if not raw:
+        return DEFAULT_WORKOUTS_DAYS
+    try:
+        days = int(raw)
+    except (TypeError, ValueError):
+        return DEFAULT_WORKOUTS_DAYS
+    return max(1, min(MAX_WORKOUTS_DAYS, days))
 
 
 def _parse_days(event: dict[str, Any]) -> int:
@@ -82,6 +100,20 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             },
         )
         return response(200, body)
+
+    if route == "GET /api/workouts":
+        days = _parse_workouts_days(event)
+        workouts = get_workouts(user_id, days=days)
+        logger.info(
+            "workouts_ok",
+            extra={
+                "request_id": request_id,
+                "user_id": user_id,
+                "handler": "api_read",
+                "count_returned": len(workouts),
+            },
+        )
+        return response(200, {"workouts": workouts})
 
     logger.warning("unknown_route", extra={"request_id": request_id, "routeKey": route})
     return response(404, {"error": "not found"})

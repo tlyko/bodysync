@@ -7,6 +7,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { ApiError, getPlan } from '../../api';
 import type { PlanResponse } from '../../types';
 import { parseTrainings, type Training } from './planParser';
+import { WorkoutHistorySection } from './WorkoutHistorySection';
 
 type State =
   | { status: 'loading' }
@@ -221,6 +222,8 @@ function PlanContent({ plan }: { plan: PlanResponse }) {
       )}
 
       <TrainingSections training={activeTraining} />
+
+      <WorkoutHistorySection trainings={trainings} />
     </>
   );
 }

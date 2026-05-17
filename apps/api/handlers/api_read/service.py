@@ -170,3 +170,47 @@ def _today_iso() -> str:
     która w Lambdzie jest UTC, daje wczorajsze date dla CET nocy.
     """
     return datetime.now(LOCAL_TZ).date().isoformat()
+
+
+def get_workouts(user_id: str, *, days: int = 30) -> list[dict[str, Any]]:
+    """Pobiera WORKOUT rows z ostatnich N dni dla user_id.
+
+    SK format: `WORKOUT#{date}#{training-slug}#{exercise_number}`. SK range
+    query DDB `BETWEEN` (mirror BIOMETRY pattern z `query_by_pk_sk_range`).
+    Tilde `~` w upper bound chwyta wszystkie sufiksy aż do next SK kategorii.
+
+    Sortowanie: DDB Query zwraca ascending po SK; reverse w aplikacji →
+    najnowsze daty pierwsze. Frontend grupuje per date dla "Historia wykonana"
+    list view.
+    """
+    today = datetime.now(LOCAL_TZ).date()
+    cutoff_iso = (today - timedelta(days=days - 1)).isoformat()
+    items = query_by_pk_sk_range(
+        f"USER#{user_id}",
+        sk_start=f"WORKOUT#{cutoff_iso}",
+        sk_end="WORKOUT#~",
+    )
+
+    out: list[dict[str, Any]] = []
+    for raw in items:
+        sk = raw["SK"]
+        parts = sk.split("#")
+        if len(parts) < 4:
+            continue
+        workout_date = parts[1]
+        training_slug = parts[2]
+        exercise_number = parts[3]
+
+        cleaned = {k: _to_python(v) for k, v in raw.items() if k not in ("PK", "SK")}
+        out.append(
+            {
+                "date": workout_date,
+                "training_slug": training_slug,
+                "exercise_number": exercise_number,
+                **cleaned,
+            }
+        )
+
+    # Reverse — DDB sortuje ascending po SK, frontend chce newest first.
+    out.sort(key=lambda x: (x["date"], x["exercise_number"]), reverse=True)
+    return out
