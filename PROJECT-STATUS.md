@@ -57,12 +57,77 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Recent activities 3 → 5 + Trend swap + HRV drop + Jakość snu | ✅ shipped 2026-05-14/15 (PRy #173/#175/#177/#178) — Trendy reorder (in/spalone/kroki), Dashboard pokazuje 5 ostatnich aktywności, HRV drop z UI (Garmin nie wysyła do AH, 0 rows w DDB), nowy MiniStat "Jakość snu" `(deep+rem)/asleep × 100%` w Recovery 2×2 panel |
 | HAE webhook scaling (Weronika onboarding) | ✅ shipped 2026-05-14 (PR #170) — bump memory 512MB → 1024MB i timeout 10s → 29s. Powód: Weronika initial export timeout'ował na 10s nawet dla `Date Range: Last 1 day`. 1024MB ≈ 2× vCPU (Lambda CPU proporcjonalna do memory), 29s = max API GW HTTP integration timeout |
 | Strava OAuth mobile experiment (revert) | ⚠️ tested + reverted 2026-05-14 (PRy #171 → #172) — próbowaliśmy `/oauth/mobile/authorize` żeby otworzyć Strava app native na iPhone. Live test: Strava app rzuca "error" zaraz po Authorize → `/oauth/mobile/authorize` deprecated dla third-party developers (tylko Strava-owned partner apps). Revert do standard `/oauth/authorize` browser flow (iOS i tak pokazuje banner "Open in Strava" jeśli zalogowany) |
+| Audit-driven sprint (frontend P0 + security P1 + tech debt P1) | ✅ shipped 2026-05-16/17 (14 PRy #180-#194) — szczegóły w sekcji "Aktywny sprint" niżej. Audyt 2026-05-16 ([`docs/audit-2026-05-16.md`](docs/audit-2026-05-16.md)) → 3 wyspecjalizowane agenty (security/frontend-designer/auditor) → 14-PR egzekucja. Bundle gzip 167→88 KB (-47%), 4 nowe security guards (nonce/Strava JWT/IAM deny/CSRF), -209 LOC duplikacji w handlerach, frontend CI gating, DDB SK range optimization |
 
 ## Open PRs
 
-`gh pr list` — **PR #178** (Jakość snu w Recovery panel) czeka na merge.
+`gh pr list` — **brak otwartych PR**. Ostatni zmergowany: PR #194 (BIOMETRY SK range query).
 
-## Aktywny sprint — Weronika onboarding (częściowo) + Strava limit ticket pending
+## Aktywny sprint
+
+**Sesja 2026-05-16 → 17 — 14 PR-ów merged (#180-#194), audit-driven sprint (frontend P0 + security P1 + tech debt P1):**
+
+Wykonana po audycie 2026-05-16 ([`docs/audit-2026-05-16.md`](docs/audit-2026-05-16.md)) trzech wyspecjalizowanych agentów (security / frontend-designer / auditor — równoległe wywołanie). Audyt zidentyfikował zero P0 critical security ale liczne P0 frontend (fonty nieładujące się, mobile UX bugs) + 4 P1 security + 4 P1 dług techniczny. Sprint wykonany sekwencyjnie 1 step = 1 PR per memory `feedback_pr_workflow.md`.
+
+### Sprint #1 — frontend P0 visible polish (PRy #180-#185)
+
+- ✅ **PR #180** — self-hosted Inter + JetBrains Mono (subset Latin Extended). `index.css` referował fonty w 30+ miejscach ale brak `@font-face` → wszystko leciało na system fallback (`ui-monospace`). 4 woff2 (~80KB raw / ~30KB gzip) w `apps/web/public/fonts/`, preload weight 600/700 dla heading bez FOUT. CSP `font-src 'self'` bez zmian.
+- ✅ **PR #181** — `100vh` → `100dvh` w 6 miejscach. iOS Safari `100vh` ≠ visible viewport (URL bar collapses/expands); chat-screen overflowował pod bottom nav. Browser support 96%+ (Safari 15.4+ / Chrome 108+ / Firefox 101+).
+- ✅ **PR #182** — touch tooltipy w MetricChart + WeightChart. Dotąd tylko `onMouseEnter` — iOS Safari emulował hover dopiero za 2-im tap. Dodane `onTouchStart` (z `preventDefault` blokującym syntetyczne mouse events) + global `touchstart` listener dla tap-outside dismiss. +2 testy. Desktop hover bez zmian.
+- ✅ **PR #183** — sidebar `position: sticky` w grid item → `position: fixed`. Znany W3C quirk: sticky nie działa w `display: grid` parent → przy długim Dashboard scrollu sidebar zjeżdżał. `.app-shell` bez grid, `.app-content { margin-left: 240px }`, mobile override z `width: auto` żeby bottom nav full width.
+- ✅ **PR #184** — modal body scroll lock + `aria-modal`. Nowy hook `apps/web/src/hooks/useBodyScrollLock.ts` (`document.body.style.overflow = 'hidden'` + restore). `RecipeModal` + `DemoGallery` używają. `RecipeModal` dorzucone `aria-modal="true"` + `aria-labelledby={useId()}` powiązane z `<h2>`. +3 testy.
+- ✅ **PR #185** — lazy-load `ChatScreen` + `recipes.json`. Bundle initial: 167.25 → **88.69 KB gzip (-47%)**. Vite warning >500KB zniknął. `React.lazy()` + `<Suspense fallback>` w Dashboard; Rollup automatycznie tworzy osobny chunk z recipes.json (324 KB raw / 78.77 KB gzip lazy). Tested manually: initial Dashboard → zero requestów do ChatScreen/recipes, klik Asystent AI → 3 requesty.
+
+### Sprint #2 — security P1 (PRy #187-#190)
+
+- ✅ **PR #187** — nonce w Google Sign-In (replay protection). Frontend `LoginScreen.tsx` generuje `crypto.randomUUID()` w useRef, wstrzykuje do `google.accounts.id.initialize({nonce})`, wysyła w body /api/auth/google. Backend `google_auth/service.login` sprawdza `idinfo['nonce'] == req.nonce` (mismatch → 401) + atomic single-use DDB `NONCE#{value}` z TTL 5min (replay → 401). Pydantic `LoginRequest` z `nonce: str = Field(min_length=16, max_length=128)`. IAM `DDBWriteNonce` statement z `LeadingKeys=NONCE#*`. +4 testy.
+- ✅ **PR #188** — Strava OAuth callback wymaga JWT cookie. Defense-in-depth: do tej pory state nonce w DDB wystarczał, atakujący z wykradzionym state mógł zakończyć OAuth z własną Stravą pod cudzym user_id (athlete map conflict guard łapał TYLKO same-athlete attempts). Nowo: JWT check **przed** state delete (atomic — anonim nie spala legit state) + porównanie `state.user_id == jwt.user_id` (mismatch → redirect `state_user_mismatch`). IAM dodane `ssm:GetParameter` na `/bodysync/jwt/signing_secret`. +3 testy.
+- ✅ **PR #189** — OIDC role deny expensive AI services. GHA `PowerUserAccess` managed policy pozwalała na `bedrock:* sagemaker:* comprehend:* rekognition:* transcribe:* polly:* lex:* kendra:* translate:* textract:* personalize:*`. Compromise OIDC tokenu (zlec PR z konta z write access, supply-chain action) → max szkoda nieograniczona w short window (Bedrock model invoke = miliony $/godz). Explicit `Deny` w nowej inline policy `deny-expensive-ai-services` przewyższa wszystkie `Allow`. Bootstrap workspace ma local backend — owner ręcznie zaapplyował `terraform apply` po merge.
+- ✅ **PR #190** — CSRF token double-submit (zamiast SameSite=Strict). Owner zdecydował zostać przy `SameSite=Lax` (Strict zepsuje Strava OAuth callback cross-site redirect z `https://www.strava.com`). Zamiast tego nowy `shared/csrf.py` z `verify_csrf(event)` (hmac.compare_digest cookie vs header). Frontend `api.ts` auto-inject `X-CSRF-Token` header dla non-safe methods. Apply do 5 handlerów: `advisor_chat` (POST + DELETE), `activity_suggestion`, `measurements`, `profile_targets` (POST/PUT), `tdee_recalc`. CORS allow_headers += `x-csrf-token`. +12 testów (6 shared/csrf unit + 6 per-handler "missing csrf → 403").
+
+### Sprint #3 — dług techniczny P1 (PRy #191-#194)
+
+- ✅ **PR #191** — Terraform import bloki cleanup. `main.tf:7-19` miało 2 leftover `import {}` bloki (weronika webhook secret + google service_account_json) utworzone ręcznie pre-IaC. Po pierwszym apply były no-op. Usunięte: -18 LOC.
+- ✅ **PR #192** — frontend CI workflow `.github/workflows/web.yml`. Dotąd broken TS w `apps/web/` leciał do prod (Cloudflare Pages auto-deploy z main bez gating); 192 vitest casy istniały tylko dla lokalnego `npm test`. Nowo: paths-filter `apps/web/**`, Node 22, `npm ci → typecheck → vitest → build`. SHA pinning per CLAUDE.md.
+- ✅ **PR #193** — `shared/http.py` extract z 9 handlerów. `_extract_session_cookie` + `_response` powtarzane w ~30 LOC każde × 9 plików. Nowo: `shared/http.py` z `extract_session_cookie` + `response`. `activities_list` zostaje lokalny `response` bo używa `_decimal_safe` serializer (DDB Decimal → JSON number, frontend wymaga `number`). Lokalne zmienne `response = SomeResponse(...)` w 5 handlerach renamed do `result = ` żeby nie shadowować shared funkcji. Net **-209 LOC**, +7 testów (shared/test_http.py). 18 zip-ów rebuild (każdy zawiera całe `shared/` per build.py — owner zaakceptował koszt).
+- ✅ **PR #194** — SK range query dla BIOMETRY zamiast pełnego prefix scan + Python filter. `api_read.get_biometry` + `advisor_chat._query_snapshots_in_range` pobierały WSZYSTKIE BIOMETRY rows usera od początku historii (1MB Query cap silent truncation risk przy długiej historii). Nowo: `shared/dynamo.query_by_pk_sk_range(pk, sk_start, sk_end)` z DDB `BETWEEN`. `BIOMETRY#{cutoff}` do `BIOMETRY#~` (tilde sorts po `#` + digits). +3 testy (inclusive bounds, category isolation, PK isolation).
+
+### Sesja 2026-05-16 → 17 — metryki
+
+- **14 PR-ów merged** (#180-#194 minus #186 audit doc PR, czyli 14 code + 1 docs)
+- **Backend testów**: 391 → **420 pass** (+29 nowych z 4 sprintów security i shared modules)
+- **Frontend testów**: 187 → **192 pass** (+5 z PR #182 touch + PR #184 modal a11y)
+- **Bundle gzip**: **-47% initial** (167 → 88 KB), warning >500KB rozwiązany przez lazy load
+- **Nowe shared modules**: `shared/http.py`, `shared/csrf.py`, `apps/web/src/hooks/useBodyScrollLock.ts`
+- **DDB extensions**: `NONCE#*` PK (Google Sign-In nonces z TTL 5min)
+- **IAM zmiany**: `DDBWriteNonce` w `google_auth`, `ssm:GetParameter jwt_signing_secret` w `strava_oauth_callback`, `Deny expensive AI services` w bootstrap OIDC role
+- **CORS**: `x-csrf-token` w allow_headers
+- **LOC delta**: -209 w handlerach (shared/http extract) -18 (TF import bloki) + nowe testy + dwa nowe shared moduli
+
+### Co zostało odłożone (z audytu, świadomie skip w tym sprincie)
+
+**Tier A featury** (wymóg prawny + must-have MVP-pary):
+- 🚧 **GDPR endpointy** — `GET /api/me/export` (ZIP wszystkich `USER#{id}` rows) + `DELETE /api/me/account` (cascade DDB + S3 raw + SSM Strava tokens + athlete-to-user map cleanup). `privacy.html` zapowiada RODO 24mc retention bez technicznego enforcement. Wymóg prawny UE.
+- 🚧 **Recovery Score 0-100** — composite z asleep h + deep+rem quality + RHR delta vs 14d baseline. Owner zaakceptował koncepcję w 2026-05-15, jeszcze nie ruszyliśmy.
+- 🚧 **Manual kcal/macro entry** — fallback gdy HAE offline (rozszerzenie `POST /api/measurements` lub osobny endpoint). Dziś dashboard pokazuje 0 jeśli HAE nie wysłał.
+- 🚧 **Comparisons user_a vs user_b** — couples accountability. Architektura DDB single-table pozwala (GSI-1 inverted index), brak read path.
+- 🚧 **CloudWatch error/latency alarms** — dziś tylko Anthropic cost-guard. Ślepi na 5xx storm, p95 spikes, DDB throttling.
+
+**A11y baseline P1**:
+- 🚧 `--text-dim` kontrast (#5a6f8e na bg = 4.04:1, fail WCAG AA → bump na #7a8ca8)
+- 🚧 focus outlines (`outline: 2px solid var(--cyan)` zamiast border swap w 7 inputach)
+- 🚧 `@media (prefers-reduced-motion)` global
+- 🚧 `<label className="sr-only">` na ChatInput
+
+**Operational gaps** (nie pilne dla 2-user MVP):
+- 🚧 X-Ray tracing na Lambdach
+- 🚧 DLQ na strava_fetcher (DDB Stream record fail = log+skip dziś)
+- 🚧 Deploy rollback doc
+- 🚧 Onboarding doc dla nowego usera (kroki rozproszone w PROJECT-STATUS)
+
+---
+
+## Poprzednia sesja — Weronika onboarding (częściowo) + Strava limit ticket pending
 
 **Sesja 2026-05-12 → 15 — 20 PR-ów merged (#159-#178), waitlist landing + dashboard polish + body measurements + onboarding Weroniki:**
 
