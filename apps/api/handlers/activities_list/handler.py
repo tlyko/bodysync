@@ -16,11 +16,11 @@ from typing import Any
 
 from shared.auth import AuthError, verify_jwt
 from shared.dynamo import query_by_pk
+from shared.http import extract_session_cookie
 from shared.logging import get_logger
 
 logger = get_logger("activities_list")
 
-COOKIE_NAME = "bodysync_session"
 DEFAULT_LIMIT = 10
 MAX_LIMIT = 50
 
@@ -40,21 +40,6 @@ def _response(status: int, body: dict[str, Any] | list[Any]) -> dict[str, Any]:
     }
 
 
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
-
-
 def _parse_limit(qs: dict[str, str]) -> int:
     raw = qs.get("limit")
     if not raw:
@@ -68,7 +53,7 @@ def _parse_limit(qs: dict[str, str]) -> int:
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "local")
 
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         return _response(401, {"error": "missing session cookie"})
 

@@ -17,7 +17,6 @@ wyłączony w PR1 — `narrative` zawsze None, frontend pokazuje raw status
 
 from __future__ import annotations
 
-import json
 from datetime import date, timedelta
 from typing import Any
 
@@ -41,11 +40,11 @@ from shared.dynamo import (
     query_weights_in_range,
     sum_metric_in_range,
 )
+from shared.http import extract_session_cookie, response
 from shared.logging import get_logger
 
 logger = get_logger("tdee_recalc")
 
-COOKIE_NAME = "bodysync_session"
 
 # Hardcoded per CLAUDE.md "user scope dziś 2 userów". Multi-user dynamic
 # wymagałby USER list entity albo Cognito — YAGNI.
@@ -54,29 +53,6 @@ CRON_USER_LIST = ["tomek", "weronika"]
 
 class ProfileNotFoundError(Exception):
     """PROFILE row brak — handler zwraca 404."""
-
-
-def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
-    }
-
-
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
 
 
 def _is_cron_event(event: dict[str, Any]) -> bool:
@@ -216,10 +192,10 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     if _is_cron_event(event):
         return _handle_cron(event, request_id, today)
 
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         logger.info("missing_session", extra={"request_id": request_id})
-        return _response(401, {"error": "missing session cookie"})
+        return response(401, {"error": "missing session cookie"})
 
     try:
         payload = verify_jwt(token)
@@ -228,18 +204,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "invalid_session",
             extra={"request_id": request_id, "reason": str(e)},
         )
-        return _response(401, {"error": "invalid session"})
+        return response(401, {"error": "invalid session"})
 
     user_id = payload.get("user_id")
     if not user_id:
-        return _response(401, {"error": "user_id missing in jwt"})
+        return response(401, {"error": "user_id missing in jwt"})
 
     # CSRF guard (sec audit 2026-05-16 P1-4) — state-changing endpoint.
     try:
         verify_csrf(event)
     except CSRFError:
         logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
-        return _response(403, {"error": "csrf_required"})
+        return response(403, {"error": "csrf_required"})
 
     try:
         result = _process_user(user_id, today)
@@ -248,13 +224,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "profile_not_found",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(404, {"error": "profile not found"})
+        return response(404, {"error": "profile not found"})
     except Exception:
         logger.exception(
             "diet_check_failed",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(500, {"error": "internal"})
+        return response(500, {"error": "internal"})
 
     logger.info(
         "diet_check_complete",
@@ -266,4 +242,4 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "status": result.status,
         },
     )
-    return _response(200, result.model_dump(mode="json"))
+    return response(200, result.model_dump(mode="json"))

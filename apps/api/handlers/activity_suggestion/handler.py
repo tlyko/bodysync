@@ -21,7 +21,6 @@ Reasoning content (po polsku, generowane LLM) NIE leci do CloudWatch.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -35,44 +34,21 @@ from handlers.activity_suggestion.service import (
 )
 from shared.auth import AuthError, verify_jwt
 from shared.csrf import CSRFError, verify_csrf
+from shared.http import extract_session_cookie, response
 from shared.logging import get_logger
 
 logger = get_logger("activity_suggestion")
 
-COOKIE_NAME = "bodysync_session"
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
-
-
-def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
-    }
-
-
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
 
 
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "local")
 
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         logger.info("missing_session", extra={"request_id": request_id})
-        return _response(401, {"error": "missing session cookie"})
+        return response(401, {"error": "missing session cookie"})
 
     try:
         payload = verify_jwt(token)
@@ -81,18 +57,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "invalid_session",
             extra={"request_id": request_id, "reason": str(e)},
         )
-        return _response(401, {"error": "invalid session"})
+        return response(401, {"error": "invalid session"})
 
     user_id = payload.get("user_id")
     if not user_id:
-        return _response(401, {"error": "user_id missing in jwt"})
+        return response(401, {"error": "user_id missing in jwt"})
 
     # CSRF guard (sec audit 2026-05-16 P1-4) — endpoint pala LLM call ($).
     try:
         verify_csrf(event)
     except CSRFError:
         logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
-        return _response(403, {"error": "csrf_required"})
+        return response(403, {"error": "csrf_required"})
 
     # Today w Europe/Warsaw — match advisor_chat semantics. 7d window
     # liczone od jego północy do dziś rano.
@@ -110,7 +86,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "reason": str(e),
             },
         )
-        return _response(503, {"error": "advisor_unavailable", "reason": str(e)})
+        return response(503, {"error": "advisor_unavailable", "reason": str(e)})
     except ActivitySuggestionBackendError as e:
         logger.warning(
             "llm_backend_error",
@@ -121,12 +97,12 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "status_code": e.status_code,
             },
         )
-        return _response(502, {"error": "advisor_backend_error", "reason": e.reason})
+        return response(502, {"error": "advisor_backend_error", "reason": e.reason})
     except Exception:
         logger.exception("internal_error", extra={"request_id": request_id})
-        return _response(500, {"error": "internal"})
+        return response(500, {"error": "internal"})
 
-    response = ActivitySuggestionResponse(
+    result = ActivitySuggestionResponse(
         level=suggestion.level,
         reasoning=suggestion.reasoning,
         activities_count=summary["activities_count"],
@@ -142,4 +118,4 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "activities_count": summary["activities_count"],
         },
     )
-    return _response(200, response.model_dump())
+    return response(200, result.model_dump())

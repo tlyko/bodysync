@@ -19,7 +19,6 @@ Owner widzi "ostatnio: 2h temu" i może kliknąć force-refresh later.
 
 from __future__ import annotations
 
-import json
 import time
 from typing import Any
 
@@ -32,37 +31,14 @@ from handlers.plan.service import (
     save_cached_plan,
 )
 from shared.auth import AuthError, verify_jwt
+from shared.http import extract_session_cookie, response
 from shared.logging import get_logger
 from shared.ssm import get_param
 
 logger = get_logger("plan")
 
-COOKIE_NAME = "bodysync_session"
 
 SERVICE_ACCOUNT_PARAM = "/bodysync/google/service_account_json"
-
-
-def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
-    }
-
-
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
 
 
 def _force_refresh(event: dict[str, Any]) -> bool:
@@ -83,18 +59,18 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "local")
 
     # ─── Auth ──────────────────────────────────────────────────────────
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         logger.info("missing_session", extra={"request_id": request_id})
-        return _response(401, {"error": "missing session cookie"})
+        return response(401, {"error": "missing session cookie"})
     try:
         payload = verify_jwt(token)
     except AuthError:
         logger.info("invalid_session", extra={"request_id": request_id})
-        return _response(401, {"error": "invalid session"})
+        return response(401, {"error": "invalid session"})
     user_id = payload.get("user_id")
     if not user_id:
-        return _response(401, {"error": "user_id missing in jwt"})
+        return response(401, {"error": "user_id missing in jwt"})
 
     force = _force_refresh(event)
 
@@ -108,14 +84,14 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "ssm_config_error",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(503, {"error": "not_configured"})
+        return response(503, {"error": "not_configured"})
 
     if sheet_id == "PLACEHOLDER" or sheet_tab == "PLACEHOLDER" or sa_json == "PLACEHOLDER":
         logger.warning(
             "ssm_placeholder",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(503, {"error": "not_configured"})
+        return response(503, {"error": "not_configured"})
 
     # ─── Cache check ──────────────────────────────────────────────────
     cached = load_cached_plan(user_id)
@@ -129,7 +105,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "age_seconds": int(time.time()) - cached.fetched_at,
             },
         )
-        return _response(
+        return response(
             200,
             PlanResponse(
                 rows=cached.rows,
@@ -155,7 +131,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "stale_age_seconds": int(time.time()) - cached.fetched_at,
                 },
             )
-            return _response(
+            return response(
                 200,
                 PlanResponse(
                     rows=cached.rows,
@@ -184,7 +160,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             )
             else 502
         )
-        return _response(status, {"error": e.reason})
+        return response(status, {"error": e.reason})
 
     # ─── Persist cache + return ───────────────────────────────────────
     now = int(time.time())
@@ -209,7 +185,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "sheet_tab": sheet_tab,
         },
     )
-    return _response(
+    return response(
         200,
         PlanResponse(
             rows=rows,

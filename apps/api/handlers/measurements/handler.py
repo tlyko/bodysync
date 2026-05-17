@@ -37,11 +37,11 @@ from handlers.measurements.schemas import MeasurementsRequest
 from handlers.measurements.service import save_measurements
 from shared.auth import AuthError, verify_jwt
 from shared.csrf import CSRFError, verify_csrf
+from shared.http import extract_session_cookie, response
 from shared.logging import get_logger
 
 logger = get_logger("measurements")
 
-COOKIE_NAME = "bodysync_session"
 
 # Mapping z Pydantic field name → DDB SK metric segment. Strip `_cm` suffix
 # żeby SK był `BIOMETRY#date#waist#manual` (nie `waist_cm#manual`) — krótsza
@@ -53,29 +53,6 @@ _FIELD_TO_METRIC = {
     "biceps_cm": "biceps",
     "thigh_cm": "thigh",
 }
-
-
-def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body),
-    }
-
-
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
 
 
 def _parse_json_body(event: dict[str, Any]) -> tuple[dict[str, Any] | None, str | None]:
@@ -100,10 +77,10 @@ def handle(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """
     request_id = getattr(context, "aws_request_id", "local")
 
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         logger.info("missing_session", extra={"request_id": request_id})
-        return _response(401, {"error": "missing session cookie"})
+        return response(401, {"error": "missing session cookie"})
 
     try:
         payload = verify_jwt(token)
@@ -112,22 +89,22 @@ def handle(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "invalid_session",
             extra={"request_id": request_id, "reason": str(e)},
         )
-        return _response(401, {"error": "invalid session"})
+        return response(401, {"error": "invalid session"})
 
     user_id = payload.get("user_id")
     if not user_id:
-        return _response(401, {"error": "user_id missing in jwt"})
+        return response(401, {"error": "user_id missing in jwt"})
 
     # CSRF guard (sec audit 2026-05-16 P1-4) — double-submit cookie.
     try:
         verify_csrf(event)
     except CSRFError:
         logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
-        return _response(403, {"error": "csrf_required"})
+        return response(403, {"error": "csrf_required"})
 
     parsed, err = _parse_json_body(event)
     if err is not None:
-        return _response(422, {"error": "validation_failed", "fields": [err]})
+        return response(422, {"error": "validation_failed", "fields": [err]})
 
     try:
         req = MeasurementsRequest.model_validate(parsed)
@@ -137,7 +114,7 @@ def handle(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "validation_failed",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(422, {"error": "validation_failed", "fields": fields})
+        return response(422, {"error": "validation_failed", "fields": fields})
 
     # Strip `_cm` suffix + drop None values (Pydantic optional).
     measurements: dict[str, float] = {}
@@ -153,13 +130,13 @@ def handle(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "ddb_write_failed",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(500, {"error": "internal"})
+        return response(500, {"error": "internal"})
     except Exception:
         logger.exception(
             "internal_error",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(500, {"error": "internal"})
+        return response(500, {"error": "internal"})
 
     saved_list = sorted(saved_map.keys())
     logger.info(
@@ -173,4 +150,4 @@ def handle(event: dict[str, Any], context: Any) -> dict[str, Any]:
             "date": req.date,
         },
     )
-    return _response(200, {"saved": saved_list, "date": req.date})
+    return response(200, {"saved": saved_list, "date": req.date})

@@ -10,26 +10,18 @@ ponad próg czytelności. Importowane wprost z `handler.py`.
 
 from __future__ import annotations
 
-import json
 from datetime import UTC, date, datetime
 from typing import Any
 from zoneinfo import ZoneInfo
 
 from handlers.advisor_chat import service
 from handlers.advisor_chat.schemas import ChatHistoryResponse
+from shared.http import response
 from shared.logging import get_logger
 
 logger = get_logger("advisor_chat_history")
 
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
-
-
-def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
-    }
 
 
 def _parse_date_param(qs: dict[str, str]) -> date | None:
@@ -66,9 +58,9 @@ def handle_get_history(event: dict[str, Any], user_id: str, request_id: str) -> 
             "history_read_failed",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(500, {"error": "internal_error"})
+        return response(500, {"error": "internal_error"})
 
-    response = ChatHistoryResponse(messages=messages, date=target_date.isoformat())
+    result = ChatHistoryResponse(messages=messages, date=target_date.isoformat())
     logger.info(
         "history_get",
         extra={
@@ -77,7 +69,7 @@ def handle_get_history(event: dict[str, Any], user_id: str, request_id: str) -> 
             "history_size": len(messages),
         },
     )
-    return _response(200, response.model_dump())
+    return response(200, result.model_dump())
 
 
 def handle_delete_history(event: dict[str, Any], user_id: str, request_id: str) -> dict[str, Any]:
@@ -100,7 +92,7 @@ def handle_delete_history(event: dict[str, Any], user_id: str, request_id: str) 
             "history_delete_failed",
             extra={"request_id": request_id, "user_id": user_id},
         )
-        return _response(500, {"error": "internal_error"})
+        return response(500, {"error": "internal_error"})
 
     logger.info(
         "history_delete",
@@ -110,4 +102,4 @@ def handle_delete_history(event: dict[str, Any], user_id: str, request_id: str) 
             "deleted_count": deleted,
         },
     )
-    return _response(200, {"deleted": deleted, "date": target_date.isoformat()})
+    return response(200, {"deleted": deleted, "date": target_date.isoformat()})
