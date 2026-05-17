@@ -1362,9 +1362,9 @@ module "me_delete" {
     {
       # S3 cleanup — list + delete na 2 user-scoped prefixach. ListBucket
       # nie ma per-object resource, scope'ujemy condition po prefix patternie.
-      Sid    = "S3ListUserRawPayloads"
-      Effect = "Allow"
-      Action = ["s3:ListBucket"]
+      Sid      = "S3ListUserRawPayloads"
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket"]
       Resource = aws_s3_bucket.data.arn
       Condition = {
         "StringLike" = {
