@@ -115,6 +115,31 @@ def query_by_pk(pk: str, sk_prefix: str | None = None) -> list[dict[str, Any]]:
     return [dict(item) for item in resp.get("Items", [])]
 
 
+def query_all_by_pk(pk: str) -> list[dict[str, Any]]:
+    """Query całej PK z paginacją (LastEvaluatedKey loop).
+
+    DDB Query ma silent 1MB page cap — `query_by_pk` zwraca tylko pierwszą
+    stronę. Dla pełnego dump'u (GDPR export `/api/me/export`) musimy iterować
+    aż `LastEvaluatedKey` zwróci None. Dla typowej rocznej historii usera
+    (~2k BIOMETRY + ~150 ACTIVITY rows ≈ 1-2 MB) to 2-3 strony.
+    """
+    items: list[dict[str, Any]] = []
+    last_key: dict[str, Any] | None = None
+    while True:
+        kwargs: dict[str, Any] = {
+            "KeyConditionExpression": "PK = :pk",
+            "ExpressionAttributeValues": {":pk": pk},
+        }
+        if last_key is not None:
+            kwargs["ExclusiveStartKey"] = last_key
+        resp = _table.query(**kwargs)
+        items.extend(dict(item) for item in resp.get("Items", []))
+        last_key = resp.get("LastEvaluatedKey")
+        if not last_key:
+            break
+    return items
+
+
 def query_by_pk_sk_range(pk: str, sk_start: str, sk_end: str) -> list[dict[str, Any]]:
     """Query items where SK lies w `[sk_start, sk_end]` lexicographically.
 

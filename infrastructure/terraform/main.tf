@@ -1250,3 +1250,71 @@ resource "aws_lambda_permission" "waitlist_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# GDPR Art. 20 — data portability. GET /api/me/export zwraca pełen dump
+# wszystkich rows pod USER#{id z JWT} jako JSON attachment. Audit
+# 2026-05-16 P0 — privacy.html zapowiada RODO 24mc retention bez
+# technicznego enforcement; ten endpoint zamyka prawny gap. 1024 MB / 29 s
+# bo full Query + JSON serialize dla typowej rocznej historii ~1-2 MB.
+module "me_export" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "me_export"
+  source_zip    = "${path.module}/../../apps/api/dist/me_export.zip"
+  handler       = "handlers.me_export.handler.handle"
+  memory_size   = 1024
+  timeout       = 29
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Read-only Query scope'owany pod USER#* (LeadingKeys condition) —
+      # defense in depth z handler PK='USER#{user_id z JWT}'. Bug w
+      # handlerze nie pozwoli na cross-PK access (np. WAITLIST, RECIPES,
+      # EVENT#strava).
+      Sid      = "DDBQueryUserData"
+      Effect   = "Allow"
+      Action   = ["dynamodb:Query"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "ReadJWTSecret"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "me_export" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.me_export.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "me_export" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/me/export"
+  target    = "integrations/${aws_apigatewayv2_integration.me_export.id}"
+}
+
+resource "aws_lambda_permission" "me_export_apigw" {
+  statement_id  = "AllowAPIGWInvokeMeExport"
+  action        = "lambda:InvokeFunction"
+  function_name = module.me_export.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
