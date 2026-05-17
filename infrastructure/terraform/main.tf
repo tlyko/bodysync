@@ -1,23 +1,5 @@
 data "aws_caller_identity" "current" {}
 
-# Import istniejącego SSM param utworzonego ręcznie przez ownera 2026-05-07
-# (przed renamem partner → weronika w handlerze). Bez tego TF próbowałby
-# CreateParameter na existing → ParameterAlreadyExists. Po pierwszym apply
-# można ten blok usunąć (idempotent — TF widzi że state już ma resource).
-import {
-  to = aws_ssm_parameter.securestring["/bodysync/health-auto-export/webhook_secret_weronika"]
-  id = "/bodysync/health-auto-export/webhook_secret_weronika"
-}
-
-# Sprint 5 — owner stworzył /bodysync/google/service_account_json ręcznie
-# pre-PR #112 (zostawione z eksperymentu lub ręczne setup'u). Pipeline #112
-# apply padł z ParameterAlreadyExists. Po pierwszym apply z tym importem
-# można blok usunąć (analogicznie do PR #66 dla openai/api_key).
-import {
-  to = aws_ssm_parameter.google_service_account_json
-  id = "/bodysync/google/service_account_json"
-}
-
 # API Gateway HTTP — single shared API dla wszystkich endpointów bodysync.
 module "api_gateway" {
   source  = "./modules/api-gateway"
