@@ -14,14 +14,21 @@ from unittest.mock import patch
 import pytest
 from botocore.exceptions import ClientError
 
+_CSRF_TEST_TOKEN = "test-csrf-token-deterministic"
+
 
 def _event(
     cookie: str | None,
     *,
     body: dict[str, Any] | None = None,
     raw_body: str | None = None,
+    csrf: bool = True,
 ) -> dict[str, Any]:
     cookies: list[str] = [cookie] if cookie else []
+    headers: dict[str, str] = {"content-type": "application/json"}
+    if csrf:
+        cookies.append(f"bodysync_csrf={_CSRF_TEST_TOKEN}")
+        headers["x-csrf-token"] = _CSRF_TEST_TOKEN
     if raw_body is not None:
         body_str: str | None = raw_body
     else:
@@ -31,7 +38,7 @@ def _event(
         "routeKey": "POST /api/measurements",
         "rawPath": "/api/measurements",
         "requestContext": {"http": {"method": "POST"}},
-        "headers": {"content-type": "application/json"},
+        "headers": headers,
         "cookies": cookies,
         "body": body_str,
         "isBase64Encoded": False,
@@ -46,6 +53,21 @@ def _mint_test_jwt(user_id: str) -> str:
     from shared.auth import mint_jwt
 
     return mint_jwt(user_id)
+
+
+# ─── CSRF guard (sec audit 2026-05-16 P1-4) ───────────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_post_without_csrf_returns_403() -> None:
+    from handlers.measurements import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handle(
+        _event(cookie, body={"date": "2026-05-17", "waist": 80.0}, csrf=False),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 403
 
 
 # ─── Happy path ────────────────────────────────────────────────────────────

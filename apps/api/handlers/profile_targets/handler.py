@@ -37,6 +37,7 @@ from handlers.profile_targets.service import (
     update_targets,
 )
 from shared.auth import AuthError, verify_jwt
+from shared.csrf import CSRFError, verify_csrf
 from shared.logging import get_logger
 
 logger = get_logger("profile_targets")
@@ -113,6 +114,14 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     method = _http_method(event)
     route = _route_key(event)
     raw_path = event.get("rawPath") or ""
+
+    # CSRF guard dla non-safe methods (sec audit 2026-05-16 P1-4).
+    if method not in {"GET", "HEAD", "OPTIONS"}:
+        try:
+            verify_csrf(event)
+        except CSRFError:
+            logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
+            return _response(403, {"error": "csrf_required"})
 
     try:
         # Route dispatch — calculate-tdee jest specyficzny path, separate od targets.

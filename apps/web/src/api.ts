@@ -32,6 +32,30 @@ class ApiError extends Error {
   }
 }
 
+// CSRF token (sec audit 2026-05-16 P1-4). Double-submit cookie pattern:
+// JS generuje token, zapisuje w cookie `bodysync_csrf` (NIE HttpOnly bo musi
+// czytać) i wysyła w header `X-CSRF-Token` przy każdym non-safe method.
+// Backend porównuje cookie z header (constant-time) — atakujący na innej
+// domenie nie może odczytać cookie (Same-Origin Policy) ani ustawić custom
+// header w cross-origin fetch (CORS preflight blokuje).
+const CSRF_COOKIE = 'bodysync_csrf';
+const CSRF_HEADER = 'X-CSRF-Token';
+// 30d match z session cookie TTL; nawet jeśli wygaśnie wcześniej, GetOrCreate
+// regeneruje przy następnym request.
+const CSRF_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
+
+function getOrCreateCsrfToken(): string {
+  const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]+)`));
+  if (match) return decodeURIComponent(match[1]);
+  // crypto.randomUUID gwarantuje ≥122 bity losowej entropii — sufficient
+  // dla CSRF token (atakujący nie odgadnie metodą brute force w sensownym czasie).
+  const token = crypto.randomUUID();
+  document.cookie = `${CSRF_COOKIE}=${token}; max-age=${CSRF_COOKIE_MAX_AGE}; path=/; SameSite=Lax`;
+  return token;
+}
+
+const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+
 // Parse error body — backend zwraca JSON `{detail: "..."}` (FastAPI/Starlette)
 // lub plain text. Spróbuj JSON, fallback do raw text.
 function parseErrorMessage(body: string): string {
@@ -50,6 +74,10 @@ function parseErrorMessage(body: string): string {
 }
 
 async function request<T>(path: string, init?: RequestInit, signal?: AbortSignal): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase();
+  const csrfHeader: Record<string, string> = SAFE_METHODS.has(method)
+    ? {}
+    : { [CSRF_HEADER]: getOrCreateCsrfToken() };
   let res: Response;
   try {
     res = await fetch(`${API_URL}${path}`, {
@@ -58,6 +86,7 @@ async function request<T>(path: string, init?: RequestInit, signal?: AbortSignal
       credentials: 'include',
       headers: {
         'Content-Type': 'application/json',
+        ...csrfHeader,
         ...(init?.headers ?? {}),
       },
     });

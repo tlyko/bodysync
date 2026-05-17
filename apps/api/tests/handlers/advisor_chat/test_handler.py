@@ -39,12 +39,18 @@ def _flatten_user_content(content: Any) -> str:
     return "".join(b["text"] for b in content if b.get("type") == "text")
 
 
+_CSRF_TEST_TOKEN = "test-csrf-token-deterministic"  # double-submit check sufficient
+
+
 def _event(
     body: dict[str, Any] | str | None,
     *,
     cookie: str | None = None,
+    csrf: bool = True,
 ) -> dict[str, Any]:
-    """Build API GW HTTP API v2 event dla POST /api/advisor/chat."""
+    """Build API GW HTTP API v2 event dla POST /api/advisor/chat.
+
+    `csrf=False` symuluje brak/zły CSRF token (testy CSRF guard)."""
     if body is None:
         raw = ""
     elif isinstance(body, str):
@@ -52,10 +58,19 @@ def _event(
     else:
         raw = json.dumps(body)
     cookies: list[str] = [cookie] if cookie else []
+    headers: dict[str, str] = {"content-type": "application/json"}
+    method = (
+        "POST"  # advisor_chat handler dispatch'uje też GET/DELETE — testy
+        # nadpisują routeKey przez explicit `requestContext`.
+    )
+    if csrf:
+        cookies.append(f"bodysync_csrf={_CSRF_TEST_TOKEN}")
+        headers["x-csrf-token"] = _CSRF_TEST_TOKEN
     return {
         "version": "2.0",
         "routeKey": "POST /api/advisor/chat",
-        "headers": {"content-type": "application/json"},
+        "requestContext": {"http": {"method": method}},
+        "headers": headers,
         "cookies": cookies,
         "queryStringParameters": {},
         "body": raw,
@@ -141,6 +156,23 @@ def _query_chat_rows(table: Any, user_id: str, today_iso: str) -> list[dict[str,
     items: list[dict[str, Any]] = raw["Items"]
     items.sort(key=lambda i: i["SK"])
     return items
+
+
+# ═══ CSRF guard (sec audit 2026-05-16 P1-4) ═══════════════════════════════
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key")
+def test_post_without_csrf_token_returns_403(dynamodb_table: Any) -> None:
+    """POST bez CSRF token (cookie + header) → 403 — double-submit guard."""
+    from handlers.advisor_chat import handler as h
+
+    result = h.handler(
+        _event({"message": "cześć"}, cookie=_cookie("user_a"), csrf=False),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 403
+    body = json.loads(result["body"])
+    assert body["error"] == "csrf_required"
 
 
 # ═══ Happy paths ═══════════════════════════════════════════════════════════

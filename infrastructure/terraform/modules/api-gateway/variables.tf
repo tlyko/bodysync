@@ -25,8 +25,11 @@ variable "cors_allow_methods" {
 }
 
 variable "cors_allow_headers" {
-  type    = list(string)
-  default = ["content-type", "authorization", "cookie"]
+  type = list(string)
+  # `x-csrf-token` (sec audit 2026-05-16 P1-4) — double-submit pattern, frontend
+  # wysyła w header dla POST/PUT/DELETE/PATCH. Bez tu CORS preflight blokuje
+  # request zanim dotrze do Lambdy.
+  default = ["content-type", "authorization", "cookie", "x-csrf-token"]
 }
 
 variable "log_retention_days" {
