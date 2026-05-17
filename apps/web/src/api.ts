@@ -88,10 +88,13 @@ export async function getBiometry(days = 7): Promise<BiometryResponse> {
   return request<BiometryResponse>(`/api/biometry?days=${days}`);
 }
 
-export async function loginWithGoogle(idToken: string): Promise<LoginResponse> {
+export async function loginWithGoogle(
+  idToken: string,
+  nonce: string,
+): Promise<LoginResponse> {
   return request<LoginResponse>('/api/auth/google', {
     method: 'POST',
-    body: JSON.stringify({ id_token: idToken }),
+    body: JSON.stringify({ id_token: idToken, nonce }),
   });
 }
 

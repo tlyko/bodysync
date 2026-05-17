@@ -16,6 +16,7 @@ declare global {
             client_id: string;
             callback: (response: { credential: string }) => void;
             auto_select?: boolean;
+            nonce?: string;
           }) => void;
           renderButton: (
             parent: HTMLElement,
@@ -43,10 +44,17 @@ export function LoginScreen({ onLoginSuccess }: Props) {
   // primary CTA. Owner + Weronika klikają "Mam już konto → Zaloguj" → reveals.
   const [showLogin, setShowLogin] = useState(false);
   const buttonRef = useRef<HTMLDivElement>(null);
+  // Replay-protection nonce (sec audit 2026-05-16 P1-1). Generowany raz per
+  // mount, wstrzykiwany do `initialize({nonce})` (Google podpisuje go w id_token)
+  // i wysyłany w body do backendu, który weryfikuje match + single-use DDB.
+  const nonceRef = useRef<string>('');
 
   useEffect(() => {
     if (!GOOGLE_CLIENT_ID || !showLogin) {
       return;
+    }
+    if (!nonceRef.current) {
+      nonceRef.current = crypto.randomUUID();
     }
     let attempts = 0;
     const maxAttempts = 50; // 5s total
@@ -64,7 +72,7 @@ export function LoginScreen({ onLoginSuccess }: Props) {
         client_id: GOOGLE_CLIENT_ID,
         callback: async (response) => {
           try {
-            await loginWithGoogle(response.credential);
+            await loginWithGoogle(response.credential, nonceRef.current);
             onLoginSuccess();
           } catch (e) {
             // 401/403/500 — pokaż w konsoli, user kliknie ponownie
@@ -72,6 +80,7 @@ export function LoginScreen({ onLoginSuccess }: Props) {
           }
         },
         auto_select: false,
+        nonce: nonceRef.current,
       });
 
       if (buttonRef.current) {

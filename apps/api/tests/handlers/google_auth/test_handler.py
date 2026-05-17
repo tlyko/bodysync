@@ -6,16 +6,33 @@ Coverage targets per ADR-002:
 - invalid Google token → 401
 - email spoza allowlisty → 403
 - PK isolation: po loginie alice, alice's PROFILE nie miesza się z bob's
+- nonce replay protection (sec audit 2026-05-16 P1-1)
 """
 
 from __future__ import annotations
 
 import json
+import uuid
 from typing import Any
 from unittest.mock import patch
 
 import jwt
 import pytest
+
+# Test nonce ≥16 chars (LoginRequest min_length). Unikalność per test wymagana
+# w testach replay-protection — generujemy `uuid4()` lokalnie tam gdzie trzeba.
+_DEFAULT_NONCE = "test-nonce-1234567890abcdef"
+
+
+def _body_with_nonce(
+    extra: dict[str, Any] | None = None, nonce: str | None = _DEFAULT_NONCE
+) -> dict[str, Any]:
+    base: dict[str, Any] = {"id_token": "fake.google.token"}
+    if nonce is not None:
+        base["nonce"] = nonce
+    if extra:
+        base.update(extra)
+    return base
 
 
 def _event(body: dict[str, Any] | str | None) -> dict[str, Any]:
@@ -38,17 +55,18 @@ class _FakeContext:
     aws_request_id = "test-req-id"
 
 
-def _patch_google(verified_email: str | None, **extra: Any) -> Any:
+def _patch_google(verified_email: str | None, *, nonce: str = _DEFAULT_NONCE, **extra: Any) -> Any:
     """Patch google.oauth2.id_token.verify_oauth2_token w obrębie testu.
 
-    Zwracana wartość symuluje idinfo dict; gdy verified_email is None — funkcja
-    raise'uje ValueError (jak google-auth dla zepsutego tokenu).
+    Zwracana wartość symuluje idinfo dict z `nonce` (Google podpisuje go w
+    id_token gdy wstrzykniemy w initialize). Gdy verified_email is None —
+    funkcja raise'uje ValueError (jak google-auth dla zepsutego tokenu).
     """
 
     def fake_verify(*_args: Any, **_kwargs: Any) -> dict[str, Any]:
         if verified_email is None:
             raise ValueError("invalid token")
-        return {"email": verified_email, "email_verified": True, **extra}
+        return {"email": verified_email, "email_verified": True, "nonce": nonce, **extra}
 
     return patch(
         "handlers.google_auth.service.google_id_token.verify_oauth2_token",
@@ -61,7 +79,7 @@ def test_happy_path_alice(dynamodb_table: Any) -> None:
     from handlers.google_auth import handler as h
 
     with _patch_google("alice@example.com", name="Alice"):
-        result = h.handler(_event({"id_token": "fake.google.token"}), _FakeContext())
+        result = h.handler(_event(_body_with_nonce()), _FakeContext())
 
     assert result["statusCode"] == 200
     body = json.loads(result["body"])
@@ -115,7 +133,26 @@ def test_400_invalid_json() -> None:
 def test_400_short_token() -> None:
     from handlers.google_auth import handler as h
 
-    result = h.handler(_event({"id_token": "x"}), _FakeContext())
+    result = h.handler(_event(_body_with_nonce({"id_token": "x"})), _FakeContext())
+    assert result["statusCode"] == 400
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_400_missing_nonce() -> None:
+    from handlers.google_auth import handler as h
+
+    result = h.handler(_event({"id_token": "fake.google.token"}), _FakeContext())
+    assert result["statusCode"] == 400
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_400_short_nonce() -> None:
+    from handlers.google_auth import handler as h
+
+    result = h.handler(
+        _event({"id_token": "fake.google.token", "nonce": "too-short"}),
+        _FakeContext(),
+    )
     assert result["statusCode"] == 400
 
 
@@ -145,8 +182,39 @@ def test_401_invalid_google_token() -> None:
     from handlers.google_auth import handler as h
 
     with _patch_google(verified_email=None):
-        result = h.handler(_event({"id_token": "garbage.token.here"}), _FakeContext())
+        result = h.handler(_event(_body_with_nonce()), _FakeContext())
     assert result["statusCode"] == 401
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_401_nonce_mismatch() -> None:
+    """id_token podpisany przez Google z innym nonce niż request body.
+
+    Symuluje wykradnięty id_token replay'owany do innego flow (legit user
+    request z nonce A, atakujący przekierowuje id_token do swojego flow
+    z nonce B). Backend MUSI odrzucić."""
+    from handlers.google_auth import handler as h
+
+    with _patch_google("alice@example.com", nonce="nonce-podpisany-w-tokenie"):
+        result = h.handler(
+            _event({"id_token": "fake.google.token", "nonce": "inny-nonce-w-bodyy"}),
+            _FakeContext(),
+        )
+    assert result["statusCode"] == 401
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_401_nonce_replay() -> None:
+    """Drugi request z tym samym nonce → 401 (single-use DDB)."""
+    from handlers.google_auth import handler as h
+
+    nonce = "shared-nonce-" + uuid.uuid4().hex
+    with _patch_google("alice@example.com", nonce=nonce):
+        first = h.handler(_event(_body_with_nonce(nonce=nonce)), _FakeContext())
+        assert first["statusCode"] == 200
+        # Drugi request — symuluje replay (wykradzione id_token + ten sam nonce).
+        second = h.handler(_event(_body_with_nonce(nonce=nonce)), _FakeContext())
+        assert second["statusCode"] == 401
 
 
 @pytest.mark.usefixtures("ssm_params", "dynamodb_table")
@@ -154,7 +222,7 @@ def test_403_email_not_allowed() -> None:
     from handlers.google_auth import handler as h
 
     with _patch_google("intruder@example.com"):
-        result = h.handler(_event({"id_token": "fake.google.token"}), _FakeContext())
+        result = h.handler(_event(_body_with_nonce()), _FakeContext())
     assert result["statusCode"] == 403
 
 
@@ -205,7 +273,10 @@ def test_relogin_preserves_existing_profile_attrs(dynamodb_table: Any) -> None:
     )
 
     with _patch_google("alice@example.com", name="Alice"):
-        result = h.handler(_event({"id_token": "alice.fake.token"}), _FakeContext())
+        result = h.handler(
+            _event(_body_with_nonce({"id_token": "alice.fake.token"})),
+            _FakeContext(),
+        )
     assert result["statusCode"] == 200
 
     profile = dynamodb_table.get_item(Key={"PK": "USER#alice", "SK": "PROFILE"})["Item"]
@@ -235,11 +306,19 @@ def test_pk_isolation_two_users(dynamodb_table: Any) -> None:
     nie ma cross-write'u."""
     from handlers.google_auth import handler as h
 
-    with _patch_google("alice@example.com", name="Alice"):
-        h.handler(_event({"id_token": "alice.fake.token"}), _FakeContext())
+    nonce_a = "alice-nonce-" + uuid.uuid4().hex
+    nonce_b = "bob-nonce-" + uuid.uuid4().hex
+    with _patch_google("alice@example.com", name="Alice", nonce=nonce_a):
+        h.handler(
+            _event(_body_with_nonce({"id_token": "alice.fake.token"}, nonce=nonce_a)),
+            _FakeContext(),
+        )
 
-    with _patch_google("bob@example.com", name="Bob"):
-        h.handler(_event({"id_token": "bob.fake.token"}), _FakeContext())
+    with _patch_google("bob@example.com", name="Bob", nonce=nonce_b):
+        h.handler(
+            _event(_body_with_nonce({"id_token": "bob.fake.token"}, nonce=nonce_b)),
+            _FakeContext(),
+        )
 
     alice = dynamodb_table.get_item(Key={"PK": "USER#alice", "SK": "PROFILE"}).get("Item")
     bob = dynamodb_table.get_item(Key={"PK": "USER#bob", "SK": "PROFILE"}).get("Item")
