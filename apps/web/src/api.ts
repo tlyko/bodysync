@@ -49,11 +49,28 @@ const CSRF_COOKIE_MAX_AGE = 60 * 60 * 24 * 30;
 
 function getOrCreateCsrfToken(): string {
   const match = document.cookie.match(new RegExp(`(?:^|; )${CSRF_COOKIE}=([^;]+)`));
-  if (match) return decodeURIComponent(match[1]);
   // crypto.randomUUID gwarantuje ≥122 bity losowej entropii — sufficient
   // dla CSRF token (atakujący nie odgadnie metodą brute force w sensownym czasie).
-  const token = crypto.randomUUID();
-  document.cookie = `${CSRF_COOKIE}=${token}; max-age=${CSRF_COOKIE_MAX_AGE}; path=/; SameSite=Lax`;
+  const token = match ? decodeURIComponent(match[1]) : crypto.randomUUID();
+  // Mirror scope `bodysync_session` (backend Set-Cookie: Domain=.bodysync.pl):
+  // frontend na `bodysync.pl`, API na `api.bodysync.pl` — bez Domain= cookie
+  // ma scope host-only i NIE leci cross-subdomain. Double-submit verify_csrf
+  // backendowy nie znalazłby cookie → wszystkie POST/PUT/DELETE 403.
+  // Setujemy idempotentnie na każdym call — gdy stary host-only cookie istnieje,
+  // browser zachowuje go obok, ale na api.bodysync.pl wyśle tylko Domain= one.
+  const hostname = typeof window !== 'undefined' ? window.location.hostname : '';
+  const isProdDomain = hostname === 'bodysync.pl' || hostname.endsWith('.bodysync.pl');
+  const attrs = [
+    `${CSRF_COOKIE}=${token}`,
+    `max-age=${CSRF_COOKIE_MAX_AGE}`,
+    'path=/',
+    'SameSite=Lax',
+  ];
+  if (isProdDomain) attrs.push('Domain=.bodysync.pl');
+  if (typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    attrs.push('Secure');
+  }
+  document.cookie = attrs.join('; ');
   return token;
 }
 
