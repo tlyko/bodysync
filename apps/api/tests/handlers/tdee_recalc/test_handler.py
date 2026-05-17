@@ -29,16 +29,27 @@ def _mint_test_jwt(user_id: str) -> str:
     return mint_jwt(user_id)
 
 
+_CSRF_TEST_TOKEN = "test-csrf-token-deterministic"
+
+
 def _http_event(
-    method: str, cookie: str | None, *, path: str = "/api/tdee/recalc"
+    method: str,
+    cookie: str | None,
+    *,
+    path: str = "/api/tdee/recalc",
+    csrf: bool = True,
 ) -> dict[str, Any]:
     cookies: list[str] = [cookie] if cookie else []
+    headers: dict[str, str] = {"content-type": "application/json"}
+    if csrf and method not in {"GET", "HEAD", "OPTIONS"}:
+        cookies.append(f"bodysync_csrf={_CSRF_TEST_TOKEN}")
+        headers["x-csrf-token"] = _CSRF_TEST_TOKEN
     return {
         "version": "2.0",
         "routeKey": f"{method} {path}",
         "rawPath": path,
         "requestContext": {"http": {"method": method}},
-        "headers": {"content-type": "application/json"},
+        "headers": headers,
         "cookies": cookies,
         "body": None,
         "isBase64Encoded": False,
@@ -139,6 +150,16 @@ def test_http_invalid_jwt_401() -> None:
     cookie = "bodysync_session=not-a-valid-jwt"
     result = h.handler(_http_event("POST", cookie), _FakeContext())
     assert result["statusCode"] == 401
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table", "freeze_today")
+def test_http_without_csrf_returns_403() -> None:
+    """POST bez CSRF token → 403 (sec audit 2026-05-16 P1-4)."""
+    from handlers.tdee_recalc import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handler(_http_event("POST", cookie, csrf=False), _FakeContext())
+    assert result["statusCode"] == 403
 
 
 @pytest.mark.usefixtures("ssm_params", "freeze_today")

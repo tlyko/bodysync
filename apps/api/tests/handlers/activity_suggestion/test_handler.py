@@ -26,14 +26,21 @@ import pytest
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 
 
-def _event(cookie: str | None) -> dict[str, Any]:
+_CSRF_TEST_TOKEN = "test-csrf-token-deterministic"
+
+
+def _event(cookie: str | None, *, csrf: bool = True) -> dict[str, Any]:
     cookies: list[str] = [cookie] if cookie else []
+    headers: dict[str, str] = {"content-type": "application/json"}
+    if csrf:
+        cookies.append(f"bodysync_csrf={_CSRF_TEST_TOKEN}")
+        headers["x-csrf-token"] = _CSRF_TEST_TOKEN
     return {
         "version": "2.0",
         "routeKey": "POST /api/profile/suggest-activity-level",
         "rawPath": "/api/profile/suggest-activity-level",
         "requestContext": {"http": {"method": "POST"}},
-        "headers": {"content-type": "application/json"},
+        "headers": headers,
         "cookies": cookies,
         "body": "{}",
         "isBase64Encoded": False,
@@ -101,6 +108,16 @@ def _seed_biometry_kcal_active(table: Any, user_id: str, *, days_ago: int, kcal:
 
 
 # ─── happy path ───────────────────────────────────────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client", "dynamodb_table")
+def test_without_csrf_returns_403() -> None:
+    """POST bez CSRF token → 403 (sec audit 2026-05-16 P1-4)."""
+    from handlers.activity_suggestion import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handler(_event(cookie, csrf=False), _FakeContext())
+    assert result["statusCode"] == 403
 
 
 @pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")

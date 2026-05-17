@@ -20,19 +20,28 @@ import pytest
 WARSAW_TZ_NAME = "Europe/Warsaw"
 
 
+_CSRF_TEST_TOKEN = "test-csrf-token-deterministic"
+
+
 def _event(
     cookie: str | None,
     *,
     query: dict[str, str] | None = None,
     method: str = "GET",
+    csrf: bool = True,
 ) -> dict[str, Any]:
     cookies: list[str] = [cookie] if cookie else []
+    headers: dict[str, str] = {"content-type": "application/json"}
+    # CSRF token required dla non-safe methods (DELETE history).
+    if csrf and method not in {"GET", "HEAD", "OPTIONS"}:
+        cookies.append(f"bodysync_csrf={_CSRF_TEST_TOKEN}")
+        headers["x-csrf-token"] = _CSRF_TEST_TOKEN
     return {
         "version": "2.0",
         "routeKey": f"{method} /api/advisor/chat/history",
         "rawPath": "/api/advisor/chat/history",
         "requestContext": {"http": {"method": method}},
-        "headers": {"content-type": "application/json"},
+        "headers": headers,
         "cookies": cookies,
         "queryStringParameters": query or {},
         "body": None,
@@ -169,6 +178,16 @@ def test_history_pk_isolation_user_b_does_not_see_user_a_turns(
 
 
 # ─── DELETE /api/advisor/chat/history ─────────────────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client", "dynamodb_table")
+def test_delete_history_without_csrf_returns_403() -> None:
+    """DELETE bez CSRF token → 403 (sec audit 2026-05-16 P1-4)."""
+    from handlers.advisor_chat import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('user_a')}"
+    result = h.handler(_event(cookie, method="DELETE", csrf=False), _FakeContext())
+    assert result["statusCode"] == 403
 
 
 @pytest.mark.usefixtures("ssm_with_anthropic_key", "patched_anthropic_client")

@@ -34,6 +34,7 @@ from handlers.tdee_recalc.service import (
     evaluate_diet_check,
 )
 from shared.auth import AuthError, verify_jwt
+from shared.csrf import CSRFError, verify_csrf
 from shared.dynamo import (
     get_item,
     put_item,
@@ -232,6 +233,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     user_id = payload.get("user_id")
     if not user_id:
         return _response(401, {"error": "user_id missing in jwt"})
+
+    # CSRF guard (sec audit 2026-05-16 P1-4) — state-changing endpoint.
+    try:
+        verify_csrf(event)
+    except CSRFError:
+        logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
+        return _response(403, {"error": "csrf_required"})
 
     try:
         result = _process_user(user_id, today)

@@ -7,6 +7,8 @@ from typing import Any
 
 import pytest
 
+_CSRF_TEST_TOKEN = "test-csrf-token-deterministic"
+
 
 def _event(
     method: str,
@@ -14,14 +16,19 @@ def _event(
     *,
     body: dict[str, Any] | None = None,
     path: str = "/api/profile/targets",
+    csrf: bool = True,
 ) -> dict[str, Any]:
     cookies: list[str] = [cookie] if cookie else []
+    headers: dict[str, str] = {"content-type": "application/json"}
+    if csrf and method not in {"GET", "HEAD", "OPTIONS"}:
+        cookies.append(f"bodysync_csrf={_CSRF_TEST_TOKEN}")
+        headers["x-csrf-token"] = _CSRF_TEST_TOKEN
     return {
         "version": "2.0",
         "routeKey": f"{method} {path}",
         "rawPath": path,
         "requestContext": {"http": {"method": method}},
-        "headers": {"content-type": "application/json"},
+        "headers": headers,
         "cookies": cookies,
         "body": json.dumps(body) if body is not None else None,
         "isBase64Encoded": False,
@@ -60,6 +67,22 @@ def _seed_profile(table: Any, user_id: str, **extra_attrs: Any) -> None:
         **extra_attrs,
     }
     table.put_item(Item=item)
+
+
+# ─── CSRF guard (sec audit 2026-05-16 P1-4) ───────────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_put_without_csrf_returns_403() -> None:
+    """PUT bez CSRF token → 403."""
+    from handlers.profile_targets import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handler(
+        _event("PUT", cookie, body={"kcal_target": 2400}, csrf=False),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 403
 
 
 # ─── GET ───────────────────────────────────────────────────────────────────

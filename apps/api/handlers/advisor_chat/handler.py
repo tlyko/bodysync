@@ -53,6 +53,7 @@ from handlers.advisor_chat.service import (
     AdvisorUnavailableError,
 )
 from shared.auth import AuthError, verify_jwt
+from shared.csrf import CSRFError, verify_csrf
 from shared.logging import get_logger
 
 logger = get_logger("advisor_chat")
@@ -123,6 +124,15 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     method = (event.get("requestContext") or {}).get("http", {}).get("method", "")
     if method == "GET":
         return _handle_get_history(event, user_id, request_id)
+    # CSRF guard dla non-safe methods (sec audit 2026-05-16 P1-4). Double-submit
+    # cookie — JS-readable `bodysync_csrf` cookie musi matchować `X-CSRF-Token`
+    # header. Cross-site attacker nie może odczytać cookie (SOP) ani ustawić
+    # custom header (CORS preflight blokuje cross-origin).
+    try:
+        verify_csrf(event)
+    except CSRFError:
+        logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
+        return _response(403, {"error": "csrf_required"})
     if method == "DELETE":
         return _handle_delete_history(event, user_id, request_id)
     # else: POST flow (default; explicit method check w istniejącej logice).

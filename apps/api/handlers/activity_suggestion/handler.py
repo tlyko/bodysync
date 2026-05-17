@@ -34,6 +34,7 @@ from handlers.activity_suggestion.service import (
     gather_activity_context,
 )
 from shared.auth import AuthError, verify_jwt
+from shared.csrf import CSRFError, verify_csrf
 from shared.logging import get_logger
 
 logger = get_logger("activity_suggestion")
@@ -85,6 +86,13 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     user_id = payload.get("user_id")
     if not user_id:
         return _response(401, {"error": "user_id missing in jwt"})
+
+    # CSRF guard (sec audit 2026-05-16 P1-4) — endpoint pala LLM call ($).
+    try:
+        verify_csrf(event)
+    except CSRFError:
+        logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
+        return _response(403, {"error": "csrf_required"})
 
     # Today w Europe/Warsaw — match advisor_chat semantics. 7d window
     # liczone od jego północy do dziś rano.
