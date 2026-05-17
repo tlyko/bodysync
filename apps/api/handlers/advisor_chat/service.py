@@ -37,6 +37,7 @@ from shared.dynamo import (
     get_item,
     put_item_idempotent,
     query_by_pk,
+    query_by_pk_sk_range,
     sum_metric_today,
 )
 from shared.logging import get_logger
@@ -281,21 +282,27 @@ def _query_snapshots_in_range(
     Snapshot metrics: weight, body_fat, resting_hr, sleep — single item
     per dzień, last-writer-wins (per health_webhook._make_scalar_upsert).
 
-    Single Query z `begins_with(SK, "BIOMETRY#")` + post-filter w Pythonie
-    (cheaper niż N×GetItem dla 7 dni — 1-2 RCU vs 7 round-tripów).
+    SK range query (BETWEEN) — DDB zwraca tylko rows w [start..end], bez
+    Python post-filter na cały user history (dług techniczny P2 z audit
+    2026-05-16). Filtr po `metric_short` w 2-part check zachowany bo SK
+    range obejmuje wszystkie metryki w tym przedziale dat.
     """
-    rows = query_by_pk(f"USER#{user_id}", sk_prefix="BIOMETRY#")
     start_iso = start.isoformat()
     end_iso = end.isoformat()
+    rows = query_by_pk_sk_range(
+        f"USER#{user_id}",
+        sk_start=f"BIOMETRY#{start_iso}",
+        sk_end=f"BIOMETRY#{end_iso}#~",
+    )
     items: list[dict[str, Any]] = []
     for row in rows:
         sk = row.get("SK", "")
-        # Snapshot SK: "BIOMETRY#YYYY-MM-DD#metric" (dokładnie 3 części).
+        # Snapshot SK: "BIOMETRY#YYYY-MM-DD#metric" (dokładnie 3 części —
+        # multi-point HRV/HR/cumulative mają 4 części z timestamp suffix).
         parts = sk.split("#")
         if len(parts) != 3 or parts[2] != metric_short:
             continue
-        if start_iso <= parts[1] <= end_iso:
-            items.append(row)
+        items.append(row)
     return items
 
 

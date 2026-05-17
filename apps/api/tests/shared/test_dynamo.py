@@ -171,3 +171,58 @@ def test_sum_metric_in_range_single_day(dynamodb_table: Any) -> None:
         end=date(2026, 5, 7),
     )
     assert out == {"2026-05-07": Decimal("250")}
+
+
+def test_query_by_pk_sk_range_inclusive_bounds(dynamodb_table: Any) -> None:
+    """SK BETWEEN inclusive — items na granicach `[sk_lo, sk_hi]` są w wyniku."""
+    from shared.dynamo import put_item_idempotent, query_by_pk_sk_range
+
+    for sk in [
+        "BIOMETRY#2026-05-01#weight",
+        "BIOMETRY#2026-05-07#weight",
+        "BIOMETRY#2026-05-10#weight",
+        "BIOMETRY#2026-05-15#weight",
+        "OTHER#2026-05-07",
+    ]:
+        put_item_idempotent("USER#tomek", sk, {"value": 80})
+
+    rows = query_by_pk_sk_range(
+        "USER#tomek",
+        sk_start="BIOMETRY#2026-05-07",
+        sk_end="BIOMETRY#2026-05-10#~",
+    )
+    sks = sorted(r["SK"] for r in rows)
+    assert sks == ["BIOMETRY#2026-05-07#weight", "BIOMETRY#2026-05-10#weight"]
+
+
+def test_query_by_pk_sk_range_excludes_other_categories(dynamodb_table: Any) -> None:
+    """SK range nie wycieka items spod innej kategorii (np. CHAT, ACTIVITY)."""
+    from shared.dynamo import put_item_idempotent, query_by_pk_sk_range
+
+    put_item_idempotent("USER#tomek", "BIOMETRY#2026-05-10#weight", {"kg": 80})
+    put_item_idempotent("USER#tomek", "ACTIVITY#12345", {"name": "run"})
+    put_item_idempotent("USER#tomek", "CHAT#2026-05-10#0001", {"role": "user"})
+
+    rows = query_by_pk_sk_range(
+        "USER#tomek",
+        sk_start="BIOMETRY#2026-05-01",
+        sk_end="BIOMETRY#~",
+    )
+    assert len(rows) == 1
+    assert rows[0]["SK"] == "BIOMETRY#2026-05-10#weight"
+
+
+def test_query_by_pk_sk_range_pk_isolation(dynamodb_table: Any) -> None:
+    """Query po USER#tomek nie zwraca BIOMETRY rows usera weronika."""
+    from shared.dynamo import put_item_idempotent, query_by_pk_sk_range
+
+    put_item_idempotent("USER#tomek", "BIOMETRY#2026-05-10#weight", {"kg": 80})
+    put_item_idempotent("USER#weronika", "BIOMETRY#2026-05-10#weight", {"kg": 60})
+
+    rows = query_by_pk_sk_range(
+        "USER#tomek",
+        sk_start="BIOMETRY#2026-05-01",
+        sk_end="BIOMETRY#~",
+    )
+    assert len(rows) == 1
+    assert rows[0]["PK"] == "USER#tomek"

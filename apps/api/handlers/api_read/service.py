@@ -9,7 +9,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from handlers.api_read.schemas import BiometryDay, MeResponse
-from shared.dynamo import get_item, query_by_pk
+from shared.dynamo import get_item, query_by_pk_sk_range
 
 # HAE webhook (`health_webhook/service.py:48`) zapisuje BIOMETRY rows pod
 # SK z datą w Europe/Warsaw — żeby kroki sprzed 2:00 UTC nie wylądowały
@@ -85,7 +85,18 @@ def get_biometry(user_id: str, *, days: int = 7) -> list[BiometryDay]:
     today = datetime.now(LOCAL_TZ).date()
     cutoff_iso = (today - timedelta(days=days - 1)).isoformat()
 
-    items = query_by_pk(f"USER#{user_id}", sk_prefix="BIOMETRY#")
+    # SK range query — DDB BETWEEN dolny `BIOMETRY#{cutoff}` zwraca tylko
+    # rows z dat >= cutoff_iso (ISO date sortuje się lexicographically).
+    # Górny `BIOMETRY#~` — tilde (U+007E) sorts po `#` i znakach numerycznych
+    # SK suffixu, obejmuje wszystkie BIOMETRY rows aż do następnej SK kategorii.
+    # Pre-fix: query_by_pk(BIOMETRY#) + Python filter `if sk_date < cutoff` —
+    # ciągnęliśmy WSZYSTKIE biometry rows usera od początku, ryzyko 1MB cap
+    # truncation przy długiej historii (dług techniczny P2 z 2026-05-16 audit).
+    items = query_by_pk_sk_range(
+        f"USER#{user_id}",
+        sk_start=f"BIOMETRY#{cutoff_iso}",
+        sk_end="BIOMETRY#~",
+    )
 
     # Per-day, per-metric — zbieramy buckety. Cumulative dostają specjalny shape
     # `{"_buckets": [attrs, ...]}` żeby agregować w 2. passie.
@@ -99,9 +110,6 @@ def get_biometry(user_id: str, *, days: int = 7) -> list[BiometryDay]:
         sk_date = parts[1]
         metric = parts[2]
         is_multipoint = len(parts) == 4
-
-        if sk_date < cutoff_iso:
-            continue
 
         attrs = {k: _to_python(v) for k, v in raw.items() if k not in ("PK", "SK")}
 

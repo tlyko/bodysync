@@ -115,6 +115,26 @@ def query_by_pk(pk: str, sk_prefix: str | None = None) -> list[dict[str, Any]]:
     return [dict(item) for item in resp.get("Items", [])]
 
 
+def query_by_pk_sk_range(pk: str, sk_start: str, sk_end: str) -> list[dict[str, Any]]:
+    """Query items where SK lies w `[sk_start, sk_end]` lexicographically.
+
+    DDB BETWEEN inclusive. Używane dla date-range queries gdy SK ma format
+    `PREFIX#YYYY-MM-DD#...` (ISO date sortuje się lexicographically). Pozwala
+    DDB zwrócić tylko items w przedziale zamiast pełnego prefix scan +
+    Python filter (taniej w RCU, eliminuje 1MB Query cap silent truncation
+    risk przy dużej historii — dług techniczny P2 z docs/audit-2026-05-16.md).
+    """
+    resp = _table.query(
+        KeyConditionExpression="PK = :pk AND SK BETWEEN :sk_lo AND :sk_hi",
+        ExpressionAttributeValues={
+            ":pk": pk,
+            ":sk_lo": sk_start,
+            ":sk_hi": sk_end,
+        },
+    )
+    return [dict(item) for item in resp.get("Items", [])]
+
+
 def sum_metric_today(user_id: str, metric_short: str, *, value_attr: str, today: date) -> Decimal:
     """Suma `value_attr` po wszystkich hourly bucketach dla danego dnia.
 
