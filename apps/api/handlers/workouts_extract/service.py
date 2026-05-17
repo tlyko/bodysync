@@ -21,6 +21,8 @@ import unicodedata
 from datetime import date, timedelta
 from typing import Any
 
+from pydantic import ValidationError
+
 from handlers.workouts_extract.schemas import (
     ExtractedExercise,
     SectionIn,
@@ -204,13 +206,22 @@ def extract_section(
     *,
     training_name: str,
     workout_date: str,
-) -> tuple[list[ExtractedExercise], int]:
-    """Iteruj exercises w sekcji, wołaj Haiku. Returns (extracted, skipped).
+) -> tuple[list[ExtractedExercise], int, int]:
+    """Iteruj exercises w sekcji, wołaj Haiku. Returns (out, skipped, errors).
+
+    Per-exercise try/except — 1 bad Haiku response (invalid JSON, Pydantic
+    validation fail) nie zabije reszty batcha. Live caught 2026-05-17:
+    Haiku zwrócił `weight_kg=-7.5` (assisted pull-up BW-7.5 counterweight),
+    odrzucone przez schema `ge=0` → cały batch rzucał 500. Po fix:
+    schema akceptuje negative (assisted), plus errors counted bez raise.
 
     Skipped = ćwiczenia bez wpisu w "Ciężar..." cell (puste, niewypełnione).
+    Errors = Haiku zwrócił niepoprawny output (JSON parse fail lub schema
+    validation fail).
     """
     out: list[ExtractedExercise] = []
     skipped = 0
+    errors = 0
     for exercise in section.exercises:
         actual = find_actual_cell(section.headers, exercise.cells)
         if actual is None or not actual[1].strip():
@@ -229,16 +240,18 @@ def extract_section(
                 actual_text=actual_text,
                 plan_context=plan_context,
             )
-        except json.JSONDecodeError:
+            sets = [WorkoutSet.model_validate(s) for s in parsed.get("sets", [])]
+        except (json.JSONDecodeError, ValidationError):
             logger.warning(
-                "haiku_invalid_json",
+                "haiku_parse_failed",
                 extra={
                     "exercise_number": exercise.number,
                     "exercise_name": exercise_name,
+                    "actual_text": actual_text,
                 },
             )
-            raise
-        sets = [WorkoutSet.model_validate(s) for s in parsed.get("sets", [])]
+            errors += 1
+            continue
         out.append(
             ExtractedExercise(
                 date=workout_date,
@@ -250,7 +263,7 @@ def extract_section(
                 notes=parsed.get("notes"),
             )
         )
-    return out, skipped
+    return out, skipped, errors
 
 
 def persist_workout(user_id: str, item: ExtractedExercise) -> None:
@@ -306,13 +319,13 @@ def run_extract(
             if section.label and section.label in _SKIP_SECTION_LABELS:
                 continue
             try:
-                items, skipped = extract_section(
+                items, skipped, section_errors = extract_section(
                     section,
                     training_name=training.name,
                     workout_date=workout_date,
                 )
-            except (json.JSONDecodeError, AnthropicUnavailableError):
-                # Per-section error — log + skip resztę tej sekcji.
+            except AnthropicUnavailableError:
+                # API key niedostępny — twardy fail dla całej sekcji.
                 errors += len(section.exercises)
                 logger.exception(
                     "section_extract_failed",
@@ -323,6 +336,7 @@ def run_extract(
                 )
                 continue
             total_skipped += skipped
+            errors += section_errors
             for item in items:
                 try:
                     persist_workout(user_id, item)

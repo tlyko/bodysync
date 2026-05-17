@@ -65,11 +65,13 @@ class ExtractRequest(BaseModel):
 class WorkoutSet(BaseModel):
     """Pojedynczy set (waga + reps). `weight_kind`:
     - "kg" — `weight_kg` zawiera wartość
-    - "bw" — bodyweight, `weight_kg` typowo null
+    - "bw" — bodyweight; `weight_kg` może być null (sam BW), positive
+      (BW+kg dla weighted pull-up), lub negative (BW-kg dla assisted —
+      band/machine wspomaga, np. "BW-7.5" = bodyweight minus 7.5 kg counterweight)
     - "other" — fallback gdy LLM nie wie (np. "lekka", "do ostatka")
     """
 
-    weight_kg: float | None = Field(default=None, ge=0, le=1000)
+    weight_kg: float | None = Field(default=None, ge=-300, le=1000)
     weight_kind: str = Field(default="kg", pattern="^(kg|bw|other)$")
     reps: int = Field(ge=0, le=100)
 
