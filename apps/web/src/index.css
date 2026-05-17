@@ -3049,6 +3049,158 @@ body:has(.preview-banner) .login-screen {
   }
 }
 
+/* Recovery Score card — composite 0-100 z sleep duration + quality + RHR delta.
+   Mirror `.kcal-balance-card` structure (h3 → primary score+label → breakdown grid
+   → 7d sparkline). Owner zatwierdził koncepcję 2026-05-15. */
+.recovery-score-card {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  padding: 1.25rem 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+.recovery-score-card h3 {
+  margin: 0;
+  font-size: 0.875rem;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.recovery-score-primary {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.375rem;
+  padding: 0.5rem 0;
+}
+.recovery-score-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 2.5rem;
+  font-weight: 700;
+  line-height: 1;
+}
+.recovery-score-unit {
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  margin-left: 0.25rem;
+}
+.recovery-score-label {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.1em;
+  padding: 0.25rem 0.75rem;
+  border-radius: 12px;
+}
+.recovery-score-good {
+  color: var(--green);
+}
+.recovery-score-label.recovery-score-good {
+  background: var(--green-dim);
+}
+.recovery-score-moderate {
+  color: var(--orange);
+}
+.recovery-score-label.recovery-score-moderate {
+  background: var(--orange-dim);
+}
+.recovery-score-poor {
+  color: var(--red);
+}
+.recovery-score-label.recovery-score-poor {
+  background: var(--red-dim);
+}
+.recovery-score-empty {
+  color: var(--text-dim);
+}
+.recovery-score-label.recovery-score-empty {
+  background: rgba(148, 163, 184, 0.08);
+  color: var(--text-dim);
+}
+.recovery-breakdown {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.recovery-breakdown > div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+  text-align: center;
+}
+.recovery-breakdown-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+.recovery-breakdown-value {
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 1.125rem;
+  font-weight: 600;
+  color: var(--text);
+}
+.recovery-breakdown-value small {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  font-weight: 400;
+  margin-left: 0.125rem;
+}
+.recovery-spark {
+  display: flex;
+  align-items: flex-end;
+  gap: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--border);
+}
+.recovery-spark-label {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  align-self: center;
+}
+.recovery-spark-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+  height: 40px;
+  flex: 1;
+}
+.recovery-spark-bar {
+  flex: 1;
+  border-radius: 3px;
+  min-height: 4px;
+  transition: opacity 120ms ease;
+}
+.recovery-spark-bar.recovery-score-good {
+  background: var(--green);
+}
+.recovery-spark-bar.recovery-score-moderate {
+  background: var(--orange);
+}
+.recovery-spark-bar.recovery-score-poor {
+  background: var(--red);
+}
+.recovery-spark-bar:hover {
+  opacity: 0.7;
+}
+
+@media (max-width: 480px) {
+  .recovery-score-card {
+    padding: 1rem;
+  }
+  .recovery-score-value {
+    font-size: 2rem;
+  }
+}
+
 .trend-charts {
   display: flex;
   flex-direction: column;
