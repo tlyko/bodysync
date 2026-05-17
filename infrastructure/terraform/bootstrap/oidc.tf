@@ -46,6 +46,44 @@ resource "aws_iam_role_policy_attachment" "github_actions_power_user" {
   policy_arn = "arn:aws:iam::aws:policy/PowerUserAccess"
 }
 
+# Sec audit 2026-05-16 P1-3 — PowerUserAccess pozwala na drogie AI/ML services
+# których projekt nigdy nie używa (Bedrock model invoke = miliony $/godz bez
+# throttle; SageMaker training jobs = $$$; Comprehend/Rekognition/Transcribe/
+# Polly/Lex/Kendra = $$ per request). Compromise OIDC tokenu (zlec PR z konta
+# z write access, supply-chain action) → max szkoda finansowa = nieograniczona
+# w short window do detection.
+#
+# Explicit Deny przewyższa wszystkie Allow z managed policy. Lista zawiera
+# services które są (a) drogie per-request i (b) na pewno nie używamy. Anthropic
+# API leci direct (NIE Bedrock — ADR-007). Audio/vision/search managed nigdy
+# nie były w planach.
+resource "aws_iam_role_policy" "github_actions_deny_expensive_ai" {
+  name = "deny-expensive-ai-services"
+  role = aws_iam_role.github_actions.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Sid    = "DenyExpensiveAIServices"
+      Effect = "Deny"
+      Action = [
+        "bedrock:*",
+        "sagemaker:*",
+        "comprehend:*",
+        "rekognition:*",
+        "transcribe:*",
+        "polly:*",
+        "lex:*",
+        "kendra:*",
+        "translate:*",
+        "textract:*",
+        "personalize:*",
+      ]
+      Resource = "*"
+    }]
+  })
+}
+
 # IAM permissions are scoped to project-prefixed resources only. PassRole is
 # required for Lambda execution roles created by Terraform.
 resource "aws_iam_role_policy" "github_actions_iam" {
