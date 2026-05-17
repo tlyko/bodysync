@@ -862,6 +862,9 @@ module "strava_oauth_callback" {
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/client_id",
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/client_secret",
         "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/athlete-to-user",
+        # Sec audit 2026-05-16 P1-2 — JWT verify w callback (state.user_id ==
+        # jwt.user_id defense-in-depth).
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
       ]
     },
     {

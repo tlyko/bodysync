@@ -27,15 +27,32 @@ from handlers.strava_oauth_callback.service import (
     tokens_ssm_path,
     update_athlete_map,
 )
+from shared.auth import AuthError, verify_jwt
 from shared.dynamo import delete_item_if_exists
 from shared.logging import get_logger
 from shared.ssm import get_param, put_param
 
 logger = get_logger("strava_oauth_callback")
 
+COOKIE_NAME = "bodysync_session"
 CLIENT_ID_PARAM = "/bodysync/strava/client_id"
 CLIENT_SECRET_PARAM = "/bodysync/strava/client_secret"
 ATHLETE_MAP_PARAM = "/bodysync/strava/athlete-to-user"
+
+
+def _extract_session_cookie(event: dict[str, Any]) -> str | None:
+    cookies: list[str] = event.get("cookies") or []
+    for cookie in cookies:
+        if cookie.startswith(f"{COOKIE_NAME}="):
+            return cookie.split("=", 1)[1]
+    headers: dict[str, str] = event.get("headers") or {}
+    raw: str | None = headers.get("cookie") or headers.get("Cookie")
+    if raw:
+        for part in raw.split(";"):
+            stripped = part.strip()
+            if stripped.startswith(f"{COOKIE_NAME}="):
+                return stripped.split("=", 1)[1]
+    return None
 
 
 def _redirect(location: str) -> dict[str, Any]:
@@ -64,6 +81,25 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         logger.warning("missing_params", extra={"request_id": request_id})
         return _redirect(frontend_redirect("missing_params"))
 
+    # Defense-in-depth (sec audit 2026-05-16 P1-2). State row trzyma user_id, ale
+    # sam state nonce wystarczał do callback'a — wykradnięty z browser history
+    # → atakujący mógłby authorize z własną Stravą pod cudzym user_id. Wymagamy
+    # że JWT cookie identyfikuje tego samego usera co state. JWT check PRZED
+    # state delete (atomic single-use) żeby zły request nie zjadał legit state.
+    token = _extract_session_cookie(event)
+    if not token:
+        logger.info("missing_session", extra={"request_id": request_id})
+        return _redirect(frontend_redirect("session_required"))
+    try:
+        jwt_payload = verify_jwt(token)
+    except AuthError:
+        logger.info("invalid_session", extra={"request_id": request_id})
+        return _redirect(frontend_redirect("session_required"))
+    authed_user_id = jwt_payload.get("user_id")
+    if not isinstance(authed_user_id, str) or not authed_user_id:
+        logger.error("jwt_missing_user_id", extra={"request_id": request_id})
+        return _redirect(frontend_redirect("session_required"))
+
     # Atomic single-use state delete. ConditionalCheckFailed (state nie
     # istnieje lub został już usunięty) → invalid.
     state_row = delete_item_if_exists(f"STRAVA_OAUTH_STATE#{state}", "META")
@@ -77,6 +113,20 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # defensive guard jeśli ktoś ręcznie putitemnął row.
         logger.error("state_missing_user_id", extra={"request_id": request_id})
         return _redirect(frontend_redirect("invalid_state"))
+
+    if user_id != authed_user_id:
+        # State mint'owany dla user A, ale request idzie z cookie usera B.
+        # Bardzo nietypowe — wymaga że user B ma valid JWT dla swojego konta
+        # + zdobył state nonce user'a A (np. z browser history). Defense-in-depth.
+        logger.warning(
+            "state_user_mismatch",
+            extra={
+                "request_id": request_id,
+                "state_user_id": user_id,
+                "session_user_id": authed_user_id,
+            },
+        )
+        return _redirect(frontend_redirect("state_user_mismatch"))
 
     # DDB native TTL jest best-effort sweep (do 48h opóźnienia). Sprawdzamy
     # ręcznie żeby expired state nie został zaakceptowany w window.

@@ -14,14 +14,21 @@ import httpx
 import pytest
 
 
-def _event(qs: dict[str, str] | None = None) -> dict[str, Any]:
+def _event(qs: dict[str, str] | None = None, *, user_id: str | None = "tomek") -> dict[str, Any]:
+    """Build a callback event. `user_id` controls the JWT session cookie;
+    pass None to omit the cookie (simulates anonymous request)."""
+    cookies: list[str] = []
+    if user_id is not None:
+        from shared.auth import mint_jwt
+
+        cookies.append(f"bodysync_session={mint_jwt(user_id)}")
     return {
         "version": "2.0",
         "routeKey": "GET /api/strava/oauth/callback",
         "rawPath": "/api/strava/oauth/callback",
         "requestContext": {"http": {"method": "GET"}},
         "headers": {},
-        "cookies": [],
+        "cookies": cookies,
         "queryStringParameters": qs or {},
         "isBase64Encoded": False,
     }
@@ -136,6 +143,51 @@ def test_state_used_twice_second_call_invalid_state(dynamodb_table: Any) -> None
     assert _redirect_status(second) == "invalid_state"
 
 
+# ─── JWT session guard (sec audit 2026-05-16 P1-2) ───────────────────────
+
+
+@pytest.mark.usefixtures("strava_ssm")
+def test_no_session_cookie_redirects_session_required(dynamodb_table: Any) -> None:
+    """Callback bez JWT cookie nie wolno: defense-in-depth."""
+    from handlers.strava_oauth_callback import handler as h
+
+    _seed_state(dynamodb_table, "needs-cookie", "tomek")
+    result = h.handler(
+        _event({"code": "abc", "state": "needs-cookie"}, user_id=None),
+        _FakeContext(),
+    )
+    assert _redirect_status(result) == "session_required"
+    # State NIE skonsumowany — anonim nie może spalić legit nonce.
+    item = dynamodb_table.get_item(Key={"PK": "STRAVA_OAUTH_STATE#needs-cookie", "SK": "META"}).get(
+        "Item"
+    )
+    assert item is not None
+
+
+@pytest.mark.usefixtures("strava_ssm")
+def test_invalid_jwt_redirects_session_required(dynamodb_table: Any) -> None:
+    from handlers.strava_oauth_callback import handler as h
+
+    _seed_state(dynamodb_table, "bad-cookie", "tomek")
+    event = _event({"code": "abc", "state": "bad-cookie"}, user_id=None)
+    event["cookies"] = ["bodysync_session=not.a.valid.jwt"]
+    result = h.handler(event, _FakeContext())
+    assert _redirect_status(result) == "session_required"
+
+
+@pytest.mark.usefixtures("strava_ssm")
+def test_state_user_mismatch_redirects(dynamodb_table: Any) -> None:
+    """State minted dla tomek, ale request idzie z weronika session cookie."""
+    from handlers.strava_oauth_callback import handler as h
+
+    _seed_state(dynamodb_table, "tomek-state", "tomek")
+    result = h.handler(
+        _event({"code": "abc", "state": "tomek-state"}, user_id="weronika"),
+        _FakeContext(),
+    )
+    assert _redirect_status(result) == "state_user_mismatch"
+
+
 # ─── Token exchange happy path ────────────────────────────────────────────
 
 
@@ -241,7 +293,10 @@ def test_pk_isolation_two_users_separate_tokens(dynamodb_table: Any) -> None:
         "handlers.strava_oauth_callback.service.httpx.Client.post",
         return_value=fake_post_factory(22222, "AT_WERONIKA"),
     ):
-        h.handler(_event({"code": "c2", "state": "weronika-state"}), _FakeContext())
+        h.handler(
+            _event({"code": "c2", "state": "weronika-state"}, user_id="weronika"),
+            _FakeContext(),
+        )
 
     ssm = boto3.client("ssm", region_name="eu-west-1")
     tomek = json.loads(
@@ -367,7 +422,7 @@ def test_athlete_already_mapped_blocks_oauth_and_does_not_persist_tokens(
         return_value=happy,
     ):
         result = h.handler(
-            _event({"code": "abc", "state": "weronika-conflict-state"}),
+            _event({"code": "abc", "state": "weronika-conflict-state"}, user_id="weronika"),
             _FakeContext(),
         )
 
