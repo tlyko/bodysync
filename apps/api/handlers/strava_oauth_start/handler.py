@@ -16,28 +16,13 @@ from typing import Any
 
 from handlers.strava_oauth_start.service import build_authorize_url, mint_state
 from shared.auth import AuthError, verify_jwt
+from shared.http import extract_session_cookie
 from shared.logging import get_logger
 from shared.ssm import get_param
 
 logger = get_logger("strava_oauth_start")
 
-COOKIE_NAME = "bodysync_session"
 CLIENT_ID_PARAM = "/bodysync/strava/client_id"
-
-
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
 
 
 def _redirect(location: str) -> dict[str, Any]:
@@ -59,7 +44,7 @@ def _error(status: int, body: str) -> dict[str, Any]:
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "local")
 
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         logger.info("missing_session", extra={"request_id": request_id})
         return _error(401, "missing session cookie")

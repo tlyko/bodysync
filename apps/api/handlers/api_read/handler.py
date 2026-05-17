@@ -12,44 +12,18 @@ HTTP API v2 daje cookies w `event["cookies"]` jako lista stringów
 
 from __future__ import annotations
 
-import json
 from typing import Any
 
 from handlers.api_read.schemas import BiometryResponse
 from handlers.api_read.service import ProfileNotFoundError, get_biometry, get_me
 from shared.auth import AuthError, verify_jwt
+from shared.http import extract_session_cookie, response
 from shared.logging import get_logger
 
 logger = get_logger("api_read")
 
-COOKIE_NAME = "bodysync_session"
 DEFAULT_BIOMETRY_DAYS = 7
 MAX_BIOMETRY_DAYS = 90
-
-
-def _response(status: int, body: dict[str, Any] | list[Any]) -> dict[str, Any]:
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
-    }
-
-
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    """API GW HTTP API v2 daje `cookies: list[str]` w event payload."""
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    # Fallback: parse Cookie header (gdyby v2 cookies nie były wysłane)
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
 
 
 def _parse_days(event: dict[str, Any]) -> int:
@@ -66,21 +40,21 @@ def _parse_days(event: dict[str, Any]) -> int:
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "local")
 
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         logger.info("missing_session", extra={"request_id": request_id})
-        return _response(401, {"error": "missing session cookie"})
+        return response(401, {"error": "missing session cookie"})
 
     try:
         payload = verify_jwt(token)
     except AuthError:
         logger.info("invalid_session", extra={"request_id": request_id})
-        return _response(401, {"error": "invalid session"})
+        return response(401, {"error": "invalid session"})
 
     user_id = payload.get("user_id")
     if not isinstance(user_id, str) or not user_id:
         logger.warning("session_no_user_id", extra={"request_id": request_id})
-        return _response(401, {"error": "invalid session payload"})
+        return response(401, {"error": "invalid session payload"})
 
     route = event.get("routeKey", "")
 
@@ -88,11 +62,11 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         try:
             me = get_me(user_id)
         except ProfileNotFoundError:
-            return _response(404, {"error": "profile not found"})
+            return response(404, {"error": "profile not found"})
         logger.info(
             "me_ok", extra={"request_id": request_id, "user_id": user_id, "handler": "api_read"}
         )
-        return _response(200, me.model_dump())
+        return response(200, me.model_dump())
 
     if route == "GET /api/biometry":
         days = _parse_days(event)
@@ -107,7 +81,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "days_returned": len(items),
             },
         )
-        return _response(200, body)
+        return response(200, body)
 
     logger.warning("unknown_route", extra={"request_id": request_id, "routeKey": route})
-    return _response(404, {"error": "not found"})
+    return response(404, {"error": "not found"})

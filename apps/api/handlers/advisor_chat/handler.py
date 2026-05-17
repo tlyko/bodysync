@@ -54,11 +54,11 @@ from handlers.advisor_chat.service import (
 )
 from shared.auth import AuthError, verify_jwt
 from shared.csrf import CSRFError, verify_csrf
+from shared.http import extract_session_cookie, response
 from shared.logging import get_logger
 
 logger = get_logger("advisor_chat")
 
-COOKIE_NAME = "bodysync_session"
 WARSAW_TZ = ZoneInfo("Europe/Warsaw")
 
 # Daily user-turn quota per ADR-007 D6 — chroni przed runaway koszty Anthropic.
@@ -71,32 +71,6 @@ DAILY_USER_TURN_LIMIT = 30
 SYSTEM_PROMPT = service._SYSTEM_PROMPT
 
 
-def _response(status: int, body: dict[str, Any]) -> dict[str, Any]:
-    """Build API GW HTTP API v2 response envelope."""
-    return {
-        "statusCode": status,
-        "headers": {"Content-Type": "application/json"},
-        "body": json.dumps(body, default=str),
-    }
-
-
-def _extract_session_cookie(event: dict[str, Any]) -> str | None:
-    """Mirror api_read._extract_session_cookie — API GW HTTP API v2 daje
-    `cookies: list[str]` w event payload, fallback na `Cookie` header."""
-    cookies: list[str] = event.get("cookies") or []
-    for cookie in cookies:
-        if cookie.startswith(f"{COOKIE_NAME}="):
-            return cookie.split("=", 1)[1]
-    headers: dict[str, str] = event.get("headers") or {}
-    raw: str | None = headers.get("cookie") or headers.get("Cookie")
-    if raw:
-        for part in raw.split(";"):
-            stripped = part.strip()
-            if stripped.startswith(f"{COOKIE_NAME}="):
-                return stripped.split("=", 1)[1]
-    return None
-
-
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     """Lambda entrypoint dla `POST /api/advisor/chat` + `GET /api/advisor/chat/history`.
 
@@ -106,19 +80,19 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "local")
 
     # ── 1. JWT verify ──────────────────────────────────────────────────────
-    token = _extract_session_cookie(event)
+    token = extract_session_cookie(event)
     if not token:
         logger.info("missing_session", extra={"request_id": request_id})
-        return _response(401, {"error": "auth_required"})
+        return response(401, {"error": "auth_required"})
     try:
         payload = verify_jwt(token)
     except AuthError:
         logger.info("invalid_session", extra={"request_id": request_id})
-        return _response(401, {"error": "auth_required"})
+        return response(401, {"error": "auth_required"})
     user_id = payload.get("user_id")
     if not isinstance(user_id, str) or not user_id:
         logger.warning("session_no_user_id", extra={"request_id": request_id})
-        return _response(401, {"error": "auth_required"})
+        return response(401, {"error": "auth_required"})
 
     # ── 1.5 Route dispatch — GET/DELETE history vs POST chat ──────────────
     method = (event.get("requestContext") or {}).get("http", {}).get("method", "")
@@ -132,7 +106,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         verify_csrf(event)
     except CSRFError:
         logger.info("csrf_failed", extra={"request_id": request_id, "user_id": user_id})
-        return _response(403, {"error": "csrf_required"})
+        return response(403, {"error": "csrf_required"})
     if method == "DELETE":
         return _handle_delete_history(event, user_id, request_id)
     # else: POST flow (default; explicit method check w istniejącej logice).
@@ -149,7 +123,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         body_dict = json.loads(raw_body)
     except json.JSONDecodeError:
         logger.warning("invalid_json", extra={"request_id": request_id, "user_id": user_id})
-        return _response(400, {"error": "invalid_request", "details": "invalid json body"})
+        return response(400, {"error": "invalid_request", "details": "invalid json body"})
 
     try:
         request = ChatRequest.model_validate(body_dict)
@@ -157,7 +131,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         # Sanityzacja per CLAUDE.md "bez payloadu w logach" — `loc`+`type` only.
         sanitized = [{"loc": err["loc"], "type": err["type"]} for err in exc.errors()]
         logger.warning("invalid_payload", extra={"request_id": request_id, "user_id": user_id})
-        return _response(400, {"error": "invalid_request", "details": sanitized})
+        return response(400, {"error": "invalid_request", "details": sanitized})
 
     logger.info(
         "chat_request_received",
@@ -188,7 +162,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "used": user_count,
                 },
             )
-            return _response(
+            return response(
                 429,
                 {
                     "error": "daily_quota",
@@ -310,7 +284,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "advisor_api_key_missing",
                 extra={"request_id": request_id, "user_id": user_id},
             )
-            return _response(503, {"error": "advisor_unavailable"})
+            return response(503, {"error": "advisor_unavailable"})
         except AdvisorBackendError as exc:
             # logger.error (NIE .exception) — `exc_info` byłby formatException'em
             # przez JsonFormatter i mógłby echo'ować Anthropic SDK body
@@ -325,7 +299,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                     "status_code": exc.status_code,
                 },
             )
-            return _response(503, {"error": "advisor_backend_error"})
+            return response(503, {"error": "advisor_backend_error"})
 
         # ── 8. Append assistant turn ───────────────────────────────────────
         # Pragmatic: nie budujemy `history_after_user` snapshotu — re-Query
@@ -341,7 +315,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
 
         # ── 9. Build response ──────────────────────────────────────────────
-        response = ChatResponse(
+        result = ChatResponse(
             role="assistant",
             content=content,
             used_recipes=retrieved or [],
@@ -373,7 +347,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
             },
         )
 
-        return _response(200, response.model_dump())
+        return response(200, result.model_dump())
 
     except Exception as exc:
         # Catch-all — logujemy `exc_type` (klasa) zamiast traceback/`str(exc)`.
@@ -388,4 +362,4 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
                 "exc_type": type(exc).__name__,
             },
         )
-        return _response(500, {"error": "internal_error"})
+        return response(500, {"error": "internal_error"})
