@@ -276,7 +276,14 @@ code {
   display: flex;
   flex-direction: column;
   padding: 2rem 2.5rem 3rem;
-  margin-left: 240px;
+  /* Sidebar 240px fixed-left. Bez extra logic content przyklejał się do sidebar
+     z lewej i ciągnął się do max-width=1240px — na ultrawide (3440px) zostawało
+     2000px+ pustki po prawej (owner zgłosił 2026-05-17).
+     `max(240px, ...)` daje: na małych viewport (≤1720px) content tuż za sidebar;
+     na większych content się odsuwa i centruje w dostępnej przestrzeni
+     (viewport minus sidebar). `margin-right: auto` symmetric fill. */
+  margin-left: max(240px, calc((100vw - 1240px) / 2));
+  margin-right: auto;
   max-width: 1240px;
   box-sizing: border-box;
 }
@@ -2399,9 +2406,10 @@ body:has(.preview-banner) .login-screen {
   }
   .app-content {
     /* Padding-bottom = nav height (~62px) + safe-area + breathing room.
-       Reset desktop margin-left: 240px — bottom nav nie zajmuje lewej kolumny. */
+       Reset desktop margin-left calc — bottom nav nie zajmuje lewej kolumny. */
     padding: 1rem 1rem calc(80px + env(safe-area-inset-bottom, 0));
     margin-left: 0;
+    margin-right: 0;
   }
   /* H1 + section header smaller */
   .app-content-title {
