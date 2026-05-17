@@ -337,3 +337,108 @@ def test_post_500_when_ddb_write_fails() -> None:
     assert result["statusCode"] == 500
     body = json.loads(result["body"])
     assert body["error"] == "internal"
+
+
+# ─── Manual nutrition entry (post-Recovery sprint) ─────────────────────────
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_post_nutrition_persists_kcal_and_macros(dynamodb_table: Any) -> None:
+    """kcal_in + P/F/C → 4 DDB rows z properly mapowanym attr per metric."""
+    from handlers.measurements import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handle(
+        _event(
+            cookie,
+            body={
+                "date": "2026-05-17",
+                "kcal_in": 2200,
+                "protein_g": 150,
+                "fat_g": 80,
+                "carbs_g": 250,
+            },
+        ),
+        _FakeContext(),
+    )
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert sorted(body["saved"]) == ["carbs", "fat", "kcal_in", "protein"]
+
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :skp)",
+        ExpressionAttributeValues={
+            ":pk": "USER#tomek",
+            ":skp": "BIOMETRY#2026-05-17#",
+        },
+    )["Items"]
+    assert len(items) == 4
+
+    by_sk = {it["SK"]: it for it in items}
+    # kcal_in → attrs has `kcal` (mirror HAE shape).
+    kcal_item = by_sk["BIOMETRY#2026-05-17#kcal_in#manual"]
+    assert kcal_item["kcal"] == Decimal("2200")
+    assert kcal_item["source"] == "manual"
+    # Makro → attrs has `g`.
+    protein_item = by_sk["BIOMETRY#2026-05-17#protein#manual"]
+    assert protein_item["g"] == Decimal("150")
+    assert protein_item["source"] == "manual"
+    fat_item = by_sk["BIOMETRY#2026-05-17#fat#manual"]
+    assert fat_item["g"] == Decimal("80")
+    carbs_item = by_sk["BIOMETRY#2026-05-17#carbs#manual"]
+    assert carbs_item["g"] == Decimal("250")
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_post_mixed_body_and_nutrition(dynamodb_table: Any) -> None:
+    """Jednym requestem waist (cm) + kcal_in (kcal) — różne attr per metric."""
+    from handlers.measurements import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handle(
+        _event(
+            cookie,
+            body={"date": "2026-05-17", "waist_cm": 85.5, "kcal_in": 2200},
+        ),
+        _FakeContext(),
+    )
+
+    assert result["statusCode"] == 200
+    items = dynamodb_table.query(
+        KeyConditionExpression="PK = :pk AND begins_with(SK, :skp)",
+        ExpressionAttributeValues={
+            ":pk": "USER#tomek",
+            ":skp": "BIOMETRY#2026-05-17#",
+        },
+    )["Items"]
+    assert len(items) == 2
+    by_sk = {it["SK"]: it for it in items}
+    assert by_sk["BIOMETRY#2026-05-17#waist#manual"]["cm"] == Decimal("85.5")
+    assert by_sk["BIOMETRY#2026-05-17#kcal_in#manual"]["kcal"] == Decimal("2200")
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_post_422_kcal_in_too_large() -> None:
+    """kcal_in > 10000 (top guard chroniący przed typo 25000 zamiast 2500)."""
+    from handlers.measurements import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handle(
+        _event(cookie, body={"date": "2026-05-17", "kcal_in": 25000}),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 422
+
+
+@pytest.mark.usefixtures("ssm_params", "dynamodb_table")
+def test_post_422_negative_protein() -> None:
+    """protein_g ≤ 0 → 422 (Field gt=0)."""
+    from handlers.measurements import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    result = h.handle(
+        _event(cookie, body={"date": "2026-05-17", "protein_g": -10}),
+        _FakeContext(),
+    )
+    assert result["statusCode"] == 422

@@ -43,15 +43,25 @@ from shared.logging import get_logger
 logger = get_logger("measurements")
 
 
-# Mapping z Pydantic field name → DDB SK metric segment. Strip `_cm` suffix
-# żeby SK był `BIOMETRY#date#waist#manual` (nie `waist_cm#manual`) — krótsza
-# klucze, dopasowane do reszty biometry (`#weight`, `#hrv`, `#sleep`).
+# Mapping z Pydantic field name → (DDB metric segment, attr_name).
+# attr_name jest unitem przechowywanym w DDB row (mirror HAE shape żeby
+# api_read service mógł sumować bez special-case dla manual). Strip
+# `_cm`/`_g`/`kcal_` suffix dla zwięzłych SK.
+#
+# Examples:
+#   waist_cm 85.5 → SK `BIOMETRY#{date}#waist#manual`, attrs `{cm: 85.5}`
+#   kcal_in 2200 → SK `BIOMETRY#{date}#kcal_in#manual`, attrs `{kcal: 2200}`
+#   protein_g 150 → SK `BIOMETRY#{date}#protein#manual`, attrs `{g: 150}`
 _FIELD_TO_METRIC = {
-    "waist_cm": "waist",
-    "hips_cm": "hips",
-    "chest_cm": "chest",
-    "biceps_cm": "biceps",
-    "thigh_cm": "thigh",
+    "waist_cm": ("waist", "cm"),
+    "hips_cm": ("hips", "cm"),
+    "chest_cm": ("chest", "cm"),
+    "biceps_cm": ("biceps", "cm"),
+    "thigh_cm": ("thigh", "cm"),
+    "kcal_in": ("kcal_in", "kcal"),
+    "protein_g": ("protein", "g"),
+    "fat_g": ("fat", "g"),
+    "carbs_g": ("carbs", "g"),
 }
 
 
@@ -116,12 +126,13 @@ def handle(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
         return response(422, {"error": "validation_failed", "fields": fields})
 
-    # Strip `_cm` suffix + drop None values (Pydantic optional).
-    measurements: dict[str, float] = {}
-    for pyd_field, metric_name in _FIELD_TO_METRIC.items():
+    # Strip suffix + drop None values (Pydantic optional). Build map
+    # {metric_name: (attr_name, value)} dla service layer.
+    measurements: dict[str, tuple[str, float]] = {}
+    for pyd_field, (metric_name, attr_name) in _FIELD_TO_METRIC.items():
         value = getattr(req, pyd_field)
         if value is not None:
-            measurements[metric_name] = value
+            measurements[metric_name] = (attr_name, value)
 
     try:
         saved_map = save_measurements(user_id, req.date, measurements)

@@ -128,12 +128,23 @@ def get_biometry(user_id: str, *, days: int = 7) -> list[BiometryDay]:
             by_date[sk_date][metric] = attrs
 
     # Pass 2: agreguj cumulative buckety → single dict z sum.
+    #
+    # Manual precedence (Sprint post-Recovery, manual nutrition entry):
+    # gdy któryś bucket ma `source == "manual"`, filtruj do manual-only
+    # przed sum. Manual entry zapisana przez POST /api/measurements ma
+    # być TYLKO 1 row per metric+date (overwrite gdy user poprawia), więc
+    # po filtrze typowo 1 bucket = 1 value. Tym sposobem manual nadpisuje
+    # HAE dla cumulative kcal_in/makro (user wpisuje manual fallback gdy
+    # HAE nie wysłał lub catch-up'uje historyczny dzień).
     for metrics_for_day in by_date.values():
         for metric, value_attr in CUMULATIVE_METRICS.items():
             bucket = metrics_for_day.get(metric)
             if not isinstance(bucket, dict) or "_buckets" not in bucket:
                 continue
             buckets = bucket["_buckets"]
+            has_manual = any(b.get("source") == "manual" for b in buckets)
+            if has_manual:
+                buckets = [b for b in buckets if b.get("source") == "manual"]
             # _to_python skonwertował Decimal→int/float w attrs, więc tu sum
             # operuje na float (bezpieczne dla agregatu — i tak idzie do JSON).
             total = sum(float(b.get(value_attr, 0)) for b in buckets)
