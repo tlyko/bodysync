@@ -314,6 +314,75 @@ def test_biometry_cumulative_legacy_single_point_still_aggregated(
     assert steps["samples"] == 1
 
 
+@pytest.mark.usefixtures("ssm_params")
+def test_biometry_manual_overrides_hae_for_cumulative(dynamodb_table: Any) -> None:
+    """Read-side precedence: gdy obecny manual + HAE buckets dla cumulative
+    (kcal_in/protein/fat/carbs), api_read filtruje na source=="manual" przed
+    sum. Manual wpis (POST /api/measurements) nadpisuje HAE per date+metric.
+    """
+    from handlers.api_read import handler as h
+
+    today = datetime.now(UTC).date().isoformat()
+    # HAE wysłał 3 hourly buckety = sum 800 kcal.
+    for hour, kcal in [("09:00", "300"), ("13:00", "250"), ("19:00", "250")]:
+        dynamodb_table.put_item(
+            Item={
+                "PK": "USER#tomek",
+                "SK": f"BIOMETRY#{today}#kcal_in#{today}T{hour}:00+02:00",
+                "kcal": Decimal(kcal),
+                "source": "apple-health",
+            }
+        )
+    # Manual override — user wpisał 2200 (HAE niedoliczyło bo offline app).
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#tomek",
+            "SK": f"BIOMETRY#{today}#kcal_in#manual",
+            "kcal": Decimal("2200"),
+            "source": "manual",
+            "recorded_at": 1715949600,
+        }
+    )
+
+    token = _mint_test_jwt("tomek")
+    result = h.handler(
+        _event_with_cookie("GET /api/biometry", f"bodysync_session={token}"), _FakeContext()
+    )
+    body = json.loads(result["body"])
+    kcal = body["days"][0]["metrics"]["kcal_in"]
+    # Manual nadpisał — sum to TYLKO manual row (2200), NIE 800+2200=3000.
+    assert kcal["kcal"] == 2200
+    assert kcal["samples"] == 1
+    assert kcal["source"] == "manual"
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_biometry_manual_only_when_hae_absent(dynamodb_table: Any) -> None:
+    """Manual entry bez HAE — w sumie 1 bucket, value pass-through."""
+    from handlers.api_read import handler as h
+
+    today = datetime.now(UTC).date().isoformat()
+    dynamodb_table.put_item(
+        Item={
+            "PK": "USER#tomek",
+            "SK": f"BIOMETRY#{today}#protein#manual",
+            "g": Decimal("150"),
+            "source": "manual",
+            "recorded_at": 1715949600,
+        }
+    )
+
+    token = _mint_test_jwt("tomek")
+    result = h.handler(
+        _event_with_cookie("GET /api/biometry", f"bodysync_session={token}"), _FakeContext()
+    )
+    body = json.loads(result["body"])
+    protein = body["days"][0]["metrics"]["protein"]
+    assert protein["g"] == 150
+    assert protein["samples"] == 1
+    assert protein["source"] == "manual"
+
+
 @pytest.mark.usefixtures("ssm_params", "dynamodb_table")
 def test_unknown_route_404() -> None:
     from handlers.api_read import handler as h

@@ -44,6 +44,7 @@ import { StatCard } from './dashboard/StatCard';
 import { TDEECalculatorWizard } from './dashboard/TDEECalculatorWizard';
 import { TrendCharts } from './dashboard/TrendCharts';
 import { KcalBalanceCard } from './dashboard/KcalBalanceCard';
+import { ManualNutritionCard } from './dashboard/ManualNutritionCard';
 import { RecoveryScoreCard } from './dashboard/RecoveryScoreCard';
 import { WeightChart } from './dashboard/WeightChart';
 import { WorkoutPlanCard } from './dashboard/WorkoutPlanCard';
@@ -740,6 +741,11 @@ function NutritionView({
           target={targets?.carbs_target_g}
         />
       </div>
+
+      {/* Manual nutrition entry — fallback gdy HAE offline. Backend rozszerzony
+          o kcal_in/protein_g/fat_g/carbs_g, manual nadpisuje HAE per date+metric
+          (api_read source=="manual" precedence). */}
+      <ManualNutritionCard days={days} todayIso={today} />
     </>
   );
 }

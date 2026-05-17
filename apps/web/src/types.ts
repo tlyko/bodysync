@@ -214,11 +214,17 @@ export type PlanResponse = {
 
 export type MeasurementsRequest = {
   date: string; // YYYY-MM-DD
+  // Body measurements (cm).
   waist_cm?: number | null;
   hips_cm?: number | null;
   chest_cm?: number | null;
   biceps_cm?: number | null;
   thigh_cm?: number | null;
+  // Nutrition manual entry (override HAE dla danego dnia, post-Recovery sprint).
+  kcal_in?: number | null;
+  protein_g?: number | null;
+  fat_g?: number | null;
+  carbs_g?: number | null;
 };
 
 export type MeasurementsResponse = {
