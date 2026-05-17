@@ -31,7 +31,11 @@ export function ChatInput({ onSend, disabled }: Props) {
 
   return (
     <div className="chat-input">
+      <label htmlFor="chat-input-textarea" className="sr-only">
+        Wiadomość do asystenta AI
+      </label>
       <textarea
+        id="chat-input-textarea"
         className="chat-input-textarea"
         value={value}
         onChange={(e) => setValue(e.target.value)}
