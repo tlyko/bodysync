@@ -18,6 +18,7 @@ import logging
 import re
 import time
 import unicodedata
+from concurrent.futures import ThreadPoolExecutor
 from datetime import date, timedelta
 from typing import Any
 
@@ -52,6 +53,17 @@ _TRAINING_DOW: dict[str, int] = {
 
 # Warm-up rows pomijamy — owner zapisuje wagi tylko dla głównego treningu.
 _SKIP_SECTION_LABELS = {"Rozgrzewka", "Warm-up", "Mobilizacja"}
+
+# Concurrent Haiku calls per section. Anthropic SDK HTTP client jest sync per
+# call, ale thread-safe — multiple threads × sync HTTP = effective parallel.
+# Live observed 2026-05-17: ~1.5s per call, 16+ exercises sequential = 24s+
+# timeout (API GW HTTP 29s max). 5 threads × 16 calls / 5 = ~3-4 rounds × 1.5s
+# = ~5-7s comfortably within budget.
+#
+# Rate limit: Haiku free tier 50 RPM, paid tier wyższy. Burst 5 concurrent
+# w 1s = 300 RPM przy stałym pace; w praktyce 1 button click = 1 burst krótki,
+# pozostała część dnia idle. Bezpiecznie.
+_HAIKU_CONCURRENCY = 5
 
 # Locate "actual" cell — header zawierający "Ciężar" (case-insensitive). Owner
 # 2026-05-17 confirmed: jedna kolumna "Ciężar x serie x powtórzenia x RIR".
@@ -201,68 +213,108 @@ def call_haiku_for_exercise(
     return parse_haiku_json(content_block.text)
 
 
+def _process_exercise(
+    exercise: Any,
+    *,
+    headers: list[str],
+    training_name: str,
+    workout_date: str,
+) -> tuple[str, ExtractedExercise | None]:
+    """Pojedynczy worker dla ThreadPoolExecutor. Returns:
+    - ("skip", None): pusty wpis w "Ciężar..." cell
+    - ("error", None): Haiku JSON/Pydantic parse fail
+    - ("ok", ExtractedExercise): success
+
+    Anthropic SDK client jest thread-safe — multiple threads × sync HTTP call
+    daje effective parallelism (I/O bound, GIL releases podczas socket wait).
+    """
+    actual = find_actual_cell(headers, exercise.cells)
+    if actual is None or not actual[1].strip():
+        return ("skip", None)
+    idx, actual_text = actual
+    exercise_name = exercise.cells[1].strip() if len(exercise.cells) > 1 else "?"
+    plan_context = {
+        headers[i]: cell for i, cell in enumerate(exercise.cells) if i != idx and i < len(headers)
+    }
+    try:
+        parsed = call_haiku_for_exercise(
+            exercise_name=exercise_name,
+            actual_text=actual_text,
+            plan_context=plan_context,
+        )
+        sets = [WorkoutSet.model_validate(s) for s in parsed.get("sets", [])]
+    except (json.JSONDecodeError, ValidationError):
+        logger.warning(
+            "haiku_parse_failed",
+            extra={
+                "exercise_number": exercise.number,
+                "exercise_name": exercise_name,
+                "actual_text": actual_text,
+            },
+        )
+        return ("error", None)
+    return (
+        "ok",
+        ExtractedExercise(
+            date=workout_date,
+            training_name=training_name,
+            exercise_number=exercise.number,
+            exercise_name=exercise_name,
+            sets=sets,
+            rir=parsed.get("rir"),
+            notes=parsed.get("notes"),
+        ),
+    )
+
+
 def extract_section(
     section: SectionIn,
     *,
     training_name: str,
     workout_date: str,
 ) -> tuple[list[ExtractedExercise], int, int]:
-    """Iteruj exercises w sekcji, wołaj Haiku. Returns (out, skipped, errors).
+    """Parallel Haiku calls per ćwiczenie. Returns (out, skipped, errors).
 
-    Per-exercise try/except — 1 bad Haiku response (invalid JSON, Pydantic
-    validation fail) nie zabije reszty batcha. Live caught 2026-05-17:
-    Haiku zwrócił `weight_kg=-7.5` (assisted pull-up BW-7.5 counterweight),
-    odrzucone przez schema `ge=0` → cały batch rzucał 500. Po fix:
-    schema akceptuje negative (assisted), plus errors counted bez raise.
+    Pre-fix sequential: ~1.5s × N exercises → 16+ ćwiczeń przekraczało API GW
+    29s timeout. ThreadPoolExecutor(_HAIKU_CONCURRENCY=5) daje ~3-4 rounds
+    zamiast N, ~5-7s total.
 
-    Skipped = ćwiczenia bez wpisu w "Ciężar..." cell (puste, niewypełnione).
-    Errors = Haiku zwrócił niepoprawny output (JSON parse fail lub schema
-    validation fail).
+    `executor.map` preserves input order — out list mirror'uje exercise order
+    z section.exercises (deterministyczne dla testów + UI consistency).
+
+    Per-exercise try/except w `_process_exercise` — 1 bad Haiku response
+    (invalid JSON, Pydantic validation fail) → errors+=1, nie raise. Live
+    caught 2026-05-17: Haiku zwrócił `weight_kg=-7.5` (assisted), schema
+    `ge=0` odrzucała; fix: range `ge=-300` + per-exercise guard.
+
+    Skipped = ćwiczenia bez wpisu w "Ciężar..." cell (puste).
     """
     out: list[ExtractedExercise] = []
     skipped = 0
     errors = 0
-    for exercise in section.exercises:
-        actual = find_actual_cell(section.headers, exercise.cells)
-        if actual is None or not actual[1].strip():
-            skipped += 1
-            continue
-        idx, actual_text = actual
-        exercise_name = exercise.cells[1].strip() if len(exercise.cells) > 1 else "?"
-        plan_context = {
-            section.headers[i]: cell
-            for i, cell in enumerate(exercise.cells)
-            if i != idx and i < len(section.headers)
-        }
-        try:
-            parsed = call_haiku_for_exercise(
-                exercise_name=exercise_name,
-                actual_text=actual_text,
-                plan_context=plan_context,
-            )
-            sets = [WorkoutSet.model_validate(s) for s in parsed.get("sets", [])]
-        except (json.JSONDecodeError, ValidationError):
-            logger.warning(
-                "haiku_parse_failed",
-                extra={
-                    "exercise_number": exercise.number,
-                    "exercise_name": exercise_name,
-                    "actual_text": actual_text,
-                },
-            )
-            errors += 1
-            continue
-        out.append(
-            ExtractedExercise(
-                date=workout_date,
-                training_name=training_name,
-                exercise_number=exercise.number,
-                exercise_name=exercise_name,
-                sets=sets,
-                rir=parsed.get("rir"),
-                notes=parsed.get("notes"),
-            )
+
+    if not section.exercises:
+        return out, skipped, errors
+
+    def worker(exercise: Any) -> tuple[str, ExtractedExercise | None]:
+        return _process_exercise(
+            exercise,
+            headers=section.headers,
+            training_name=training_name,
+            workout_date=workout_date,
         )
+
+    with ThreadPoolExecutor(max_workers=_HAIKU_CONCURRENCY) as executor:
+        results = list(executor.map(worker, section.exercises))
+
+    for status, item in results:
+        if status == "skip":
+            skipped += 1
+        elif status == "error":
+            errors += 1
+        elif item is not None:
+            out.append(item)
+
     return out, skipped, errors
 
 
