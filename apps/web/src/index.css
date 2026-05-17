@@ -39,7 +39,9 @@
   --border-light: #374357;
   --text: #e2e8f0;
   --text-muted: #94a3b8;
-  --text-dim: #5a6f8e;
+  /* WCAG AA contrast bump 2026-05-17. Stary #5a6f8e dawał 4.04:1 na bg
+     #0a0e17 (fail AA dla normal text wymagającego 4.5:1). #7a8ca8 → ~5.5:1. */
+  --text-dim: #7a8ca8;
   --cyan: #22d3ee;
   --cyan-dim: rgba(34, 211, 238, 0.12);
   --green: #10b981;
@@ -63,6 +65,48 @@
 body {
   margin: 0;
   min-height: 100dvh;
+}
+
+/* A11y baseline (audit 2026-05-16 P1). Globalny focus indicator dla
+   keyboard nav — :focus-visible NIE odpala się na mouse click (chronimy
+   istniejący button hover styling). Outline + offset zamiast border swap
+   działa konsekwentnie na buttonach/inputach/linkach niezależnie od
+   custom styling per-komponent. */
+*:focus-visible {
+  outline: 2px solid var(--cyan);
+  outline-offset: 2px;
+}
+
+/* Screen reader only — visually hidden ale accessible przez assistive tech.
+   Standard webaim.org pattern (clip-path superseded clip property, ale
+   clip wciąż używamy dla legacy compatibility). */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border-width: 0;
+}
+
+/* Respect user "reduce motion" OS setting (System Preferences → Display →
+   Reduce Motion w macOS / Accessibility → Display w iOS).
+   Wszystkie transitions/animations skrócone do 0.01ms — efektywnie wyłączone
+   ale zachowują semantykę (state change zostaje, tylko bez wizualnej
+   animacji). Dotyczy: NutritionDonut animation, button hover transitions,
+   chart hover state changes, modal open/close. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 button {
