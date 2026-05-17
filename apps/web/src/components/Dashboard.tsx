@@ -44,6 +44,7 @@ import { StatCard } from './dashboard/StatCard';
 import { TDEECalculatorWizard } from './dashboard/TDEECalculatorWizard';
 import { TrendCharts } from './dashboard/TrendCharts';
 import { KcalBalanceCard } from './dashboard/KcalBalanceCard';
+import { RecoveryScoreCard } from './dashboard/RecoveryScoreCard';
 import { WeightChart } from './dashboard/WeightChart';
 import { WorkoutPlanCard } from './dashboard/WorkoutPlanCard';
 
@@ -456,6 +457,11 @@ function DashboardOverview({
           </SectionPanel>
         </div>
       </div>
+
+      {/* Recovery Score — composite 0-100 z sleep duration + quality + RHR delta
+          (per ADR-koncept zatwierdzony 2026-05-15). Glanceable answer "jak się
+          dziś czuję". HRV celowo skipped — Garmin nie wysyła do AH (PR #177). */}
+      <RecoveryScoreCard days={days} todayIso={today} />
 
       {/* Bilans kaloryczny — today's kcal_in vs kcal_burned + saldo z
           DEFICYT/NADWYŻKA label + 7-day sparkline. Owner request — wybiera
