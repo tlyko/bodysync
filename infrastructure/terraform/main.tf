@@ -1318,3 +1318,122 @@ resource "aws_lambda_permission" "me_export_apigw" {
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }
+
+# GDPR Art. 17 — right to erasure. DELETE /api/me/account cascade'uje:
+# DDB pełnej PK → S3 (HAE + Strava raw user prefix) → SSM per-user keys
+# (Strava tokens, HAE webhook secret, training-sheet refs) → SSM JSON maps
+# (athlete-to-user, allowed_emails) drop user entries. Wymaga body
+# `{"confirm": "DELETE"}` jako anti-misclick guard. 1024 MB / 29 s bo
+# pełna iteracja partition + paginated S3 list.
+module "me_delete" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "me_delete"
+  source_zip    = "${path.module}/../../apps/api/dist/me_delete.zip"
+  handler       = "handlers.me_delete.handler.handle"
+  memory_size   = 1024
+  timeout       = 29
+
+  environment = {
+    TABLE_NAME      = aws_dynamodb_table.data.name
+    RAW_BUCKET_NAME = aws_s3_bucket.data.id
+    ENV             = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Defense in depth z handler PK='USER#{user_id z JWT}'. Query dla
+      # enumeracji, BatchWriteItem dla cascade delete (batch_writer w
+      # shared/dynamo.batch_delete).
+      Sid    = "DDBEraseUserPartition"
+      Effect = "Allow"
+      Action = [
+        "dynamodb:Query",
+        "dynamodb:BatchWriteItem",
+      ]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      # S3 cleanup — list + delete na 2 user-scoped prefixach. ListBucket
+      # nie ma per-object resource, scope'ujemy condition po prefix patternie.
+      Sid      = "S3ListUserRawPayloads"
+      Effect   = "Allow"
+      Action   = ["s3:ListBucket"]
+      Resource = aws_s3_bucket.data.arn
+      Condition = {
+        "StringLike" = {
+          "s3:prefix" = [
+            "raw/health-auto-export/*",
+            "strava/streams/*",
+          ]
+        }
+      }
+    },
+    {
+      Sid    = "S3DeleteUserRawPayloads"
+      Effect = "Allow"
+      Action = ["s3:DeleteObject"]
+      Resource = [
+        "${aws_s3_bucket.data.arn}/raw/health-auto-export/*",
+        "${aws_s3_bucket.data.arn}/strava/streams/*",
+      ]
+    },
+    {
+      Sid    = "SSMReadJWTAndMaps"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/athlete-to-user",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/auth/allowed_emails",
+      ]
+    },
+    {
+      # Per-user keys do delete + 2 JSON maps do update (read-modify-write).
+      # Scope'ujemy ARN ke prefixami `/bodysync/strava/*/tokens` etc. — w
+      # MVP są tylko 2 userzy, ale * preempt'uje konieczność TF apply przy
+      # dodaniu trzeciego.
+      Sid    = "SSMEraseUserKeys"
+      Effect = "Allow"
+      Action = [
+        "ssm:DeleteParameter",
+        "ssm:PutParameter",
+      ]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/*/tokens",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/health-auto-export/webhook_secret_*",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/*/training-sheet-id",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/*/training-sheet-tab",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/strava/athlete-to-user",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/auth/allowed_emails",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "me_delete" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.me_delete.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "me_delete" {
+  api_id    = module.api_gateway.api_id
+  route_key = "DELETE /api/me/account"
+  target    = "integrations/${aws_apigatewayv2_integration.me_delete.id}"
+}
+
+resource "aws_lambda_permission" "me_delete_apigw" {
+  statement_id  = "AllowAPIGWInvokeMeDelete"
+  action        = "lambda:InvokeFunction"
+  function_name = module.me_delete.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}

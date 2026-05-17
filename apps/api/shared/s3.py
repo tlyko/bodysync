@@ -39,3 +39,28 @@ def archive_raw_payload(
         Body=body,
         ContentType=content_type,
     )
+
+
+def delete_by_prefix(bucket: str, prefix: str) -> int:
+    """Skasuj wszystkie obiekty pod prefix'em w S3 — returns count of deletes.
+
+    Używane przez GDPR account erasure: `strava/streams/{user_id}/` +
+    `raw/health-auto-export/{user_id}/`. List+batch delete (1000 keys per
+    DeleteObjects). Idempotent — pusty prefix zwraca 0.
+
+    Bucket NIE jest versioned (per s3.tf — versioning=Disabled), więc jeden
+    DeleteObject = trwałe usunięcie. Gdy versioning włączymy później,
+    trzeba bedzie też kasować NoncurrentVersions / DeleteMarkers.
+    """
+    client = _get_client()
+    paginator = client.get_paginator("list_objects_v2")
+    deleted = 0
+    for page in paginator.paginate(Bucket=bucket, Prefix=prefix):
+        keys = [{"Key": obj["Key"]} for obj in page.get("Contents", [])]
+        if not keys:
+            continue
+        # DeleteObjects API limit: 1000 keys per call. ListObjectsV2 page
+        # size = 1000 by default, więc każda strona = jeden DeleteObjects.
+        client.delete_objects(Bucket=bucket, Delete={"Objects": keys, "Quiet": True})
+        deleted += len(keys)
+    return deleted
