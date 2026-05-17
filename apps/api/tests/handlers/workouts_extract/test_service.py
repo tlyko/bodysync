@@ -38,6 +38,7 @@ def test_slugify_training_fallback_empty() -> None:
 
 def test_date_latest_week_trening_a_today_sunday() -> None:
     from handlers.workouts_extract.service import compute_date_for_training
+
     # 2026-05-17 = niedziela. Monday current = 2026-05-11. Latest week
     # (weekIdx=3 of 3) Trening A = pon = 2026-05-11.
     assert compute_date_for_training("Trening A", 3, 3, "2026-05-17") == "2026-05-11"
