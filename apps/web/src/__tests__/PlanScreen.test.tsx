@@ -3,9 +3,34 @@ import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest';
 import { PlanScreen } from '../components/dashboard/PlanScreen';
 
 const fetchMock = vi.fn();
+// Queue per-test responses dla /api/plan (initial + refresh). WorkoutHistorySection
+// (2026-05-17) auto-fetches /api/workouts na mount — routujemy URL-wise żeby
+// nie konsumowała queue.
+let planQueue: Response[] = [];
+
+function queuePlanResponse(response: Response): void {
+  planQueue.push(response);
+}
 
 beforeEach(() => {
   fetchMock.mockReset();
+  planQueue = [];
+  fetchMock.mockImplementation((url: unknown) => {
+    const u = typeof url === 'string' ? url : (url as Request).url;
+    if (u.includes('/api/workouts')) {
+      return Promise.resolve(
+        new Response(JSON.stringify({ workouts: [] }), {
+          status: 200,
+          headers: { 'content-type': 'application/json' },
+        }),
+      );
+    }
+    if (u.includes('/api/plan')) {
+      const next = planQueue.shift();
+      if (next) return Promise.resolve(next);
+    }
+    return Promise.reject(new Error('unexpected fetch ' + u));
+  });
   vi.stubGlobal('fetch', fetchMock);
 });
 
@@ -22,7 +47,7 @@ function jsonResponse(data: unknown, status = 200): Response {
 
 describe('PlanScreen', () => {
   test('renders parsed trainings + meta after fetch', async () => {
-    fetchMock.mockResolvedValueOnce(
+    queuePlanResponse(
       jsonResponse({
         rows: [
           ['Numer', 'Ćwiczenie', 'Link', 'Serie x powt.', 'Ból'],
@@ -48,7 +73,7 @@ describe('PlanScreen', () => {
   });
 
   test('cached state pokazuje "(z cache)" w meta', async () => {
-    fetchMock.mockResolvedValueOnce(
+    queuePlanResponse(
       jsonResponse({
         rows: [['x']], // brak "Numer" → unparseable, ale meta nadal renderuje
         fetched_at: Math.floor(Date.now() / 1000) - 600,
@@ -62,7 +87,7 @@ describe('PlanScreen', () => {
   });
 
   test('503 not_configured pokazuje friendly error + brak retry button', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'not_configured' }, 503));
+    queuePlanResponse(jsonResponse({ error: 'not_configured' }, 503));
 
     render(<PlanScreen />);
     await waitFor(() =>
@@ -72,7 +97,7 @@ describe('PlanScreen', () => {
   });
 
   test('502 sheets_api_error → retryable button visible', async () => {
-    fetchMock.mockResolvedValueOnce(jsonResponse({ error: 'sheets_api_error' }, 502));
+    queuePlanResponse(jsonResponse({ error: 'sheets_api_error' }, 502));
 
     render(<PlanScreen />);
     // Use getByRole żeby unika collision z error message text
@@ -93,7 +118,7 @@ describe('PlanScreen', () => {
       ['Trening A', '', ''],
       ['01', 'Fresh-exercise', '4x8'],
     ];
-    fetchMock.mockResolvedValueOnce(
+    queuePlanResponse(
       jsonResponse({
         rows: initialRows,
         fetched_at: Math.floor(Date.now() / 1000),
@@ -101,7 +126,7 @@ describe('PlanScreen', () => {
         sheet_tab: 'Arkusz5',
       }),
     );
-    fetchMock.mockResolvedValueOnce(
+    queuePlanResponse(
       jsonResponse({
         rows: refreshedRows,
         fetched_at: Math.floor(Date.now() / 1000),
@@ -117,8 +142,12 @@ describe('PlanScreen', () => {
 
     await waitFor(() => expect(screen.getByText('Fresh-exercise')).toBeInTheDocument());
 
-    // Druga fetch wywołana z refresh=1
-    expect(fetchMock).toHaveBeenCalledTimes(2);
-    expect(fetchMock.mock.calls[1][0]).toContain('refresh=1');
+    // Filtrujemy plan-specific calls (workouts fetch z WorkoutHistorySection
+    // dorzuca dodatkowe wywołanie).
+    const planCalls = fetchMock.mock.calls
+      .map((c) => String(c[0]))
+      .filter((u) => u.includes('/api/plan'));
+    expect(planCalls).toHaveLength(2);
+    expect(planCalls[1]).toContain('refresh=1');
   });
 });

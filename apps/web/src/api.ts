@@ -21,6 +21,9 @@ import type {
   ProfileTargets,
   ProfileTargetsUpdate,
   WaitlistSignupRequest,
+  WorkoutExtractRequest,
+  WorkoutExtractResponse,
+  WorkoutsResponse,
 } from './types';
 
 class ApiError extends Error {
@@ -282,6 +285,31 @@ export async function postMeasurements(
     method: 'POST',
     body: JSON.stringify(payload),
   });
+}
+
+// Workout history (2026-05-17). POST trigger extraction; GET list ostatnich.
+export async function postWorkoutsExtract(
+  payload: WorkoutExtractRequest,
+): Promise<WorkoutExtractResponse> {
+  return request<WorkoutExtractResponse>('/api/workouts/extract', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+}
+
+export async function getWorkouts(days = 30): Promise<WorkoutsResponse> {
+  return request<WorkoutsResponse>(`/api/workouts?days=${days}`);
+}
+
+export function workoutsErrorMessage(err: unknown): string {
+  if (!(err instanceof ApiError)) return 'Nieoczekiwany błąd.';
+  if (err.status === 0) return '';
+  if (err.status === -1) return 'Brak połączenia — spróbuj za chwilę.';
+  if (err.status === 401) return 'Sesja wygasła. Zaloguj się ponownie.';
+  if (err.status === 403) return 'Brak uprawnień (CSRF).';
+  if (err.status === 422) return 'Niepoprawne dane planu treningowego.';
+  if (err.status >= 500) return 'Parser się wywalił — spróbuj ponownie.';
+  return err.message || 'Coś poszło nie tak.';
 }
 
 // PL banner messages dla measurements submit error.

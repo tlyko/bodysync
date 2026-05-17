@@ -608,6 +608,13 @@ resource "aws_apigatewayv2_route" "api_biometry" {
   target    = "integrations/${aws_apigatewayv2_integration.api_read.id}"
 }
 
+# Sprint workouts (2026-05-17) — list extracted workout history.
+resource "aws_apigatewayv2_route" "api_workouts" {
+  api_id    = module.api_gateway.api_id
+  route_key = "GET /api/workouts"
+  target    = "integrations/${aws_apigatewayv2_integration.api_read.id}"
+}
+
 resource "aws_lambda_permission" "api_read_apigw" {
   statement_id  = "AllowAPIGWInvoke"
   action        = "lambda:InvokeFunction"
@@ -1434,6 +1441,74 @@ resource "aws_lambda_permission" "me_delete_apigw" {
   statement_id  = "AllowAPIGWInvokeMeDelete"
   action        = "lambda:InvokeFunction"
   function_name = module.me_delete.function_name
+  principal     = "apigateway.amazonaws.com"
+  source_arn    = "${module.api_gateway.execution_arn}/*/*"
+}
+
+# Workout history extract (2026-05-17) — POST /api/workouts/extract czyta
+# Training[] z frontu (parseTrainings output), woła Haiku per ćwiczenie żeby
+# wyciągnąć structured sets z cell "Ciężar x serie x powtórzenia x RIR".
+# 1024 MB / 29 s — wiele sequential LLM calls (typowo 6-15 exercises per
+# button click). Owner-triggered (button), nie cron — kontrola kosztu LLM.
+module "workouts_extract" {
+  source = "./modules/lambda"
+
+  project       = local.project
+  function_name = "workouts_extract"
+  source_zip    = "${path.module}/../../apps/api/dist/workouts_extract.zip"
+  handler       = "handlers.workouts_extract.handler.handle"
+  memory_size   = 1024
+  timeout       = 29
+
+  environment = {
+    TABLE_NAME = aws_dynamodb_table.data.name
+    ENV        = "prod"
+  }
+
+  extra_iam_statements = [
+    {
+      # Per CLAUDE.md PK isolation — Lambda pisze tylko WORKOUT# rows pod
+      # USER#* (LeadingKeys condition). Bez Query (frontend pre-parses Training[]
+      # i nie potrzebuje read).
+      Sid      = "DDBWriteWorkouts"
+      Effect   = "Allow"
+      Action   = ["dynamodb:PutItem"]
+      Resource = aws_dynamodb_table.data.arn
+      Condition = {
+        "ForAllValues:StringLike" = {
+          "dynamodb:LeadingKeys" = ["USER#*"]
+        }
+      }
+    },
+    {
+      Sid    = "SSMReadAnthropicAndJwt"
+      Effect = "Allow"
+      Action = ["ssm:GetParameter"]
+      Resource = [
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/jwt/signing_secret",
+        "arn:aws:ssm:${local.aws_region}:${local.account_id}:parameter/bodysync/anthropic/api_key",
+      ]
+    },
+  ]
+}
+
+resource "aws_apigatewayv2_integration" "workouts_extract" {
+  api_id                 = module.api_gateway.api_id
+  integration_type       = "AWS_PROXY"
+  integration_uri        = module.workouts_extract.invoke_arn
+  payload_format_version = "2.0"
+}
+
+resource "aws_apigatewayv2_route" "workouts_extract" {
+  api_id    = module.api_gateway.api_id
+  route_key = "POST /api/workouts/extract"
+  target    = "integrations/${aws_apigatewayv2_integration.workouts_extract.id}"
+}
+
+resource "aws_lambda_permission" "workouts_extract_apigw" {
+  statement_id  = "AllowAPIGWInvokeWorkoutsExtract"
+  action        = "lambda:InvokeFunction"
+  function_name = module.workouts_extract.function_name
   principal     = "apigateway.amazonaws.com"
   source_arn    = "${module.api_gateway.execution_arn}/*/*"
 }

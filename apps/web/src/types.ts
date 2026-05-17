@@ -210,6 +210,51 @@ export type PlanResponse = {
   sheet_tab: string;
 };
 
+// ─── Workout history (2026-05-17, mirror handlers/workouts_extract/schemas.py) ───
+
+export type WorkoutSet = {
+  weight_kg?: number | null;
+  weight_kind: 'kg' | 'bw' | 'other';
+  reps: number;
+};
+
+export type WorkoutEntry = {
+  date: string;
+  training_slug: string;
+  training_name: string;
+  exercise_number: string;
+  exercise_name: string;
+  sets: WorkoutSet[];
+  rir?: number | null;
+  notes?: string | null;
+  source?: string;
+  recorded_at?: number;
+};
+
+export type WorkoutsResponse = {
+  workouts: WorkoutEntry[];
+};
+
+export type WorkoutExtractRequest = {
+  today_iso: string;
+  trainings: unknown[]; // mirror Training[] z planParser — opaque payload (forward as-is)
+};
+
+export type WorkoutExtractResponse = {
+  extracted: number;
+  skipped: number;
+  errors: number;
+  items: Array<{
+    date: string;
+    training_name: string;
+    exercise_number: string;
+    exercise_name: string;
+    sets: WorkoutSet[];
+    rir?: number | null;
+    notes?: string | null;
+  }>;
+};
+
 // ─── Body measurements (Sprint 12, mirror handlers/measurements/schemas.py) ───
 
 export type MeasurementsRequest = {
