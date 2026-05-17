@@ -376,3 +376,80 @@ def test_pk_isolation_user_a_writes_under_own_partition(dynamodb_table: Any) -> 
 
     assert len(tomek_items) > 0
     assert len(weronika_items) == 0
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_negative_weight_assisted_accepted(dynamodb_table: Any) -> None:
+    """Assisted exercise (BW-7.5 counterweight) → schema accepts negative weight_kg.
+    Live regression 2026-05-17 — Haiku zwrócił -7.5, schema z `ge=0` odrzucała
+    cały batch przez ValidationError raise.
+    """
+    from handlers.workouts_extract import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+
+    with patch("handlers.workouts_extract.service.get_anthropic_client") as mock_get_client:
+        client = mock_get_client.return_value
+        client.messages.create.return_value = _make_mock_anthropic_response(
+            json.dumps(
+                {
+                    "sets": [
+                        {"weight_kg": -7.5, "weight_kind": "bw", "reps": 8},
+                        {"weight_kg": -5.0, "weight_kind": "bw", "reps": 6},
+                    ],
+                    "rir": None,
+                    "notes": "assisted pull-up",
+                }
+            )
+        )
+
+        result = h.handle(
+            _event(
+                cookie,
+                body={"today_iso": "2026-05-17", "trainings": _sample_trainings()},
+            ),
+            _FakeContext(),
+        )
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["errors"] == 0
+    assert body["extracted"] >= 1
+
+
+@pytest.mark.usefixtures("ssm_params")
+def test_invalid_haiku_response_skips_exercise_not_batch(dynamodb_table: Any) -> None:
+    """Haiku zwraca invalid JSON dla 1 ćwiczenia → tylko ono w errors,
+    reszta batcha przechodzi (defense in depth).
+    """
+    from handlers.workouts_extract import handler as h
+
+    cookie = f"bodysync_session={_mint_test_jwt('tomek')}"
+    good = _make_mock_anthropic_response(
+        json.dumps(
+            {
+                "sets": [{"weight_kg": 100, "weight_kind": "kg", "reps": 5}],
+                "rir": None,
+                "notes": None,
+            }
+        )
+    )
+    bad = _make_mock_anthropic_response("not valid json {{")
+
+    with patch("handlers.workouts_extract.service.get_anthropic_client") as mock_get_client:
+        client = mock_get_client.return_value
+        # Pierwszy ćwiczenie OK, drugie corrupt.
+        client.messages.create.side_effect = [good, bad]
+
+        result = h.handle(
+            _event(
+                cookie,
+                body={"today_iso": "2026-05-17", "trainings": _sample_trainings()},
+            ),
+            _FakeContext(),
+        )
+
+    assert result["statusCode"] == 200
+    body = json.loads(result["body"])
+    assert body["extracted"] == 1
+    assert body["errors"] == 1
