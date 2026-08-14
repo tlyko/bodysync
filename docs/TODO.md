@@ -2807,3 +2807,131 @@ Owner pytał o niche / scaling potential:
 - **Window 12-18 mies** zanim OpenAI/Anthropic/mainstream apps add PL AI coach
 - **Decyzja owner'a:** dorzucić waitlist na login screen jako tani test popytu (priorytet 2 wyżej) zanim podejmie pivot decision
 
+
+---
+
+## Sprint 12 — Revocation + detection (audyt bezpieczeństwa 2026-08-14)
+
+**Kontekst:** przegląd całego łańcucha auth (login → sesja → API → serwer MCP → IAM/DDB → nagłówki
+frontu) na prośbę ownera: "czy nikt niepowołany nie dobije się do aplikacji, serwera MCP i danych
+poszczególnych użytkowników". Nie znaleziono ścieżki, w której osoba spoza allowlisty czyta dane
+albo w której dane jednego usera wyciekają do drugiego. Baseline jest dobry: nonce anti-replay przy
+Google id_token, rozdzielone sekrety podpisujące (cookie vs token MCP), PKCE S256 + jednorazowy kod,
+allowlista hostów redirectu, `LeadingKeys` w IAM jako druga warstwa PK isolation, testy cross-user.
+
+**Czego brakuje — jednym zdaniem:** wydanego dostępu nie da się cofnąć. Wszystko poniżej krąży
+wokół tej jednej luki plus taniego wykrywania prób.
+
+**Kolejność:** S12.1–S12.5 to jeden spójny kawałek (revocation), S12.6–S12.7 to po jednym bloku
+Terraform, reszta to backlog higieniczny.
+
+---
+
+### Step 1 (P0): rdzeń unieważniania sesji — `token_version` → `apps/api/shared/`
+
+**Problem:** JWT sesyjny jest bezstanowy i żyje 30 dni (`shared/auth.py`), a `POST /api/auth/logout`
+tylko kasuje cookie w przeglądarce. Skradziony token działa do `exp` niezależnie od wylogowania —
+przy zgubionym telefonie z zalogowaną sesją nie ma czym zareagować.
+
+- **Tworzy:**
+  - `shared/session.py` — `resolve_session(event) -> user_id`: cookie → `verify_jwt` → `GetItem`
+    `USER#{id}/PROFILE` → porównanie claimu `tv` z atrybutem `token_version`. Trzy powody odmowy
+    (brak cookie / zły podpis / unieważniona sesja) wracają jako jeden `SessionError` → 401.
+    Dodatkowo: **brak profilu = 401**, co zamyka pkt 3 audytu (token po `DELETE /api/me/account`).
+  - `shared/dynamo.py` — `increment_attr(pk, sk, attr) -> int` (UpdateItem `ADD`, atomowy, zwraca
+    nową wartość). Potrzebny do bumpa; osobno, bo to generyczny helper.
+  - `shared/auth.py` — `mint_jwt(user_id, *, token_version=0)` wstawia claim `tv`.
+  - `google_auth/service.py` — mint z `token_version` odczytanym z istniejącego `PROFILE`
+    (profil i tak jest tam czytany dla merge'a, więc zero dodatkowych RCU).
+- **Backward compat:** stare cookie nie ma `tv`, stary profil nie ma `token_version` — oba czytane
+  jako `0`, więc obecne sesje przeżywają deploy. Pierwszy bump je unieważnia, i o to chodzi.
+- **Koszt:** jeden `GetItem` (~2 ms, 0.5 RCU) na request z sesją. Przy 2 userach pomijalne.
+- **Nie robi:** nie podpina się jeszcze do żadnego handlera (Step 2) — PR ma być czytelny.
+- **Test:** `tests/shared/test_session.py` — happy path, brak cookie, zły podpis, `tv` mismatch,
+  usunięty profil, legacy token bez `tv` przechodzi przy `token_version=0`.
+- **Acceptance:** `pytest` zielony, `ruff check + format --check .` na całym `apps/api`.
+
+### Step 2 (P0): podpięcie `resolve_session` w handlerach → `apps/api/handlers/`
+
+- **Zmienia:** ~15 handlerów (`api_read`, `activities_list`, `advisor_chat`, `measurements`, `plan`,
+  `profile_targets`, `me_export`, `me_delete`, `tdee_recalc`, `workouts_extract`, `strava_oauth_*`,
+  `activity_suggestion`, `mcp/handler.py::_session_user`) — trzy powtórzone bloki
+  (`extract_session_cookie` + `verify_jwt` + sprawdzenie `user_id`) schodzą do jednego wywołania.
+- **Efekt uboczny:** minus ~150 LOC duplikacji, ten sam ruch co `shared/http.py` w audycie 2026-05-16.
+- **Test:** istniejące testy handlerów muszą przejść bez zmian w asercjach (kontrakt 401 ten sam);
+  nowy test cross-cutting: bump `token_version` → wszystkie chronione endpointy zwracają 401.
+- **Acceptance:** `grep -rn "verify_jwt" apps/api/handlers` zwraca tylko `mcp/oauth.py`.
+
+### Step 3 (P0): `POST /api/auth/sessions/revoke` + UI → backend & frontend
+
+- **Tworzy:** endpoint bumpujący `token_version` (JWT + CSRF wymagane), IAM `dynamodb:UpdateItem`
+  na `USER#*` dla tej Lambdy, przycisk "Wyloguj ze wszystkich urządzeń" w Ustawieniach z
+  potwierdzeniem.
+- **Decyzja:** zwykły `POST /api/auth/logout` **nie** bumpuje — wylogowanie na laptopie nie ma
+  wywalać drugiego urządzenia. Revoke jest świadomym, osobnym gestem.
+- **Test:** dwie sesje (dwa cookie), revoke z pierwszej → druga dostaje 401.
+
+### Step 4 (P0): MCP — access token przestaje ufać samemu podpisowi → `handlers/mcp/`
+
+**Problem:** `user_id_from_access_token` (`oauth.py:422`) sprawdza wyłącznie podpis. Po usunięciu
+maila z `/bodysync/auth/allowed_emails` wcześniej wydany refresh token nadal wymienia się na access
+i czyta dane **przez 30 dni**. To scenariusz offboardingu — jedyny realny w modelu 2 userów.
+
+- **Zmienia:** `_mint_access_token` niesie `tv`; `mcp/auth.py::resolve_user_id` po weryfikacji
+  podpisu robi `GetItem` na profil i porównuje `tv` (ta sama funkcja co `shared/session.py`, ale bez
+  cookie). Brak profilu → 401. Efekt: revoke z Step 3 ubija też konektory.
+- **Test:** `tests/handlers/mcp/test_handler.py` — token wydany przed bumpem dostaje 401 na `POST /mcp`.
+
+### Step 5 (P0): MCP — refresh tokeny odwoływalne per user → `handlers/mcp/` + `mcp.tf` + `me_delete`
+
+**Problem:** itemy `MCP_REFRESH#{sha256}` nie da się wyszukać po użytkowniku, więc ani `me_delete`
+ich nie sprząta (pkt 3 audytu), ani nie ma jak zrobić "odłącz konektory".
+
+- **Zmienia:** klucz na `PK=MCP_REFRESH#{user_id}`, `SK=TOKEN#{sha256(secret)}`; token w postaci
+  `{user_id}.{secret}` (posiadacz i tak zna swój `user_id`), z walidacją formatu przy wymianie.
+  Revoke-all = `Query` po PK + `batch_delete`.
+- **IaC:** `mcp.tf` — do statementu `DDBOAuthState` dochodzi `dynamodb:Query` i `BatchWriteItem`
+  (nadal wyłącznie na prefiksach `MCP_*`, zero dostępu do `USER#*` na zapis).
+- **Zmienia:** `me_delete/service.py` — krok 6: revoke wszystkich refresh tokenów usera.
+- **⚠️ Breaking:** zmiana formatu unieważnia obecnie wydany refresh token — po deployu trzeba raz
+  przepiąć konektor w Claude. Świadomie, i tak jest to pożądane po audycie.
+- **Test:** revoke-all kasuje oba tokeny usera A i nie tyka usera B; `me_delete` zostawia tabelę bez
+  wierszy `MCP_REFRESH#{user_id}`.
+
+### Step 6 (P1): throttle rejestracji DCR → `modules/api-gateway/`
+
+**Problem:** `POST /mcp/register` to nieuwierzytelniony zapis do DDB (zgodny z RFC 7591, ale jednak).
+Jedyny hamulec to 50 req/s na cały stage — czyli miliony wierszy `MCP_CLIENT#*` dziennie, jeśli ktoś
+się uprze. To nie wyciek, to koszt i śmieci.
+
+- **Zmienia:** `route_settings` dla `POST /mcp/register` → 1 req/s / burst 3 (wzorem override'u dla
+  advisor chat); `for_each` na mapie override'ów, bo są już dwa.
+- **Rozważyć:** krótszy TTL rejestracji (90 d → 24 h), przedłużany dopiero przy pierwszym wydanym
+  kodzie. Klient, który nigdy nie doszedł do zgody, nie zasługuje na kwartał w tabeli.
+
+### Step 7 (P1): alarmy na anomalie auth → `cloudwatch.tf`
+
+**Problem:** jedyny alarm to koszt Anthropic. Seria 401 na `/mcp/token`, 403 na `/api/auth/google`
+czy nieudane bearery HAE przejdą niezauważone. Przy dwóch userach **każdy** taki spike jest z
+definicji podejrzany — to najtańszy detection, jaki da się mieć.
+
+- **Tworzy:** metric filter na logach API GW (`$context.status` 401/403) + alarm > 20 / 5 min →
+  istniejący Telegram pipeline (ten sam SNS co cost guard, per `feedback_telegram_autonomous_off`
+  — alarmy tak, daily push nie).
+
+### Step 8 (P2): backlog higieniczny
+
+- `sub` sesji wpięty w `request_token` ekranu zgody i porównywany w `POST /mcp/authorize`
+  (dziś chroni `SameSite=Lax` + to, że request_token wymaga ważnej sesji — ale to trzy linijki).
+- Reuse detection refresh tokenów: użycie już skasowanego tokenu unieważnia całą rodzinę usera.
+  Przy 30-dniowym oknie to jedyny sygnał, że token wyciekł.
+- `mcp_return_to` obsłużone na froncie (dziś `oauth.py:304` przekierowuje z tym parametrem, a
+  `apps/web/src` nie ma ani jednego trafienia — flow konektora dla wylogowanej przeglądarki
+  dead-enduje na dashboardzie). **Przy dopinaniu walidować prefiks
+  `https://api.bodysync.pl/mcp/authorize`**, inaczej robi się open redirect tam, gdzie go dziś nie ma.
+- CSP `style-src 'unsafe-inline'` → nonce (znany backlog W4 z audytu 2026-05-16).
+
+**Świadomie NIE robimy:** podpisu webhooka Strava (Strava nie podpisuje eventów — identity check po
+`subscription_id`/`owner_id` z body jest spoofowalny, ale fetcher i tak pyta Strava API o prawdziwe
+dane po `object_id`, więc skutkiem jest co najwyżej wymuszone zapytanie). Ograniczenie dostawcy, nie
+nasz błąd.
