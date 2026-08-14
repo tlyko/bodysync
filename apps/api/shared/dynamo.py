@@ -85,6 +85,31 @@ def delete_item_if_exists(pk: str, sk: str) -> dict[str, Any] | None:
     return dict(resp.get("Attributes") or {}) or None
 
 
+def increment_attr(pk: str, sk: str, attr: str, *, by: int = 1) -> int:
+    """Atomowy `ADD` na liczbowym atrybucie — zwraca wartość PO inkrementacji.
+
+    DDB `ADD` traktuje brakujący atrybut jak 0, więc pierwszy bump na profilu
+    bez `token_version` daje 1 (nie wybucha). Atomowość ma znaczenie: dwa
+    równoległe "wyloguj wszędzie" nie mogą się nawzajem nadpisać, bo obie
+    sesje muszą zostać unieważnione.
+
+    Item musi istnieć — `UpdateItem` stworzyłby pusty wiersz z samym
+    licznikiem, więc wymuszamy `attribute_exists(PK)` i przepuszczamy
+    `ConditionalCheckFailedException` do wołającego.
+    """
+    resp = _table.update_item(
+        Key={"PK": pk, "SK": sk},
+        UpdateExpression="ADD #a :inc",
+        ConditionExpression="attribute_exists(PK)",
+        ExpressionAttributeNames={"#a": attr},
+        ExpressionAttributeValues={":inc": by},
+        ReturnValues="UPDATED_NEW",
+    )
+    # DDB zwraca liczby jako Decimal; `str()` w środku bo boto3 typuje wartość
+    # jako union z bytes, którego `int()` nie przyjmuje w strict mode.
+    return int(str(resp["Attributes"][attr]))
+
+
 def batch_delete(keys: list[tuple[str, str]]) -> None:
     """Batch delete items by `(PK, SK)` tuples — używane przez chat history
     wipe (Sprint 11 prep — "Wyczyść rozmowę" przycisk).

@@ -24,12 +24,19 @@ class AuthError(Exception):
 JwtSecretMisconfiguredError = SecretMisconfiguredError
 
 
-def mint_jwt(user_id: str, *, ttl_days: int = JWT_TTL_DAYS) -> str:
-    """Sign a JWT carrying user_id + exp."""
+def mint_jwt(user_id: str, *, ttl_days: int = JWT_TTL_DAYS, token_version: int = 0) -> str:
+    """Sign a JWT carrying user_id + exp + token_version.
+
+    `tv` to licznik unieważnień trzymany w `USER#{id}/PROFILE`. Sam token
+    pozostaje bezstanowy — dopiero `shared.session.resolve_session` porównuje
+    claim z aktualną wartością w profilu i odrzuca sesje sprzed bumpa.
+    Domyślne `0` = "profil bez licznika", czyli stan przed Sprintem 12.
+    """
     secret = load_secure_secret(JWT_SSM_PARAM, min_length=JWT_SECRET_MIN_LENGTH)
     now = datetime.now(UTC)
     payload = {
         "user_id": user_id,
+        "tv": token_version,
         "iat": int(now.timestamp()),
         "exp": int((now + timedelta(days=ttl_days)).timestamp()),
     }

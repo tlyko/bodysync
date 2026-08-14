@@ -75,6 +75,18 @@ def _resolve_user_id(email: str) -> str:
     raise EmailNotAllowedError(f"email not on allowlist: {email}")
 
 
+def _token_version(profile: dict[str, Any]) -> int:
+    """Licznik unieważnień sesji z profilu. Brak / śmieć = `0`.
+
+    Duplikat `shared.session.current_token_version`, ale bez `GetItem` —
+    profil jest tu już wczytany dla merge'a.
+    """
+    try:
+        return int(profile.get("token_version", 0))
+    except (TypeError, ValueError):
+        return 0
+
+
 def login(req: LoginRequest) -> tuple[LoginResponse, str]:
     """Zwraca (response_body, jwt_token). Handler dokleja Set-Cookie."""
     idinfo = _verify_google_token(req.id_token)
@@ -115,5 +127,9 @@ def login(req: LoginRequest) -> tuple[LoginResponse, str]:
 
     put_item(pk=f"USER#{user_id}", sk="PROFILE", attrs=merged)
 
-    token = mint_jwt(user_id)
+    # `token_version` z profilu wędruje do claimu `tv` — świeżo wydane cookie
+    # musi mieć aktualną wartość, inaczej `resolve_session` odrzuciłoby je
+    # zaraz po zalogowaniu (u kogoś, kto kiedykolwiek zrobił "wyloguj wszędzie").
+    # Czytamy z `existing`, bo merge go zachowuje i nie kosztuje dodatkowego RCU.
+    token = mint_jwt(user_id, token_version=_token_version(existing))
     return LoginResponse(user_id=user_id, email=email, name=name), token
