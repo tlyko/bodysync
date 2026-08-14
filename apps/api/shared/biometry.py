@@ -67,10 +67,21 @@ def cutoff_iso(days: int) -> str:
     return (today - timedelta(days=days - 1)).isoformat()
 
 
+def today_iso() -> str:
+    """Dzisiejsza data w LOCAL_TZ, ISO YYYY-MM-DD."""
+    return datetime.now(LOCAL_TZ).date().isoformat()
+
+
 def aggregate_biometry_days(user_id: str, *, days: int) -> list[dict[str, Any]]:
-    """BIOMETRY rows z ostatnich N dni, pogrupowane po dacie i zagregowane
-    per metric_name. Zwraca `[{"date": "YYYY-MM-DD", "metrics": {...}}, ...]`
-    posortowane malejąco po dacie (najnowsze pierwsze).
+    """BIOMETRY z ostatnich N dni. Cienka nakładka na `aggregate_biometry_range`."""
+    return aggregate_biometry_range(user_id, date_from=cutoff_iso(days), date_to=today_iso())
+
+
+def aggregate_biometry_range(user_id: str, *, date_from: str, date_to: str) -> list[dict[str, Any]]:
+    """BIOMETRY rows z zakresu dat (obie granice inclusive), pogrupowane po
+    dacie i zagregowane per metric_name. Zwraca
+    `[{"date": "YYYY-MM-DD", "metrics": {...}}, ...]` posortowane malejąco
+    po dacie (najnowsze pierwsze).
 
     Format SK po PR #46 (Sprint 3.5):
       BIOMETRY#YYYY-MM-DD#metric_name              — snapshot (weight, body_fat,
@@ -90,10 +101,14 @@ def aggregate_biometry_days(user_id: str, *, days: int) -> list[dict[str, Any]]:
     # suffixu, obejmuje wszystkie BIOMETRY rows aż do następnej SK kategorii.
     # Pre-PR-#194: query_by_pk(BIOMETRY#) + Python filter — ciągnęliśmy
     # WSZYSTKIE biometry rows usera od początku, ryzyko 1MB cap truncation.
+    #
+    # Górna granica `BIOMETRY#{date_to}#~` zamiast `BIOMETRY#{date_to}` —
+    # bez tilde BETWEEN uciąłby rows z tego samego dnia, bo `BIOMETRY#2026-08-14`
+    # sortuje się PRZED `BIOMETRY#2026-08-14#weight`.
     items = query_by_pk_sk_range(
         f"USER#{user_id}",
-        sk_start=f"BIOMETRY#{cutoff_iso(days)}",
-        sk_end="BIOMETRY#~",
+        sk_start=f"BIOMETRY#{date_from}",
+        sk_end=f"BIOMETRY#{date_to}#~",
     )
 
     # Per-day, per-metric — zbieramy buckety. Cumulative dostają specjalny
@@ -165,19 +180,24 @@ def _collapse_cumulative(by_date: dict[str, dict[str, Any]]) -> None:
 
 
 def fetch_workouts(user_id: str, *, days: int) -> list[dict[str, Any]]:
-    """WORKOUT rows z ostatnich N dni dla user_id, najnowsze pierwsze.
+    """WORKOUT z ostatnich N dni. Cienka nakładka na `fetch_workouts_range`."""
+    return fetch_workouts_range(user_id, date_from=cutoff_iso(days), date_to=today_iso())
+
+
+def fetch_workouts_range(user_id: str, *, date_from: str, date_to: str) -> list[dict[str, Any]]:
+    """WORKOUT rows z zakresu dat (inclusive), najnowsze pierwsze.
 
     SK format: `WORKOUT#{date}#{training-slug}#{exercise_number}`. SK range
     query DDB `BETWEEN` (mirror BIOMETRY pattern). Tilde `~` w upper bound
-    chwyta wszystkie sufiksy aż do next SK kategorii.
+    chwyta wszystkie sufiksy dnia `date_to`.
 
     Sortowanie: DDB Query zwraca ascending po SK; reverse w aplikacji →
     najnowsze daty pierwsze.
     """
     items = query_by_pk_sk_range(
         f"USER#{user_id}",
-        sk_start=f"WORKOUT#{cutoff_iso(days)}",
-        sk_end="WORKOUT#~",
+        sk_start=f"WORKOUT#{date_from}",
+        sk_end=f"WORKOUT#{date_to}#~",
     )
 
     out: list[dict[str, Any]] = []

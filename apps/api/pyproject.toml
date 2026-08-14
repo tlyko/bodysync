@@ -43,6 +43,13 @@ dev = [
     "numpy>=2.0",
     "openai>=1.50",
     "faiss-cpu>=1.9",
+    # Oficjalne SDK MCP — WYŁĄCZNIE test-time. `tests/handlers/mcp/
+    # test_conformance.py` waliduje nim kształt naszych odpowiedzi JSON-RPC
+    # (InitializeResult / ListToolsResult / CallToolResult). To jest cała
+    # mitygacja decyzji z ADR-010 o pisaniu protokołu ręcznie zamiast przez
+    # FastMCP — dlatego pakiet NIE MOŻE trafić do handlers/mcp/requirements.txt,
+    # bo ciągnie pydantica (~490 ms cold startu) i starlette.
+    "mcp>=1.20",
 ]
 
 # Sprint 6.2 PR2 Step 2 — `scripts/seed_recipes.py` deps. Local-only,
