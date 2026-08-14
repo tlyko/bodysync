@@ -42,6 +42,12 @@ locals {
     # Telegram bot dla cost-guard SNS subscriber (zastępuje email subscription
     # po Gmail auto-unsub). Owner wpisuje token od @BotFather po deploy.
     "/bodysync/telegram/bot_token",
+    # ADR-010 — podpisuje access i request tokeny serwera MCP. ŚWIADOMIE
+    # osobny od `/bodysync/jwt/signing_secret`: gdyby dzieliły klucz,
+    # `shared.auth.verify_jwt` przyjęłoby token MCP jako cookie sesyjne
+    # i dostęp read-only stałby się pełnym zapisem. Owner wpisuje wartość
+    # po deployu (min. 32 bajty, np. `openssl rand -base64 48`).
+    "/bodysync/mcp/token_signing_secret",
   ]
 
   ssm_strings = [
