@@ -293,3 +293,112 @@ def test_token_endpoint_errors_use_rfc6749_codes(mcp_env: Any) -> None:
 
     assert resp["statusCode"] == 400
     assert json.loads(resp["body"])["error"] == "invalid_grant"
+
+
+# ------------------------------------------- regresja: base64 body (prod bug)
+
+
+def _b64_event(route: str, form: dict[str, str], **kw: Any) -> dict[str, Any]:
+    """Event tak, jak API Gateway HTTP v2 realnie przysyła formularz:
+    body zakodowane base64 + `isBase64Encoded: true`."""
+    import base64
+
+    event = _event(route, **kw)
+    event["body"] = base64.b64encode(urlencode(form).encode()).decode()
+    event["isBase64Encoded"] = True
+    return event
+
+
+def test_consent_form_arrives_base64_encoded(mcp_env: Any) -> None:
+    """Regresja produkcyjna (2026-08-14): po kliknięciu "Zezwalam" serwer
+    zwracał `brak request_token`.
+
+    API Gateway HTTP v2 traktuje `application/x-www-form-urlencoded` jako
+    binarny i koduje body base64, w przeciwieństwie do `application/json`.
+    Czytanie `event["body"]` wprost działało więc dla DCR, ale po cichu
+    zwracało śmieci dla formularza zgody.
+    """
+    from handlers.mcp import oauth
+
+    _seed_profile()
+    client_id = _register(mcp_env)
+    request = oauth.validate_authorize_request(_authorize_query(client_id))
+    token = oauth.mint_request_token(request)
+
+    resp = mcp_env.handler(
+        _b64_event("POST /mcp/authorize", {"request_token": token}, cookies=_session_cookie()),
+        _Ctx(),
+    )
+
+    assert resp["statusCode"] == 302, resp["body"]
+    assert resp["headers"]["Location"].startswith(CLAUDE_REDIRECT)
+
+
+def test_token_endpoint_accepts_base64_form(mcp_env: Any) -> None:
+    """Ta sama pułapka dotyczy wymiany kodu — Claude wysyła ją tym samym
+    content-type co przeglądarka formularz."""
+    from handlers.mcp import oauth
+
+    client_id = _register(mcp_env)
+    request = oauth.validate_authorize_request(_authorize_query(client_id))
+    code = oauth.issue_authorization_code(request, user_id="tomek")
+
+    resp = mcp_env.handler(
+        _b64_event(
+            "POST /mcp/token",
+            {
+                "grant_type": "authorization_code",
+                "code": code,
+                "client_id": client_id,
+                "redirect_uri": CLAUDE_REDIRECT,
+                "code_verifier": VERIFIER,
+            },
+        ),
+        _Ctx(),
+    )
+
+    assert resp["statusCode"] == 200, resp["body"]
+    assert json.loads(resp["body"])["token_type"] == "Bearer"
+
+
+def test_json_rpc_also_survives_base64_encoding(mcp_env: Any) -> None:
+    """Defensywnie: gdyby API Gateway kiedykolwiek zakodował też JSON-a."""
+    import base64
+
+    from handlers.mcp import oauth
+
+    client_id = _register(mcp_env)
+    request = oauth.validate_authorize_request(_authorize_query(client_id))
+    code = oauth.issue_authorization_code(request, user_id="tomek")
+    tokens = oauth.handle_token_request(
+        {
+            "grant_type": "authorization_code",
+            "code": code,
+            "client_id": client_id,
+            "redirect_uri": CLAUDE_REDIRECT,
+            "code_verifier": VERIFIER,
+        }
+    )
+
+    event = _event("POST /mcp", headers={"authorization": f"Bearer {tokens['access_token']}"})
+    event["body"] = base64.b64encode(
+        json.dumps({"jsonrpc": "2.0", "id": 1, "method": "tools/list"}).encode()
+    ).decode()
+    event["isBase64Encoded"] = True
+
+    resp = mcp_env.handler(event, _Ctx())
+
+    assert resp["statusCode"] == 200
+    assert len(json.loads(resp["body"])["result"]["tools"]) == 4
+
+
+def test_malformed_base64_does_not_crash(mcp_env: Any) -> None:
+    """Uszkodzone body ma dać czytelny błąd, nie 500."""
+    event = _event("POST /mcp/token")
+    event["body"] = "to-nie-jest-base64!!!"
+    event["isBase64Encoded"] = True
+
+    resp = mcp_env.handler(event, _Ctx())
+
+    assert resp["statusCode"] == 400
+    assert json.loads(resp["body"])["error"] == "unsupported_grant_type"

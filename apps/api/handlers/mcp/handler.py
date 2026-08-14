@@ -17,6 +17,7 @@ czego streamować (ADR-010).
 
 from __future__ import annotations
 
+import base64
 import json
 from typing import Any
 from urllib.parse import parse_qs
@@ -77,13 +78,32 @@ def _query(event: dict[str, Any]) -> dict[str, Any]:
     return event.get("queryStringParameters") or {}
 
 
+def raw_body(event: dict[str, Any]) -> str:
+    """Body requestu, zdekodowane gdy API Gateway zakodował je base64.
+
+    HTTP API v2 traktuje `application/json` jako tekst i przekazuje wprost,
+    ale `application/x-www-form-urlencoded` uznaje za binarny i **koduje
+    base64**, ustawiając `isBase64Encoded: true`. Czytanie `event["body"]`
+    wprost działa więc dla JSON-a i po cichu zwraca śmieci dla formularzy —
+    czego skutkiem był `brak request_token` po kliknięciu "Zezwalam"
+    na produkcji.
+    """
+    raw = event.get("body") or ""
+    if not event.get("isBase64Encoded"):
+        return raw
+    try:
+        return base64.b64decode(raw).decode("utf-8")
+    except (ValueError, UnicodeDecodeError):
+        return ""
+
+
 def _form(event: dict[str, Any]) -> dict[str, str]:
     """Parsuje `application/x-www-form-urlencoded`.
 
-    RFC 6749 §4.1.3 — Claude wysyła tak zarówno wymianę kodu, jak i refresh.
+    RFC 6749 §4.1.3 — Claude wysyła tak zarówno wymianę kodu, jak i refresh,
+    a przeglądarka tak samo wysyła formularz z ekranu zgody.
     """
-    raw = event.get("body") or ""
-    return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+    return {k: v[0] for k, v in parse_qs(raw_body(event), keep_blank_values=True).items()}
 
 
 def _session_user(event: dict[str, Any]) -> dict[str, Any] | None:
@@ -126,7 +146,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
 
 def _handle_register(event: dict[str, Any]) -> dict[str, Any]:
     try:
-        body = json.loads(event.get("body") or "{}")
+        body = json.loads(raw_body(event) or "{}")
     except json.JSONDecodeError as exc:
         raise oauth.OAuthError("invalid_request", "body nie jest poprawnym JSON-em") from exc
     if not isinstance(body, dict):
@@ -180,7 +200,7 @@ def _handle_authorize_post(event: dict[str, Any], *, request_id: str) -> dict[st
 
 
 def _handle_rpc(event: dict[str, Any], *, request_id: str) -> dict[str, Any]:
-    raw = event.get("body") or ""
+    raw = raw_body(event)
     if len(raw) > MAX_BODY_BYTES:
         return _response(413, {"error": "payload_too_large"})
 
