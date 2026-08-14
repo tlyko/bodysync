@@ -1,21 +1,16 @@
 """Uwierzytelnienie requestów MCP — Bearer token z flow OAuth 2.0.
 
-**Ten moduł jest celowo niekompletny do PR 4.** Serwer autoryzacji (dokumenty
-`.well-known`, `/register`, `/authorize`, `/token`, PKCE S256) jest osobnym
-krokiem — patrz ADR-010, decyzja 3. Do tego czasu `resolve_user_id` odrzuca
-KAŻDY request, więc handler nie może zwrócić danych bez autoryzacji nawet
-przez pomyłkę.
-
-To nie jest tymczasowa dziura: handler nie jest podpięty do API Gateway
-(Terraform dochodzi w PR 5), więc nic nie jest publicznie wystawione.
-Kształt odpowiedzi 401 + `WWW-Authenticate` jest już zgodny ze spec, bo to
-on uruchamia discovery po stronie klienta — PR 4 dokłada wyłącznie walidację
-tokenu.
+Token wystawia nasz własny serwer autoryzacji (`handlers/mcp/oauth.py`).
+Podpisany jest **osobnym** sekretem niż cookie sesyjne aplikacji, więc token
+MCP nie może zostać użyty jako sesja `bodysync_session` — patrz komentarz
+przy `oauth.TOKEN_SECRET_PARAM`.
 """
 
 from __future__ import annotations
 
 from typing import Any
+
+from handlers.mcp.oauth import OAuthError, user_id_from_access_token
 
 
 class AuthError(Exception):
@@ -39,12 +34,11 @@ def bearer_token(event: dict[str, Any]) -> str | None:
 
 
 def resolve_user_id(event: dict[str, Any]) -> str:
-    """Zwraca `user_id` właściciela tokenu albo rzuca `AuthError`.
-
-    PR 4 podmieni ciało na walidację tokenu wystawionego przez nasz serwer
-    autoryzacji (podpis, exp, mapowanie token → user_id w DDB).
-    """
+    """Zwraca `user_id` właściciela tokenu albo rzuca `AuthError`."""
     token = bearer_token(event)
     if token is None:
         raise AuthError("brak nagłówka Authorization: Bearer")
-    raise AuthError("weryfikacja tokenu nie jest jeszcze zaimplementowana")
+    try:
+        return user_id_from_access_token(token)
+    except OAuthError as exc:
+        raise AuthError(exc.description) from exc
