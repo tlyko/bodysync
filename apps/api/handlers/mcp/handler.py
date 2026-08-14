@@ -1,69 +1,188 @@
-"""AWS Lambda entry point serwera MCP — Streamable HTTP (POST, bez SSE).
+"""AWS Lambda entry point serwera MCP — endpoint danych + serwer autoryzacji.
 
-`POST /mcp` przyjmuje pojedynczą wiadomość JSON-RPC 2.0 i odpowiada
-`application/json`. SSE nie jest używane świadomie: API Gateway HTTP nie
+Routing (wszystkie trasy trafiają w tę samą Lambdę):
+
+  POST /mcp                                     JSON-RPC 2.0, wymaga Bearer
+  GET  /.well-known/oauth-protected-resource    RFC 9728
+  GET  /.well-known/oauth-authorization-server  RFC 8414
+  POST /mcp/register                            RFC 7591 DCR
+  GET  /mcp/authorize                           ekran zgody
+  POST /mcp/authorize                           wydanie kodu
+  POST /mcp/token                               wymiana kodu / refresh
+
+`POST /mcp` odpowiada `application/json`, nie SSE — API Gateway HTTP nie
 wspiera response streamingu, a przy czterech narzędziach read-only nie ma
 czego streamować (ADR-010).
-
-Auth: OAuth 2.0 Bearer. Request bez ważnego tokenu dostaje `401` z nagłówkiem
-`WWW-Authenticate` wskazującym protected resource metadata — to jest handshake,
-od którego Claude zaczyna flow autoryzacji.
 """
 
 from __future__ import annotations
 
 import json
 from typing import Any
+from urllib.parse import parse_qs
 
-from handlers.mcp import protocol
+from handlers.mcp import oauth, protocol
 from handlers.mcp.auth import AuthError, resolve_user_id
+from shared.auth import AuthError as SessionAuthError
+from shared.auth import verify_jwt
+from shared.dynamo import get_item
+from shared.http import extract_session_cookie
 from shared.logging import get_logger
 
 logger = get_logger("mcp")
 
-# Adres protected resource metadata. PR 4 wystawi ten dokument; nagłówek
-# wskazuje na niego już teraz, bo to on uruchamia discovery po stronie klienta.
-RESOURCE_METADATA_URL = "https://api.bodysync.pl/.well-known/oauth-protected-resource"
-
+RESOURCE_METADATA_URL = f"{oauth.ISSUER}/.well-known/oauth-protected-resource"
 MAX_BODY_BYTES = 256 * 1024
 
 
 def _response(
-    status: int, body: dict[str, Any] | None, headers: dict[str, str] | None = None
+    status: int,
+    body: str | dict[str, Any] | None,
+    headers: dict[str, str] | None = None,
+    *,
+    content_type: str = "application/json",
 ) -> dict[str, Any]:
-    out: dict[str, Any] = {
+    payload = json.dumps(body, ensure_ascii=False) if isinstance(body, dict) else (body or "")
+    return {
         "statusCode": status,
-        "headers": {"Content-Type": "application/json", **(headers or {})},
+        "headers": {
+            "Content-Type": content_type,
+            # Dokumenty discovery i odpowiedzi tokenowe nigdy nie mogą
+            # wylądować w cache pośrednika.
+            "Cache-Control": "no-store",
+            **(headers or {}),
+        },
+        "body": payload,
     }
-    out["body"] = json.dumps(body, ensure_ascii=False) if body is not None else ""
-    return out
 
 
 def _unauthorized(detail: str) -> dict[str, Any]:
     """401 z WWW-Authenticate — start flow OAuth po stronie klienta.
 
-    Spec wymaga statusu 401; Claude nie honoruje `WWW-Authenticate` na 200.
+    Spec: Claude nie honoruje `WWW-Authenticate` na odpowiedzi 200, więc
+    status MUSI być 401, a `resource_metadata` musi wskazywać dokument RFC 9728.
     """
     return _response(
         401,
-        {"error": "unauthorized", "detail": detail},
+        {"error": "unauthorized", "error_description": detail},
         {"WWW-Authenticate": f'Bearer resource_metadata="{RESOURCE_METADATA_URL}"'},
     )
 
 
+def _oauth_error(exc: oauth.OAuthError) -> dict[str, Any]:
+    return _response(exc.status, oauth.error_body(exc))
+
+
+def _query(event: dict[str, Any]) -> dict[str, Any]:
+    return event.get("queryStringParameters") or {}
+
+
+def _form(event: dict[str, Any]) -> dict[str, str]:
+    """Parsuje `application/x-www-form-urlencoded`.
+
+    RFC 6749 §4.1.3 — Claude wysyła tak zarówno wymianę kodu, jak i refresh.
+    """
+    raw = event.get("body") or ""
+    return {k: v[0] for k, v in parse_qs(raw, keep_blank_values=True).items()}
+
+
+def _session_user(event: dict[str, Any]) -> dict[str, Any] | None:
+    """User zalogowany cookie `bodysync_session`, albo None."""
+    token = extract_session_cookie(event)
+    if not token:
+        return None
+    try:
+        payload = verify_jwt(token)
+    except SessionAuthError:
+        return None
+    return payload if isinstance(payload.get("user_id"), str) else None
+
+
 def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
     request_id = getattr(context, "aws_request_id", "local")
+    route = event.get("routeKey", "")
 
-    method = (event.get("requestContext") or {}).get("http", {}).get("method", "POST")
-    if method != "POST":
-        # Streamable HTTP dopuszcza GET dla kanału SSE — my go nie wystawiamy.
+    try:
+        if route == "GET /.well-known/oauth-protected-resource":
+            return _response(200, oauth.protected_resource_metadata())
+        if route == "GET /.well-known/oauth-authorization-server":
+            return _response(200, oauth.authorization_server_metadata())
+        if route == "POST /mcp/register":
+            return _handle_register(event)
+        if route == "GET /mcp/authorize":
+            return _handle_authorize_get(event)
+        if route == "POST /mcp/authorize":
+            return _handle_authorize_post(event, request_id=request_id)
+        if route == "POST /mcp/token":
+            return _response(200, oauth.handle_token_request(_form(event)))
+        if route == "POST /mcp":
+            return _handle_rpc(event, request_id=request_id)
+    except oauth.OAuthError as exc:
+        logger.info("mcp_oauth_error", extra={"request_id": request_id, "code": exc.code})
+        return _oauth_error(exc)
+
+    return _response(404, {"error": "not_found", "error_description": f"nieznana trasa: {route}"})
+
+
+def _handle_register(event: dict[str, Any]) -> dict[str, Any]:
+    try:
+        body = json.loads(event.get("body") or "{}")
+    except json.JSONDecodeError as exc:
+        raise oauth.OAuthError("invalid_request", "body nie jest poprawnym JSON-em") from exc
+    if not isinstance(body, dict):
+        raise oauth.OAuthError("invalid_request", "oczekiwano obiektu JSON")
+    return _response(201, oauth.register_client(body))
+
+
+def _handle_authorize_get(event: dict[str, Any]) -> dict[str, Any]:
+    request = oauth.validate_authorize_request(_query(event))
+
+    session = _session_user(event)
+    if session is None:
+        # Brak sesji → login na froncie, potem powrót tutaj.
         return _response(
-            405, {"error": "method not allowed", "detail": "serwer przyjmuje wyłącznie POST"}
+            302, None, {"Location": oauth.login_redirect_url(event.get("rawQueryString") or "")}
         )
 
+    page = oauth.consent_page(
+        request,
+        request_token=oauth.mint_request_token(request),
+        user_email=_profile_email(str(session["user_id"])),
+    )
+    return _response(200, page, content_type="text/html; charset=utf-8")
+
+
+def _profile_email(user_id: str) -> str:
+    """Mail do wyświetlenia na ekranie zgody. JWT sesyjny niesie tylko
+    `user_id`, a przy udzielaniu dostępu warto widzieć, które to konto."""
+    profile = get_item(f"USER#{user_id}", "PROFILE") or {}
+    email = profile.get("email")
+    return str(email) if isinstance(email, str) else user_id
+
+
+def _handle_authorize_post(event: dict[str, Any], *, request_id: str) -> dict[str, Any]:
+    session = _session_user(event)
+    if session is None:
+        # Zgoda bez ważnej sesji — nie ma komu udzielić dostępu.
+        raise oauth.OAuthError("access_denied", "sesja wygasła, zaloguj się ponownie", status=401)
+
+    request = oauth.verify_request_token(_form(event).get("request_token"))
+    code = oauth.issue_authorization_code(request, user_id=str(session["user_id"]))
+    logger.info(
+        "mcp_authorize_granted",
+        extra={
+            "request_id": request_id,
+            "user_id": session["user_id"],
+            "client_id": request["client_id"],
+        },
+    )
+    return _response(302, None, {"Location": oauth.success_redirect_url(request, code)})
+
+
+def _handle_rpc(event: dict[str, Any], *, request_id: str) -> dict[str, Any]:
     raw = event.get("body") or ""
     if len(raw) > MAX_BODY_BYTES:
-        return _response(413, {"error": "payload too large"})
+        return _response(413, {"error": "payload_too_large"})
 
     try:
         user_id = resolve_user_id(event)
@@ -88,9 +207,7 @@ def handler(event: dict[str, Any], context: Any) -> dict[str, Any]:
         )
 
     reply = protocol.dispatch(message, user_id=user_id)
-
     if reply is None:
-        # Notyfikacja — JSON-RPC nie przewiduje odpowiedzi. 202 bez ciała.
+        # Notyfikacja — JSON-RPC nie przewiduje odpowiedzi.
         return _response(202, None)
-
     return _response(200, reply)
