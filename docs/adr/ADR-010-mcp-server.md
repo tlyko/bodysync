@@ -90,7 +90,16 @@ Wspierane typy auth: `oauth_dcr` i `oauth_cimd` (out of the box), `static_header
 anthropics/claude-ai-mcp #10, #110, #644, #685 raportują, że dialog "Add custom connector"
 na planach indywidualnych pokazuje tylko OAuth Client ID/Secret), `none`.
 
-Na Pro/Max realnie zostaje OAuth.
+**Zweryfikowane na koncie właściciela (2026-08-14):** dialog `Customize > Connectors >
+Add custom connector` zawiera pola Name, Remote MCP server URL oraz — pod Advanced
+settings — wyłącznie **OAuth Client ID (optional)** i **OAuth Client Secret (optional)**.
+Sekcji Request headers **nie ma**, więc `static_headers` odpada nie tylko teoretycznie.
+
+Na Pro/Max realnie zostaje OAuth. Oba pola OAuth są opcjonalne — pozostawione puste
+uruchamiają ścieżkę DCR, w której Claude sam rejestruje klienta przez `/register`,
+a właściciel przy dodawaniu connectora wkleja **wyłącznie URL**. To przesądza wybór
+DCR nad wariantem z pre-registered client ID: zero ręcznej konfiguracji i zero
+sekretów przenoszonych między systemami.
 
 **Decyzja:** własny authorization server w tej samej Lambdzie:
 
