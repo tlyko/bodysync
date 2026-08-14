@@ -52,6 +52,23 @@ zgodne ze spec, skoro nie deklarujemy tych capabilities.
 **Decyzja:** surowy JSON-RPC 2.0, bez `pydantica`, Lambda 1024 MB (~2× vCPU, ta sama
 sztuczka co PR #170). Cel: **~700 ms cold, ~15 ms warm, bundle 15 MB.**
 
+> **Weryfikacja po deployu (2026-08-14).** Bundle wyszedł **13.97 MB** — zgodnie
+> z założeniem. Cold start na produkcji to jednak **881 ms**, nie ~700 ms —
+> pudło o ~28%. Powód: szacunek opierał się wyłącznie na rozmiarze bundla
+> (`activities-list`, 13.9 MB → 684 ms), a handler MCP importuje przy starcie
+> wyraźnie więcej modułów: `jwt`, `hashlib`, `base64`, `html`, `urllib.parse`
+> plus pięć modułów `shared/`. Liczba i waga importów okazała się drugim
+> czynnikiem obok samego rozmiaru — ten sam mechanizm, który w tabeli wyżej
+> widać przy `pydanticu`. Zastrzeżenie: jedna próbka.
+>
+> Warm wyszedł **lepiej** niż zakładano: **2 ms** (vs ~15 ms). Zużycie pamięci
+> to 82 MB z 1024 MB — potwierdza, że 1024 MB kupujemy wyłącznie dla vCPU,
+> nie dla RAM-u. Warto kiedyś zmierzyć 512 MB dla porównania.
+>
+> Decyzja się broni: 881 ms vs szacowane ~1.3–1.6 s dla FastMCP. Ale wniosek
+> na przyszłość jest taki, że **rozmiar bundla sam w sobie nie wystarcza do
+> przewidzenia init** — trzeba patrzeć też na drzewo importów.
+
 **Mitygacja głównego minusa (dryf względem spec):** testy zgodności pisane **oficjalnym
 klientem `mcp`** w `requirements-dev.txt`. SDK weryfikuje handshake, ale nie ląduje
 w bundlu Lambdy — pewność zbliżona do FastMCP przy zerowym koszcie cold startu.
@@ -176,6 +193,27 @@ Poza zakresem: Strava, streamy (moc/kadencja), HRV, Body Battery, plan treningow
 - Druga ścieżka odczytu obok REST. Mitygacja: `shared/biometry.py`.
 - `static_headers` może wyjść z bety i uprościć całość — wtedy OAuth zostaje jako
   poprawniejszy wariant, ale warto to odnotować przy rewizji.
+
+## Pułapki napotkane przy wdrożeniu
+
+**API Gateway HTTP v2 koduje formularze w base64.** `application/json` dociera
+do Lambdy jako czysty tekst, ale `application/x-www-form-urlencoded` przychodzi
+zakodowane base64 z flagą `isBase64Encoded: true`. Handler czytający
+`event["body"]` wprost działa więc dla JSON-a i **po cichu** parsuje formularz
+do pustego dicta. U nas objawiło się to jako `brak request_token` po kliknięciu
+„Zezwalam" na ekranie zgody (PR #224). Dotyczy obu form-owych endpointów OAuth:
+`/mcp/authorize` i `/mcp/token`.
+
+Testy tego nie złapały, bo fixture budował body jako czysty `urlencode(...)` —
+czyli tak, jak było wygodnie, a nie tak, jak realnie wygląda event z API
+Gateway. **To jest ważniejsza lekcja niż sam base64:** fixture, który upraszcza
+kształt wejścia, przepuszcza całą klasę błędów integracyjnych.
+
+**Sekret SSM tworzony ręcznie przed apply blokuje apply.** `aws ssm put-parameter`
+wykonane zanim Terraform założy zasób kończy się `ParameterAlreadyExists`
+i wywala cały apply (PR #223, naprawione blokiem `import`). Przy dokładaniu
+kolejnych sekretów: najpierw apply, potem wpisanie wartości — albo od razu
+blok `import`.
 
 ## Odrzucone alternatywy
 

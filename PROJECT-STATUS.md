@@ -57,15 +57,77 @@ Domena: `bodysync.pl` (frontend, Cloudflare Pages) + `api.bodysync.pl` (API Gate
 | Recent activities 3 → 5 + Trend swap + HRV drop + Jakość snu | ✅ shipped 2026-05-14/15 (PRy #173/#175/#177/#178) — Trendy reorder (in/spalone/kroki), Dashboard pokazuje 5 ostatnich aktywności, HRV drop z UI (Garmin nie wysyła do AH, 0 rows w DDB), nowy MiniStat "Jakość snu" `(deep+rem)/asleep × 100%` w Recovery 2×2 panel |
 | HAE webhook scaling (Weronika onboarding) | ✅ shipped 2026-05-14 (PR #170) — bump memory 512MB → 1024MB i timeout 10s → 29s. Powód: Weronika initial export timeout'ował na 10s nawet dla `Date Range: Last 1 day`. 1024MB ≈ 2× vCPU (Lambda CPU proporcjonalna do memory), 29s = max API GW HTTP integration timeout |
 | Strava OAuth mobile experiment (revert) | ⚠️ tested + reverted 2026-05-14 (PRy #171 → #172) — próbowaliśmy `/oauth/mobile/authorize` żeby otworzyć Strava app native na iPhone. Live test: Strava app rzuca "error" zaraz po Authorize → `/oauth/mobile/authorize` deprecated dla third-party developers (tylko Strava-owned partner apps). Revert do standard `/oauth/authorize` browser flow (iOS i tak pokazuje banner "Open in Strava" jeśli zalogowany) |
+| Serwer MCP (custom connector dla Claude) | ✅ shipped 2026-08-14 (7 PRy #218-#224) — `https://api.bodysync.pl/mcp`, surowy JSON-RPC bez pydantica (881 ms cold / 2 ms warm), własny serwer OAuth 2.0 z DCR reużywający cookie `bodysync_session`, 4 narzędzia read-only (skład ciała / metryki dzienne / trendy / treningi siłowe), IAM `LeadingKeys` rozdzielony na odczyt `USER#*` i zapis `MCP_*`. Szczegóły w [ADR-010](docs/adr/ADR-010-mcp-server.md) i sekcji "Aktywny sprint" |
 | Audit-driven sprint (frontend P0 + security P1 + tech debt P1) | ✅ shipped 2026-05-16/17 (14 PRy #180-#194) — szczegóły w sekcji "Aktywny sprint" niżej. Audyt 2026-05-16 ([`docs/audit-2026-05-16.md`](docs/audit-2026-05-16.md)) → 3 wyspecjalizowane agenty (security/frontend-designer/auditor) → 14-PR egzekucja. Bundle gzip 167→88 KB (-47%), 4 nowe security guards (nonce/Strava JWT/IAM deny/CSRF), -209 LOC duplikacji w handlerach, frontend CI gating, DDB SK range optimization |
 
 ## Open PRs
 
-`gh pr list` — **brak otwartych PR**. Ostatni zmergowany: PR #194 (BIOMETRY SK range query).
+`gh pr list` — **brak otwartych PR**. Ostatni zmergowany: PR #224 (base64 body hotfix MCP).
 
 ## Aktywny sprint
 
-**Sesja 2026-05-16 → 17 — 14 PR-ów merged (#180-#194), audit-driven sprint (frontend P0 + security P1 + tech debt P1):**
+**Sesja 2026-08-14 — 7 PR-ów merged (#218-#224), serwer MCP dla danych zdrowotnych:**
+
+Cel: wystawić dane bodysync jako custom connector w Claude, żeby model czytał je bezpośrednio w rozmowie. Tylko odczyt. Wykonane 1 step = 1 PR per memory `feedback_pr_workflow.md`.
+
+| PR | Zakres |
+|---|---|
+| #218 | [ADR-010](docs/adr/ADR-010-mcp-server.md) — cztery decyzje poparte pomiarem |
+| #219 | Refaktor: agregacja biometrii → `shared/biometry.py` |
+| #220 | Rdzeń MCP: JSON-RPC + 4 narzędzia + testy zgodności |
+| #221 | Serwer autoryzacji OAuth 2.0 z DCR |
+| #222 | Terraform: Lambda 1024 MB, 7 tras, IAM least-privilege |
+| #223 | Fix: import istniejącego sekretu SSM do stanu |
+| #224 | Hotfix: dekodowanie body base64 z API Gateway |
+
+### Decyzje i ich uzasadnienie (pomiary, nie szacunki)
+
+**Surowy JSON-RPC zamiast FastMCP.** Zmierzone na naszym koncie: `pydantic` kosztuje ~490 ms cold startu (`activities-list` 13.9 MB → 684 ms vs `api-read` 16.3 MB → 1177 ms), a FastMCP go wymusza. Init nie skaluje się z megabajtami — 16.3→36.6 MB to tylko +260 ms. Na API Gateway nie ma response streamingu, więc `stateless_http` + `json_response` i tak wyłączają główną przewagę FastMCP. Bundle 13.9 MB zamiast 22 MB.
+
+**Zmierzony cold start produkcyjny: 881 ms** (predykcja w ADR mówiła ~700 ms — poprawione, patrz ADR-010). Warm: **2 ms**. Pamięć: 82 MB z 1024 MB — płacimy za vCPU, nie RAM.
+
+**OAuth 2.0 DCR zamiast sekretu w URL.** Pierwotna propozycja (sekret w ścieżce) była błędna — spec autoryzacji MCP zabrania tokenów w URL. Zweryfikowane w UI Claude: dialog `Add custom connector` ma pod Advanced settings wyłącznie OAuth Client ID i Secret, **żadnej sekcji Request headers**, więc `static_headers` (beta) odpada. `/authorize` sprawdza istniejące cookie `bodysync_session` → reużywa Google OAuth i allowlistę 2 maili, zero drugiego systemu tożsamości.
+
+**Zakres: 4 narzędzia, bez Stravy.** Scan tabeli potwierdził **zero wierszy `hrv` i `body_battery`** — Garmin nie wysyła ich do Apple Health (spójne z PR #177). Strava wycięta, bo owner ma osobny Strava MCP; wartością bodysync jest złączenie treningu siłowego ze składem ciała, nie surowe streamy.
+
+### Co jest live
+
+```
+POST /mcp                                     JSON-RPC, wymaga Bearer
+GET  /.well-known/oauth-protected-resource    RFC 9728
+GET  /.well-known/oauth-authorization-server  RFC 8414
+POST /mcp/register                            RFC 7591 DCR
+GET/POST /mcp/authorize                       ekran zgody
+POST /mcp/token                               kod / refresh
+```
+
+Zweryfikowane curlem: discovery zwraca 200, `POST /mcp` bez tokenu zwraca 401 z poprawnym `WWW-Authenticate`, allowlista `redirect_uri` odrzuca obce hosty. **Pełny flow konektora end-to-end nie został jeszcze potwierdzony po hotfixie #224** — do sprawdzenia przy następnym podejściu.
+
+### Dwa błędy z tej sesji warte zapamiętania
+
+**Osierocony lock Terraforma blokował CI od 8 czerwca** — dwa miesiące. `terraform.tfstate.tflock`, `OperationTypePlan`, z przerwanego runa. Dependabot PR z 27 lipca failował tak samo i nikt nie zauważył. Usunięty ręcznie po weryfikacji, że żaden run nie jest aktywny. **To argument za odłożonym z audytu alarmem na czerwony workflow.**
+
+**API Gateway HTTP v2 koduje `application/x-www-form-urlencoded` w base64**, a `application/json` przekazuje wprost. Handler czytał `event["body"]` bez sprawdzania `isBase64Encoded`, więc DCR (JSON) działał, a formularz zgody po cichu parsował się do pustego dicta → `brak request_token` po kliknięciu „Zezwalam". Testy tego nie złapały, bo fixture budował body jako czysty `urlencode` — czyli tak, jak wygodnie, a nie jak realnie przysyła API Gateway.
+
+### Metryki sesji
+
+- **Backend testów**: 468 → **550 pass** (+82)
+- **Nowe moduły**: `shared/biometry.py`, `handlers/mcp/` (7 plików)
+- **Nowy bundle Lambdy**: `mcp.zip` 13.97 MB, 1024 MB pamięci
+- **DDB extensions**: `MCP_CLIENT#*`, `MCP_CODE#*`, `MCP_REFRESH#*` (wszystkie z TTL)
+- **SSM**: `/bodysync/mcp/token_signing_secret` — świadomie osobny od `jwt/signing_secret`
+- **Nowa zależność dev**: `mcp` w `[project.optional-dependencies].dev` (testy zgodności, nigdy w bundlu)
+
+### Do dokończenia
+
+- Potwierdzić pełny flow konektora po hotfixie #224 (dodać connector → „Zezwalam" → wywołanie narzędzia)
+- README z instrukcją podłączenia konektora
+- Alarm na czerwony workflow na `main` (patrz błąd z lockiem wyżej)
+- Rozważyć eksperyment 512 MB vs 1024 MB dla Lambdy MCP — użycie pamięci to 82 MB, więc 1024 MB kupujemy wyłącznie dla vCPU
+
+---
+
+**Poprzednia sesja 2026-05-16 → 17 — 14 PR-ów merged (#180-#194), audit-driven sprint (frontend P0 + security P1 + tech debt P1):**
 
 Wykonana po audycie 2026-05-16 ([`docs/audit-2026-05-16.md`](docs/audit-2026-05-16.md)) trzech wyspecjalizowanych agentów (security / frontend-designer / auditor — równoległe wywołanie). Audyt zidentyfikował zero P0 critical security ale liczne P0 frontend (fonty nieładujące się, mobile UX bugs) + 4 P1 security + 4 P1 dług techniczny. Sprint wykonany sekwencyjnie 1 step = 1 PR per memory `feedback_pr_workflow.md`.
 
