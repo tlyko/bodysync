@@ -15,14 +15,22 @@ from typing import Any
 
 import pytest
 
-from shared.biometry import LOCAL_TZ
+# UWAGA: `shared.*` importujemy WYŁĄCZNIE wewnątrz funkcji, nigdy na poziomie
+# modułu. `shared/dynamo.py` tworzy `boto3.resource("dynamodb")` przy imporcie,
+# a import na poziomie modułu odpala się podczas collection — czyli zanim
+# autouse fixture `_aws_credentials` ustawi AWS_DEFAULT_REGION. Lokalnie to
+# przechodzi (region z ~/.aws/config), na GHA wywala się NoRegionError.
 
 
 def _today() -> str:
+    from shared.biometry import LOCAL_TZ
+
     return datetime.now(LOCAL_TZ).date().isoformat()
 
 
 def _days_ago(n: int) -> str:
+    from shared.biometry import LOCAL_TZ
+
     return (datetime.now(LOCAL_TZ).date() - timedelta(days=n)).isoformat()
 
 
