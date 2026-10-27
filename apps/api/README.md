@@ -1,14 +1,14 @@
 # `@bodysync/api`
 
-Python 3.12 Lambda backend dla bodysync.pl (per [ADR-002 lambda packaging](../../docs/adr/ADR-002-lambda-packaging.md)).
+Python 3.12 Lambda backend for bodysync.pl (per [ADR-002 lambda packaging](../../docs/adr/ADR-002-lambda-packaging.md)).
 
 ## Layout
 
 ```
 apps/api/
 ├── pyproject.toml          # dev deps (pytest, moto, ruff, mypy)
-├── shared/                 # importowane przez wszystkie handlery
-│   ├── ssm.py             # get_param z module-level cache
+├── shared/                 # imported by every handler
+│   ├── ssm.py             # get_param with a module-level cache
 │   ├── dynamo.py          # get_item / put_item / query_by_pk
 │   ├── auth.py            # verify_jwt, mint_jwt
 │   └── logging.py         # structured logger
@@ -16,35 +16,35 @@ apps/api/
 │   └── google_auth/
 │       ├── handler.py      # def handler(event, context)
 │       ├── schemas.py      # Pydantic input/output
-│       ├── service.py      # logika osobno od event/context
-│       └── requirements.txt # prod deps tylko dla tej Lambdy
+│       ├── service.py      # logic kept separate from event/context
+│       └── requirements.txt # prod deps for this Lambda only
 ├── tests/
 │   ├── conftest.py         # fixtures: dynamodb_table (moto), ssm_params
 │   └── handlers/google_auth/test_handler.py
 ├── scripts/
-│   └── build.py            # produkuje dist/{fn}.zip per handler
-└── dist/                   # gitignored — Terraform input
+│   └── build.py            # produces dist/{fn}.zip per handler
+└── dist/                   # gitignored, Terraform input
 ```
 
 ## Local setup
 
-Wymaga [uv](https://docs.astral.sh/uv/) (`brew install uv`).
+Requires [uv](https://docs.astral.sh/uv/) (`brew install uv`).
 
 ```bash
 cd apps/api
 uv python install 3.12      # one-time
 uv venv --python 3.12        # creates .venv/
-uv pip install -e ".[dev]"   # all dev deps + pip (potrzebne dla scripts/build.py)
+uv pip install -e ".[dev]"   # all dev deps + pip (needed by scripts/build.py)
 ```
 
-Aktywacja venv: `source .venv/bin/activate` albo `uv run <command>` bez aktywacji.
+Activate the venv with `source .venv/bin/activate`, or use `uv run <command>` without activating.
 
-Alternatywnie classic pip (jeśli masz Python 3.12 w PATH):
+Alternatively, with plain pip (if Python 3.12 is on your PATH):
 ```bash
 python3.12 -m venv .venv && source .venv/bin/activate && pip install -e ".[dev]"
 ```
 
-## Komendy
+## Commands
 
 ```bash
 pytest -v                               # tests
@@ -56,9 +56,9 @@ python scripts/build.py                  # build all handlers → dist/
 python scripts/build.py google_auth      # build single handler
 ```
 
-Build script:
-- robi `pip install -r handlers/{fn}/requirements.txt --target dist/_build/{fn}/ --platform manylinux2014_aarch64 --only-binary=:all:` (wheels dla Lambda ARM64)
-- kopiuje `handlers/{fn}/*.py` + `shared/` do `dist/_build/{fn}/`
-- `zip dist/{fn}.zip` deterministycznie (sortowane pliki, fixed mtime)
+The build script:
+- runs `pip install -r handlers/{fn}/requirements.txt --target dist/_build/{fn}/ --platform manylinux2014_aarch64 --only-binary=:all:` (wheels for Lambda ARM64)
+- copies `handlers/{fn}/*.py` + `shared/` into `dist/_build/{fn}/`
+- zips `dist/{fn}.zip` deterministically (sorted files, fixed mtime)
 
-Output `apps/api/dist/{fn}.zip` jest konsumowany przez `infrastructure/terraform/main.tf` (`module "lambda_X" { source_zip = "${path.module}/../../apps/api/dist/X.zip" }`).
+The output `apps/api/dist/{fn}.zip` is consumed by `infrastructure/terraform/main.tf` (`module "lambda_X" { source_zip = "${path.module}/../../apps/api/dist/X.zip" }`).
