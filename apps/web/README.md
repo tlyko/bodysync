@@ -1,6 +1,6 @@
 # @bodysync/web
 
-Frontend SPA dla bodysync.pl — React 19 + Vite 7 + TypeScript.
+Frontend SPA for bodysync.pl: React 19 + Vite 7 + TypeScript.
 
 ## Local dev
 
@@ -14,23 +14,23 @@ npm run dev    # http://localhost:5173
 
 ```bash
 npm run build       # → apps/web/dist
-npm run preview     # preview produkcyjnego buildu
+npm run preview     # preview the production build
 npm run typecheck   # tsc --noEmit
 ```
 
 ## Cloudflare (Workers + Static Assets)
 
-Cloudflare promował "Pages" project do "Workers + Static Assets" — deploy odbywa się przez `npx wrangler deploy` / `npx wrangler versions upload`, więc potrzebujemy `wrangler.jsonc`. Plik leży w **root repo** (`/wrangler.jsonc`) — wrangler odpalany w cwd = root, ścieżka assets jest pełna (`./apps/web/dist`).
+Cloudflare promoted the "Pages" project to "Workers + Static Assets". Deploys run through `npx wrangler deploy` / `npx wrangler versions upload`, so we need a `wrangler.jsonc`. The file lives in the **repo root** (`/wrangler.jsonc`): wrangler runs with cwd = root, and the assets path is spelled out in full (`./apps/web/dist`).
 
-UI Cloudflare → Settings → Build (defaults wystarczą):
+Cloudflare UI → Settings → Build (defaults are enough):
 
-| Setting | Wartość |
+| Setting | Value |
 |---|---|
 | Root directory | `/` *(repo root)* |
 | Build command | `cd apps/web && npm ci && npm run build` |
 | Deploy command | *(default `npx wrangler deploy`)* |
 | `NODE_VERSION` | `20` |
 
-`wrangler.jsonc` w root mówi wranglerowi gdzie są assety i włącza SPA fallback (każde 404 → `index.html`). Jeśli nazwa projektu w CF jest inna niż `bodysync-web`, popraw `"name"` w `/wrangler.jsonc` na exact match — inaczej wrangler stworzy duplikat workera.
+`wrangler.jsonc` in the root tells wrangler where the assets are and enables the SPA fallback (every 404 → `index.html`). If the project name in Cloudflare differs from `bodysync-web`, change `"name"` in `/wrangler.jsonc` to an exact match, otherwise wrangler creates a duplicate worker.
 
-Branche: `main` → production (`bodysync.pl`), pozostałe → preview deployments (`npx wrangler versions upload`, Workers preview URL).
+Branches: `main` → production (`bodysync.pl`), everything else → preview deployments (`npx wrangler versions upload`, Workers preview URL).

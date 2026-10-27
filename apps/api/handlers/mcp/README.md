@@ -1,114 +1,120 @@
-# Serwer MCP — dane zdrowotne bodysync w rozmowie z Claude
+# MCP server: bodysync health data in Claude conversations
 
-Wystawia dane bodysync jako custom connector w Claude. **Wyłącznie odczyt.**
-Decyzje projektowe i ich uzasadnienie: [ADR-010](../../../../docs/adr/ADR-010-mcp-server.md).
+Exposes bodysync data as a custom connector in Claude. **Read-only.**
+Design decisions and their rationale: [ADR-010](../../../../docs/adr/ADR-010-mcp-server.md).
 
-## Jak podłączyć
+## Connecting
 
-1. W Claude: **Customize → Connectors → `+` → Add custom connector**
-2. **Name:** dowolna, np. `bodysync`
+1. In Claude: **Customize → Connectors → `+` → Add custom connector**
+2. **Name:** anything, e.g. `bodysync`
 3. **Remote MCP server URL:** `https://api.bodysync.pl/mcp`
-4. **Advanced settings:** oba pola OAuth zostaw **puste** — Claude zarejestruje
-   się sam przez DCR
-5. Kliknij **Add**, potem połącz konektor
-6. Na ekranie zgody sprawdź, czy zgadza się mail konta, i kliknij **Zezwalam**
+4. **Advanced settings:** leave both OAuth fields **empty**. Claude registers
+   itself through DCR
+5. Click **Add**, then connect the connector
+6. On the consent screen, check that the account email is correct and click
+   **Zezwalam** (Allow)
 
-Jeśli nie masz aktywnej sesji na `bodysync.pl`, `/authorize` przekieruje Cię
-najpierw na login Google i wróci tutaj. Dostęp dostaje wyłącznie konto z
-allowlisty 2 maili — tej samej, której używa aplikacja.
+If you don't have an active session on `bodysync.pl`, `/authorize` first
+redirects you to Google login and then back here. Only accounts on the
+2-email allowlist get access, the same allowlist the app uses.
 
-## Narzędzia
+## Tools
 
-| Narzędzie | Zwraca | Domyślny zakres |
+| Tool | Returns | Default range |
 |---|---|---|
-| `get_body_composition` | waga, BMI, % tłuszczu, beztłuszczowa masa, obwody | 90 dni |
-| `get_daily_health_metrics` | kcal in/active/basal + bilans, makro, kroki, fazy snu, tętno | dzisiaj |
-| `get_health_trends` | jedna metryka w czasie + podsumowanie (first/last/change/min/max/avg) | 30 dni |
-| `get_workouts` | ćwiczenia, serie, ciężary, RIR, pogrupowane w sesje | 30 dni |
+| `get_body_composition` | weight, BMI, body fat %, lean mass, circumferences | 90 days |
+| `get_daily_health_metrics` | kcal in/active/basal + balance, macros, steps, sleep stages, heart rate | today |
+| `get_health_trends` | one metric over time + summary (first/last/change/min/max/avg) | 30 days |
+| `get_workouts` | exercises, sets, weights, RIR, grouped into sessions | 30 days |
 
-`get_health_trends` powyżej **60 dni** przełącza się na średnie tygodniowe —
-pół roku wartości dziennych zalałoby kontekst modelu. Twardy limit okna: 730 dni.
+Above **60 days**, `get_health_trends` switches to weekly averages, because
+half a year of daily values would flood the model's context. Hard window
+limit: 730 days.
 
-### Czego tu nie ma
+### What's not here
 
-- **Aktywności ze Stravy** — osobny konektor Strava pokrywa to lepiej
-- **HRV i Body Battery** — Garmin nie wysyła ich do Apple Health, więc te dane
-  nie istnieją w bazie. Nie da się ich dodać bez integracji z Garmin Connect
-- **Cokolwiek zapisującego** — serwer nie ma endpointów mutujących, a IAM Lambdy
-  nie zawiera `PutItem` na `USER#*`
+- **Strava activities**: the separate Strava connector covers them better
+- **HRV and Body Battery**: Garmin doesn't send them to Apple Health, so this
+  data doesn't exist in the database. Adding it would need a Garmin Connect
+  integration
+- **Anything that writes**: the server has no mutating endpoints, and the
+  Lambda's IAM role has no `PutItem` on `USER#*`
 
-Instrukcje serwera (`protocol.INSTRUCTIONS`) mówią to modelowi wprost, żeby nie
-szukał tych danych i nie brał braku wyniku za zero.
+The server instructions (`protocol.INSTRUCTIONS`) tell the model this
+explicitly, so it doesn't go looking for this data or treat a missing result
+as zero.
 
-## Architektura
+## Architecture
 
-Jedna Lambda (`bodysync-mcp`, 1024 MB) obsługuje siedem tras:
+One Lambda (`bodysync-mcp`, 1024 MB) serves seven routes:
 
 ```
-POST /mcp                                     JSON-RPC 2.0, wymaga Bearer
+POST /mcp                                     JSON-RPC 2.0, requires Bearer
 GET  /.well-known/oauth-protected-resource    RFC 9728
 GET  /.well-known/oauth-authorization-server  RFC 8414
 POST /mcp/register                            RFC 7591 DCR
-GET  /mcp/authorize                           ekran zgody
-POST /mcp/authorize                           wydanie kodu
-POST /mcp/token                               wymiana kodu / refresh
+GET  /mcp/authorize                           consent screen
+POST /mcp/authorize                           code issuance
+POST /mcp/token                               code exchange / refresh
 ```
 
-Zmierzone na produkcji: **881 ms cold start, 2 ms warm**, bundle 13.97 MB.
+Measured in production: **881 ms cold start, 2 ms warm**, 13.97 MB bundle.
 
-Protokół pisany ręcznie, bez FastMCP — uzasadnienie i pomiary w ADR-010.
-Zgodności ze spec pilnują testy w `tests/handlers/mcp/test_conformance.py`,
-walidujące odpowiedzi modelami oficjalnego SDK. **Pakiet `mcp` jest zależnością
-wyłącznie dev** — dwa testy-strażniki pilnują, żeby nigdy nie trafił do bundla
-Lambdy razem ze swoim `pydantikiem`.
+The protocol is hand-written, without FastMCP. Rationale and measurements are
+in ADR-010. Spec conformance is checked by `tests/handlers/mcp/test_conformance.py`,
+which validates responses against the official SDK models. **The `mcp`
+package is a dev-only dependency.** Two guard tests make sure it never ends up
+in the Lambda bundle together with its `pydantic`.
 
-## Bezpieczeństwo
+## Security
 
-- PKCE **S256** wymagane, `plain` odrzucane
-- `redirect_uri` musi być dokładnie zarejestrowanym, a jego host należeć do
-  allowlisty (`claude.ai`, `claude.com` przez https; loopback dla Claude Code).
-  DCR jest z definicji otwarty — to allowlista decyduje, że kod nie trafi do
-  osoby trzeciej
-- Kod autoryzacyjny jednorazowy (atomowy delete), TTL 60 s, związany z
+- PKCE **S256** required, `plain` rejected
+- `redirect_uri` must exactly match a registered one, and its host must be on
+  the allowlist (`claude.ai`, `claude.com` over https; loopback for Claude
+  Code). DCR is open by definition, so the allowlist is what guarantees the
+  code never reaches a third party
+- Authorization code is single-use (atomic delete), 60 s TTL, bound to
   `client_id` + `redirect_uri` + `code_challenge`
-- Refresh tokeny rotowane przy każdym użyciu, trzymane jako SHA-256
-- Access token podpisany **osobnym** sekretem niż cookie sesyjne — gdyby
-  dzieliły klucz, token read-only przeszedłby jako sesja aplikacji i dałby
-  pełny zapis
+- Refresh tokens are rotated on every use and stored as SHA-256
+- Access tokens are signed with a **different** secret than the session
+  cookie. If they shared a key, a read-only token would pass as an app
+  session and grant full write access
 
-## Sekret
+## Secret
 
-`/bodysync/mcp/token_signing_secret` (SecureString, min. 32 bajty). Terraform
-zakłada placeholder; wartość wpisuje owner **po** udanym apply:
+`/bodysync/mcp/token_signing_secret` (SecureString, at least 32 bytes).
+Terraform creates a placeholder; the owner sets the value **after** a
+successful apply:
 
 ```sh
 aws ssm put-parameter --name /bodysync/mcp/token_signing_secret \
   --value "$(openssl rand -base64 48)" --type SecureString --overwrite --region eu-west-1
 ```
 
-Kolejność ma znaczenie: wpisanie wartości **przed** apply kończy się
-`ParameterAlreadyExists` i wywala cały apply (patrz ADR-010, sekcja pułapek).
+Order matters: setting the value **before** apply fails with
+`ParameterAlreadyExists` and breaks the whole apply (see ADR-010, pitfalls
+section).
 
-Rotacja sekretu unieważnia wszystkie wydane tokeny — konektor trzeba wtedy
-połączyć ponownie.
+Rotating the secret invalidates every issued token, so the connector has to
+be reconnected.
 
-## Diagnostyka
+## Troubleshooting
 
 ```sh
-# Czy discovery żyje
+# Is discovery alive
 curl -s https://api.bodysync.pl/.well-known/oauth-protected-resource | jq
 
-# Czy handshake 401 jest poprawny
+# Is the 401 handshake correct
 curl -si -X POST https://api.bodysync.pl/mcp \
   -H 'Content-Type: application/json' \
   -d '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' | grep -i www-authenticate
 
-# Czy parsowanie formularzy działa (regresja base64 z PR #224)
+# Does form parsing work (base64 regression from PR #224)
 curl -s -X POST https://api.bodysync.pl/mcp/token \
   -H 'Content-Type: application/x-www-form-urlencoded' \
   -d 'grant_type=refresh_token&refresh_token=testowy'
-# oczekiwane: invalid_grant. `grant_type: None` = body nie dociera do parsera
+# expected: invalid_grant. `grant_type: None` = the body doesn't reach the parser
 ```
 
-Logi: `/aws/lambda/bodysync-mcp`. Zdarzenia do szukania — `mcp_client_registered`,
+Logs: `/aws/lambda/bodysync-mcp`. Events to search for: `mcp_client_registered`,
 `mcp_authorize_granted`, `mcp_token_issued`, `mcp_tool_ok`, `mcp_oauth_error`.
